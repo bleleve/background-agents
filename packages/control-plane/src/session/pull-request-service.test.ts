@@ -234,6 +234,29 @@ describe("SessionPullRequestService", () => {
     });
   });
 
+  it("pushes mixed-case head branches using lowercase names", async () => {
+    await harness.service.createPullRequest(
+      createInput({
+        promptingAuth: { authType: "oauth", token: "user-token" },
+        headBranch: "Feature/Mixed-Case",
+      })
+    );
+
+    expect(harness.deps.pushBranchToRemote).toHaveBeenCalledWith(
+      "feature/mixed-case",
+      expect.objectContaining({
+        refspec: "HEAD:refs/heads/feature/mixed-case",
+        targetBranch: "feature/mixed-case",
+      })
+    );
+    expect(harness.provider.createPullRequest).toHaveBeenCalledWith(
+      { authType: "oauth", token: "user-token" },
+      expect.objectContaining({
+        sourceBranch: "feature/mixed-case",
+      })
+    );
+  });
+
   it("ignores prior manual branch artifact and creates PR", async () => {
     harness.artifacts.push({
       id: "branch-artifact-1",

@@ -64,7 +64,7 @@ resource "local_file" "web_app_wrangler_production" {
     workers_dev = false
 
     [[routes]]
-    pattern = "coding-agent.internal.fountain.com"
+    pattern = "coding-agent-staging.internal.fountain.com"
     custom_domain = true
 
     [observability]

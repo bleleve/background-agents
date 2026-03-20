@@ -578,7 +578,7 @@ export async function listRepositoryBranches(
   let page = 1;
 
   // Paginate through branches (100 per page, cap at 500)
-  while (branches.length < 500) {
+  while (branches.length < 5000) {
     const response = await fetchWithTimeout(
       `https://api.github.com/repos/${owner}/${repo}/branches?per_page=100&page=${page}`,
       {

@@ -49,39 +49,22 @@ export function buildCodeReviewPrompt(params: {
   const { owner, repo, number, title, body, author, base, head, isPublic, codeReviewInstructions } =
     params;
 
-  const prTitleBlock = buildUntrustedUserContentBlock({
-    source: "github_pr_title",
-    author: "github",
-    content: title,
-  });
-  const prAuthorBlock = buildUntrustedUserContentBlock({
-    source: "github_pr_author",
-    author: "github",
-    content: `@${author}`,
-  });
-  const prBranchesBlock = buildUntrustedUserContentBlock({
-    source: "github_pr_branches",
-    author: "github",
-    content: `base: ${base}\nhead: ${head}`,
-  });
-  const prDescriptionBlock = buildUntrustedUserContentBlock({
-    source: "github_pr_description",
-    author: "github",
-    content: body ?? "_No description provided._",
-  });
+  // Temporarily disable PR review submission. Restore these instructions when
+  // the bot should submit a GitHub review again.
+  // gh api repos/${owner}/${repo}/pulls/${number}/reviews \
+  //   --method POST \
+  //   -f body="<your review summary>" \
+  //   -f event="COMMENT|APPROVE|REQUEST_CHANGES"
 
   return `You are reviewing Pull Request #${number} in ${owner}/${repo}.
-The repository has been cloned and you are on the PR head branch.
+The repository has been cloned and you are on the ${head} branch.
 
 ## PR Details
-- **Title**:
-${prTitleBlock}
-- **Author**:
-${prAuthorBlock}
-- **Branches**:
-${prBranchesBlock}
+- **Title**: ${title}
+- **Author**: @${author}
+- **Branch**: ${base} ← ${head}
 - **Description**:
-${prDescriptionBlock}
+${body ?? "_No description provided._"}
 
 ## Instructions
 1. Run \`gh pr diff ${number}\` to see the full diff
@@ -91,17 +74,9 @@ ${prDescriptionBlock}
    - Performance implications
    - Code clarity and maintainability
 3. You may read individual files in the repo for additional context beyond the diff
-4. When your review is complete, submit it via:
-
-   gh api repos/${owner}/${repo}/pulls/${number}/reviews \\
-     --method POST \\
-     -f body="<your review summary>" \\
-     -f event="COMMENT|APPROVE|REQUEST_CHANGES"
-
-   Use APPROVE if the code looks good, REQUEST_CHANGES if changes are needed,
-   or COMMENT for general feedback.
-
-5. For inline comments on specific files:
+4. Do not submit a pull request review.
+5. Leave feedback only as inline comments on specific changed files/lines when you find an issue worth calling out.
+6. For each inline comment you post, use:
 
    gh api repos/${owner}/${repo}/pulls/${number}/comments \\
      --method POST \\
@@ -111,6 +86,7 @@ ${prDescriptionBlock}
      -f line=<line number> \\
      -f side="RIGHT"
 
+7. If you do not find any actionable file-specific feedback, do not submit a review or a general PR comment.
 ${buildCustomInstructionsSection(codeReviewInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
 }

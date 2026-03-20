@@ -5,6 +5,7 @@
  * to enable unit testing via mock injection and reduce coupling.
  */
 
+import { normalizeBranchName } from "@open-inspect/shared";
 import type {
   SessionRow,
   ParticipantRow,
@@ -257,7 +258,11 @@ export class SessionRepository {
   }
 
   updateSessionBranch(sessionId: string, branchName: string): void {
-    this.sql.exec(`UPDATE session SET branch_name = ? WHERE id = ?`, branchName, sessionId);
+    this.sql.exec(
+      `UPDATE session SET branch_name = ? WHERE id = ?`,
+      normalizeBranchName(branchName),
+      sessionId
+    );
   }
 
   updateSessionCurrentSha(sha: string): void {

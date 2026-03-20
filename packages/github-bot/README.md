@@ -170,7 +170,7 @@ Two prompt templates in `src/prompts.ts`:
 **`buildCodeReviewPrompt`** — Includes PR title, body, author, branches, and instructions to:
 
 - Run `gh pr diff` for the full diff
-- Submit a review via `gh api .../reviews`
+- Avoid submitting a review via `gh api .../reviews` for now
 - Post inline comments via `gh api .../comments`
 
 **`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and

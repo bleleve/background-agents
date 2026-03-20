@@ -75,6 +75,13 @@ base_image = (
         " > /etc/apt/sources.list.d/github-cli.list",
         "apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*",
     )
+    # Install rwx (for agent-direct GitHub interaction via rwx API)
+    .run_commands(
+        "curl -fsSL https://github.com/rwx-cloud/rwx/releases/download/v3.9.2/rwx-linux-x86_64"
+        " | tee /usr/local/bin/rwx > /dev/null",
+        "chmod +x /usr/local/bin/rwx",
+        "rwx --version",
+    )
     # Install Node.js 22 LTS
     .run_commands(
         # Add NodeSource repository for Node.js 22
