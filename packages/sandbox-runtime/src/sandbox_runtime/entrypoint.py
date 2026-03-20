@@ -736,7 +736,7 @@ class SandboxSupervisor:
                         f"OpenCode crashed {restart_count} times, giving up"
                     )
                     self.shutdown_event.set()
-                    break
+                    breakf
 
                 # Exponential backoff
                 delay = min(self.BACKOFF_BASE**restart_count, self.BACKOFF_MAX)
