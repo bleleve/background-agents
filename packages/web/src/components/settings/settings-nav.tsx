@@ -11,7 +11,6 @@ import {
   AppearanceIcon,
   TerminalIcon,
   ChevronRightIcon,
-  CodeIcon,
 } from "@/components/ui/icons";
 
 const NAV_ITEMS = [
@@ -54,11 +53,6 @@ const NAV_ITEMS = [
     id: "integrations",
     label: "Integrations",
     icon: IntegrationsIcon,
-  },
-  {
-    id: "opencode-config",
-    label: "OpenCode Config",
-    icon: CodeIcon,
   },
 ] as const;
 

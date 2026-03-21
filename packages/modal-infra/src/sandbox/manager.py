@@ -278,9 +278,6 @@ class SandboxManager:
         if config.session_config:
             env_vars["SESSION_CONFIG"] = config.session_config.model_dump_json()
 
-        if config.opencode_user_config:
-            env_vars["OPENCODE_CONFIG_CONTENT"] = config.opencode_user_config
-
         # Determine image to use (priority: session snapshot > repo image > base image)
         if config.snapshot_id:
             image = modal.Image.from_registry(f"open-inspect-snapshot:{config.snapshot_id}")
@@ -607,9 +604,6 @@ class SandboxManager:
         )
 
         self._inject_vcs_env_vars(env_vars, clone_token)
-
-        if opencode_user_config:
-            env_vars["OPENCODE_CONFIG_CONTENT"] = opencode_user_config
 
         code_server_password: str | None = None
         if code_server_enabled:

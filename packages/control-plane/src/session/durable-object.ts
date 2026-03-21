@@ -53,7 +53,6 @@ import { SessionWebSocketManagerImpl, type SessionWebSocketManager } from "./web
 import { SessionPullRequestService } from "./pull-request-service";
 import { RepoSecretsStore } from "../db/repo-secrets";
 import { GlobalSecretsStore } from "../db/global-secrets";
-import { OpenCodeConfigStore } from "../db/opencode-config";
 import { mergeSecrets } from "../db/secrets-validation";
 import { OpenAITokenRefreshService } from "./openai-token-refresh-service";
 import { ParticipantService, getAvatarUrl } from "./participant-service";
@@ -85,35 +84,6 @@ import {
 } from "./http/handlers/participants.handler";
 import { MessageService } from "./services/message.service";
 import { createAlarmHandler, type AlarmHandler } from "./alarm/handler";
-
-/**
- * Recursively merge two plain objects, with override winning for non-dict values.
- * Arrays and primitives from override replace those in base.
- */
-function deepMergeObjects(
-  base: Record<string, unknown>,
-  override: Record<string, unknown>
-): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...base };
-  for (const [key, value] of Object.entries(override)) {
-    if (
-      value !== null &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      typeof result[key] === "object" &&
-      result[key] !== null &&
-      !Array.isArray(result[key])
-    ) {
-      result[key] = deepMergeObjects(
-        result[key] as Record<string, unknown>,
-        value as Record<string, unknown>
-      );
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
-}
 
 /**
  * Timeout for WebSocket authentication (in milliseconds).
@@ -573,7 +543,6 @@ export class SessionDO extends DurableObject<Env> {
       getSandboxWithCircuitBreaker: () => this.repository.getSandboxWithCircuitBreaker(),
       getSession: () => this.repository.getSession(),
       getUserEnvVars: () => this.getUserEnvVars(),
-      getOpencodeUserConfig: () => this.getOpencodeConfig(),
       updateSandboxStatus: (status) => this.updateSandboxStatus(status),
       updateSandboxForSpawn: (data) => this.repository.updateSandboxForSpawn(data),
       updateSandboxModalObjectId: (id) => this.repository.updateSandboxModalObjectId(id),
@@ -1634,61 +1603,6 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     return mergedCount === 0 ? undefined : merged;
-  }
-
-  /**
-   * Load and merge OpenCode config from D1 for this session's repo.
-   *
-   * Fetches global config and repo-specific config, then deep-merges them
-   * (repo overrides global). Returns null if neither is set.
-   */
-  private async getOpencodeConfig(): Promise<string | undefined> {
-    const session = this.getSession();
-    if (!session) {
-      this.log.warn("Cannot load OpenCode config: no session");
-      return undefined;
-    }
-
-    if (!this.env.DB) {
-      return undefined;
-    }
-
-    const store = new OpenCodeConfigStore(this.env.DB);
-
-    let globalConfig: Record<string, unknown> | null = null;
-    let repoConfig: Record<string, unknown> | null = null;
-
-    try {
-      const globalJson = await store.getGlobalConfig();
-      if (globalJson) {
-        globalConfig = JSON.parse(globalJson) as Record<string, unknown>;
-      }
-    } catch (e) {
-      this.log.warn("Failed to load global OpenCode config, proceeding without", {
-        error: e instanceof Error ? e.message : String(e),
-      });
-    }
-
-    try {
-      const repoJson = await store.getRepoConfig(session.repo_owner, session.repo_name);
-      if (repoJson) {
-        repoConfig = JSON.parse(repoJson) as Record<string, unknown>;
-      }
-    } catch (e) {
-      this.log.warn("Failed to load repo OpenCode config, proceeding without", {
-        repo_owner: session.repo_owner,
-        repo_name: session.repo_name,
-        error: e instanceof Error ? e.message : String(e),
-      });
-    }
-
-    if (!globalConfig && !repoConfig) {
-      return undefined;
-    }
-
-    // Deep-merge: repo overrides global
-    const merged = deepMergeObjects(globalConfig ?? {}, repoConfig ?? {});
-    return JSON.stringify(merged);
   }
 
   /**

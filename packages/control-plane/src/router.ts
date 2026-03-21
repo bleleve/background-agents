@@ -39,7 +39,6 @@ import {
 } from "./routes/shared";
 import { integrationSettingsRoutes } from "./routes/integration-settings";
 import { modelPreferencesRoutes } from "./routes/model-preferences";
-import { opencodeConfigRoutes } from "./routes/opencode-config";
 import { reposRoutes } from "./routes/repos";
 import { repoImageRoutes } from "./routes/repo-images";
 import { secretsRoutes } from "./routes/secrets";
@@ -501,9 +500,6 @@ const routes: Route[] = [
 
   // Integration settings
   ...integrationSettingsRoutes,
-
-  // OpenCode config
-  ...opencodeConfigRoutes,
 
   // Repo image builds
   ...repoImageRoutes,

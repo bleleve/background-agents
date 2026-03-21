@@ -659,13 +659,3 @@ export interface ListAutomationRunsResponse {
 }
 
 export * from "./integrations";
-
-// ─── OpenCode Config API ──────────────────────────────────────────────────────
-
-/**
- * Response shape for GET /opencode-config and GET /repos/:owner/:name/opencode-config.
- * config is a raw JSON string (the user-supplied OpenCode config blob), or null if not set.
- */
-export interface OpencodeConfigResponse {
-  config: string | null;
-}

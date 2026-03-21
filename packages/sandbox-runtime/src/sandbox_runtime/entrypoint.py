@@ -28,23 +28,6 @@ from .log_config import configure_logging, get_logger
 configure_logging()
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
-    """
-    Recursively merge two dicts. Values in override win for non-dict values.
-    For dict values, recursively merge. Arrays and primitives from override replace base.
-    """
-    result = dict(base)
-    for key, value in override.items():
-        if (
-            isinstance(value, dict)
-            and isinstance(result.get(key), dict)
-        ):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
 class SandboxSupervisor:
     """
     Supervisor process for sandbox lifecycle management.
@@ -544,16 +527,6 @@ class SandboxSupervisor:
                 },
             },
         }
-
-        # Apply user-supplied OpenCode config (deep-merged on top of system config)
-        user_config_str = os.environ.get("OPENCODE_CONFIG_CONTENT")
-        if user_config_str:
-            try:
-                user_config = json.loads(user_config_str)
-                opencode_config = _deep_merge(opencode_config, user_config)
-            except json.JSONDecodeError:
-                self.log.warn("opencode.user_config_parse_error",
-                              reason="Failed to parse OPENCODE_CONFIG_CONTENT, ignoring")
 
         # Determine working directory - use repo path if cloned, otherwise /workspace
         workdir = self.workspace_path
