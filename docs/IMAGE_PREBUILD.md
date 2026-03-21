@@ -67,7 +67,7 @@ This means your pre-built image is never more than ~30 minutes behind your lates
 The build process runs the same setup steps that a normal session would:
 
 1. Clones your repository
-2. Runs your `.openinspect/setup.sh` script (if you have one)
+2. Runs your `scripts/.openinspect/setup.sh` script (if you have one)
 3. Saves a snapshot of the resulting environment
 
 Everything your setup script installs — dependencies, build artifacts, caches — is captured in the
@@ -92,8 +92,8 @@ from starting a session.
 
 ## Optimizing Your Setup Script
 
-The more work you front-load into your `.openinspect/setup.sh`, the faster your sessions start. Here
-are some tips:
+The more work you front-load into your `scripts/.openinspect/setup.sh`, the faster your sessions
+start. Here are some tips:
 
 - **Install all dependencies** — `npm install`, `pip install -r requirements.txt`, `bundle install`,
   etc.
@@ -114,9 +114,9 @@ start.
 
 Check the error message shown in the Images settings page. Common causes:
 
-- **Setup script errors** — Your `.openinspect/setup.sh` is failing. Test it locally or check the
-  script for commands that might not work in the sandbox environment (Debian Linux with Node.js,
-  Python, and common dev tools).
+- **Setup script errors** — Your `scripts/.openinspect/setup.sh` is failing. Test it locally or
+  check the script for commands that might not work in the sandbox environment (Debian Linux with
+  Node.js, Python, and common dev tools).
 - **Timeout** — Builds have a 30-minute limit. If your setup takes longer, look for ways to optimize
   it (e.g., use faster package managers, reduce dependencies).
 

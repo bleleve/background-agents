@@ -167,17 +167,17 @@ OpenAI models work with your existing ChatGPT subscription — no separate API k
 
 ### Repository Lifecycle Scripts
 
-Repositories can define two optional startup scripts under `.openinspect/`:
+Repositories can define two optional startup scripts under `scripts/.openinspect/`:
 
 ```bash
-# .openinspect/setup.sh (provisioning)
+# scripts/.openinspect/setup.sh (provisioning)
 #!/bin/bash
 npm install
 pip install -r requirements.txt
 ```
 
 ```bash
-# .openinspect/start.sh (runtime startup)
+# scripts/.openinspect/start.sh (runtime startup)
 #!/bin/bash
 docker compose up -d postgres redis
 ```

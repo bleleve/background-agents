@@ -24,9 +24,9 @@ def _make_supervisor(tmp_path) -> SandboxSupervisor:
 
 
 def _create_start_script(repo_path, content="#!/bin/bash\necho start\n"):
-    """Create .openinspect/start.sh inside repo_path."""
+    """Create scripts/.openinspect/start.sh inside repo_path."""
     repo_path.mkdir(parents=True, exist_ok=True)
-    setup_dir = repo_path / ".openinspect"
+    setup_dir = repo_path / "scripts/.openinspect"
     setup_dir.mkdir(parents=True, exist_ok=True)
     script = setup_dir / "start.sh"
     script.write_text(content)

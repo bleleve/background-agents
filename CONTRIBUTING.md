@@ -7,7 +7,7 @@ contributing to the project.
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR-USERNAME/open-inspect.git`
-3. Run the setup script: `bash .openinspect/setup.sh`
+3. Run the setup script: `bash scripts/.openinspect/setup.sh`
 4. Create a branch for your changes: `git checkout -b feature/your-feature-name`
 
 ## Development Setup
@@ -15,7 +15,7 @@ contributing to the project.
 The quickest way to get a working environment:
 
 ```bash
-bash .openinspect/setup.sh
+bash scripts/.openinspect/setup.sh
 ```
 
 This handles npm dependencies, builds the shared package, configures git hooks (husky +

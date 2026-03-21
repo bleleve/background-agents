@@ -179,13 +179,13 @@ When you create a session for a repo without an existing snapshot:
 └─────────┘    └──────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └───────┘
                                      │                    │
                                      ▼                    ▼
-                            .openinspect/setup.sh   .openinspect/start.sh
+                            scripts/.openinspect/setup.sh   scripts/.openinspect/start.sh
 ```
 
 1. **Sandbox created**: Modal spins up a new container from the base image
 2. **Git sync**: Clones your repository using GitHub App credentials
-3. **Setup script**: Runs `.openinspect/setup.sh` for provisioning (if present)
-4. **Start script**: Runs `.openinspect/start.sh` for runtime startup (if present)
+3. **Setup script**: Runs `scripts/.openinspect/setup.sh` for provisioning (if present)
+4. **Start script**: Runs `scripts/.openinspect/start.sh` for runtime startup (if present)
 5. **Agent start**: OpenCode server starts and connects back to the control plane
 6. **Ready**: Sandbox accepts prompts
 
@@ -202,7 +202,7 @@ When restoring from a previous snapshot:
 
 1. **Restore snapshot**: Modal restores the filesystem from a saved image
 2. **Quick sync**: Pulls latest changes (usually just a few commits)
-3. **Start script**: Runs `.openinspect/start.sh` for runtime startup (if present)
+3. **Start script**: Runs `scripts/.openinspect/start.sh` for runtime startup (if present)
 4. **Ready**: Sandbox is ready almost instantly
 
 Snapshots include installed dependencies, built artifacts, and workspace state. This is why
@@ -213,8 +213,8 @@ follow-up prompts in an existing session are much faster than the first prompt.
 When starting from a pre-built repo image:
 
 1. **Incremental git sync**: Fast fetch + hard reset to latest branch head
-2. **Setup skipped**: `.openinspect/setup.sh` already ran when the image was built
-3. **Start script runs**: `.openinspect/start.sh` executes for per-session runtime startup
+2. **Setup skipped**: `scripts/.openinspect/setup.sh` already ran when the image was built
+3. **Start script runs**: `scripts/.openinspect/start.sh` executes for per-session runtime startup
 4. **Ready**: Agent starts once runtime hook succeeds
 
 If `start.sh` exists and fails, startup fails fast instead of continuing with a broken runtime.

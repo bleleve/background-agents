@@ -62,8 +62,8 @@ class SandboxSupervisor:
     MAX_RESTARTS = 5
     BACKOFF_BASE = 2.0
     BACKOFF_MAX = 60.0
-    SETUP_SCRIPT_PATH = ".openinspect/setup.sh"
-    START_SCRIPT_PATH = ".openinspect/start.sh"
+    SETUP_SCRIPT_PATH = "scripts/.openinspect/setup.sh"
+    START_SCRIPT_PATH = "scripts/.openinspect/start.sh"
     DEFAULT_SETUP_TIMEOUT_SECONDS = 300
     DEFAULT_START_TIMEOUT_SECONDS = 120
     CLONE_DEPTH_COMMITS = 100
@@ -957,7 +957,7 @@ class SandboxSupervisor:
 
     async def run_setup_script(self) -> bool:
         """
-        Run .openinspect/setup.sh if it exists in the cloned repo.
+        Run scripts/.openinspect/setup.sh if it exists in the cloned repo.
 
         Fresh-session failures are non-fatal. Build mode callers may treat
         failures as fatal.
@@ -974,7 +974,7 @@ class SandboxSupervisor:
 
     async def run_start_script(self) -> bool:
         """
-        Run .openinspect/start.sh if it exists in the repository.
+        Run scripts/.openinspect/start.sh if it exists in the repository.
 
         Returns:
             True if script succeeded or was not present, False on failure/timeout.

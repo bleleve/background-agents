@@ -24,9 +24,9 @@ def _make_supervisor(tmp_path) -> SandboxSupervisor:
 
 
 def _create_setup_script(repo_path, content="#!/bin/bash\necho hello\n"):
-    """Create .openinspect/setup.sh inside repo_path."""
+    """Create scripts/.openinspect/setup.sh inside repo_path."""
     repo_path.mkdir(parents=True, exist_ok=True)
-    setup_dir = repo_path / ".openinspect"
+    setup_dir = repo_path / "scripts/.openinspect"
     setup_dir.mkdir(parents=True, exist_ok=True)
     script = setup_dir / "setup.sh"
     script.write_text(content)
@@ -53,7 +53,7 @@ class TestSetupScriptSkip:
 
     async def test_skip_when_no_setup_script(self, tmp_path):
         sup = _make_supervisor(tmp_path)
-        # repo_path exists but no .openinspect/setup.sh
+        # repo_path exists but no scripts/.openinspect/setup.sh
         sup.repo_path.mkdir(parents=True, exist_ok=True)
 
         with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:

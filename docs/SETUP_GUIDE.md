@@ -48,7 +48,7 @@ git --version
 From repository root:
 
 ```bash
-bash .openinspect/setup.sh
+bash scripts/.openinspect/setup.sh
 ```
 
 What this does:
