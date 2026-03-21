@@ -782,7 +782,9 @@ class AgentBridge:
                                  and assistant responses will have parentID pointing to it.
             reasoning_effort: Optional reasoning effort level (e.g., "high", "max")
         """
-        request_body: dict[str, Any] = {"parts": [{"type": "text", "text": content}]}
+        prompt_suffix = os.environ.get("PROMPT_SUFFIX", "").strip()
+        prompt_text = f"{content}\n\n{prompt_suffix}" if prompt_suffix else content
+        request_body: dict[str, Any] = {"parts": [{"type": "text", "text": prompt_text}]}
 
         if opencode_message_id:
             request_body["messageID"] = opencode_message_id

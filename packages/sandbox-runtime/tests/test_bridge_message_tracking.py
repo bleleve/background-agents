@@ -167,6 +167,22 @@ class TestBuildPromptRequestBody:
         assert "model" not in body
         assert "messageID" not in body
 
+    def test_prepends_env_prompt_suffix(self, monkeypatch: pytest.MonkeyPatch):
+        """Should prepend PROMPT_SUFFIX to every prompt when configured."""
+        monkeypatch.setenv("PROMPT_SUFFIX", "Always include this text.")
+        bridge = AgentBridge(
+            sandbox_id="test-sandbox",
+            session_id="test-session",
+            control_plane_url="http://localhost:8787",
+            auth_token="test-token",
+        )
+
+        body = bridge._build_prompt_request_body("Hello", None)
+
+        assert body["parts"] == [
+            {"type": "text", "text": "Hello\n\nAlways include this text."}
+        ]
+
     def test_with_opencode_message_id(self, bridge: AgentBridge):
         """Should include messageID when provided (expects OpenCode format)."""
         # The function now expects an already-formatted OpenCode ID
