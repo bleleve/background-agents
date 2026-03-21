@@ -515,14 +515,14 @@ class SandboxSupervisor:
         }
 
         # Apply user-supplied OpenCode config (deep-merged on top of system config)
-        user_config_str = os.environ.get("OPENCODE_USER_CONFIG")
+        user_config_str = os.environ.get("OPENCODE_CONFIG_CONTENT")
         if user_config_str:
             try:
                 user_config = json.loads(user_config_str)
                 opencode_config = _deep_merge(opencode_config, user_config)
             except json.JSONDecodeError:
                 self.log.warn("opencode.user_config_parse_error",
-                              reason="Failed to parse OPENCODE_USER_CONFIG, ignoring")
+                              reason="Failed to parse OPENCODE_CONFIG_CONTENT, ignoring")
 
         # Determine working directory - use repo path if cloned, otherwise /workspace
         workdir = self.workspace_path
