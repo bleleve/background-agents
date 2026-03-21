@@ -260,7 +260,7 @@ export class ModalClient {
           branch: request.branch || null,
           code_server_enabled: request.codeServerEnabled ?? false,
           sandbox_settings: request.sandboxSettings ?? null,
-          opencode_user_config: request.opencodeUserConfig ?? null,
+          opencodeUserConfig: request.opencodeUserConfig ?? null,
         }),
       });
 
@@ -346,7 +346,7 @@ export class ModalClient {
           timeout_seconds: request.timeoutSeconds || null,
           code_server_enabled: request.codeServerEnabled ?? false,
           sandbox_settings: request.sandboxSettings ?? null,
-          opencode_user_config: request.opencodeUserConfig ?? null,
+          opencodeUserConfig: request.opencodeUserConfig ?? null,
         }),
       });
 
