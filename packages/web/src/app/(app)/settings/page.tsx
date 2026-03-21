@@ -12,6 +12,7 @@ import { IntegrationsSettings } from "@/components/settings/integrations-setting
 import { SandboxSettingsPage } from "@/components/settings/sandbox-settings";
 import { ImagesSettings } from "@/components/settings/images-settings";
 import { AppearanceSettings } from "@/components/settings/appearance-settings";
+import { OpenCodeConfigSettings } from "@/components/settings/opencode-config-settings";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { SidebarIcon, BackIcon } from "@/components/ui/icons";
 import { useIsMobile } from "@/hooks/use-media-query";
@@ -25,6 +26,7 @@ const CATEGORY_LABELS: Record<SettingsCategory, string> = {
   "data-controls": "Data Controls",
   sandbox: "Sandbox",
   integrations: "Integrations",
+  "opencode-config": "OpenCode Config",
 };
 
 const VALID_CATEGORIES = new Set<string>([
@@ -36,6 +38,7 @@ const VALID_CATEGORIES = new Set<string>([
   "data-controls",
   "sandbox",
   "integrations",
+  "opencode-config",
 ]);
 
 function isValidCategory(tab: string | null): tab is SettingsCategory {
@@ -76,6 +79,7 @@ export default function SettingsPage() {
       {activeCategory === "data-controls" && <DataControlsSettings />}
       {activeCategory === "sandbox" && <SandboxSettingsPage />}
       {activeCategory === "integrations" && <IntegrationsSettings />}
+      {activeCategory === "opencode-config" && <OpenCodeConfigSettings />}
     </>
   );
 
