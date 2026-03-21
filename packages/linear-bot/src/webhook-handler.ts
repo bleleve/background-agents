@@ -37,6 +37,8 @@ import {
 } from "./kv-store";
 
 const log = createLogger("handler");
+const AGENT_SESSION_THREAD_PLACEHOLDER =
+  "This thread is for an agent session with fountaincodingagent.";
 
 export function escapeHtml(s: string): string {
   return s
@@ -44,6 +46,10 @@ export function escapeHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function isAgentSessionThreadPlaceholder(content: string): boolean {
+  return content.trim() === AGENT_SESSION_THREAD_PLACEHOLDER;
 }
 
 function buildUntrustedUserContentBlock(params: {
@@ -704,9 +710,12 @@ export function buildPrompt(
     }
 
     // Include recent comments for context
-    if (issueDetails.comments.length > 0) {
+    const filteredComments = issueDetails.comments
+      .slice(-5)
+      .filter((c) => !isAgentSessionThreadPlaceholder(c.body));
+    if (filteredComments.length > 0) {
       parts.push("", "---", "**Recent comments:**");
-      for (const c of issueDetails.comments.slice(-5)) {
+      for (const c of filteredComments) {
         const author = c.user?.name || "Unknown";
         parts.push(
           buildUntrustedUserContentBlock({
@@ -719,7 +728,7 @@ export function buildPrompt(
     }
   }
 
-  if (comment?.body) {
+  if (comment?.body && !isAgentSessionThreadPlaceholder(comment.body)) {
     parts.push(
       "",
       "---",
