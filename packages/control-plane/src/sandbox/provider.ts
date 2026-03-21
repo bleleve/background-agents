@@ -62,6 +62,8 @@ export interface CreateSandboxConfig {
   codeServerEnabled?: boolean;
   /** Sandbox settings (tunnel ports, etc.) resolved from integration settings */
   sandboxSettings?: SandboxSettings;
+  /** User-supplied OpenCode config JSON string (deep-merged on top of system config in sandbox) */
+  opencodeUserConfig?: string;
 }
 
 /**
@@ -120,6 +122,8 @@ export interface RestoreConfig {
   codeServerEnabled?: boolean;
   /** Sandbox settings (tunnel ports, etc.) resolved from integration settings */
   sandboxSettings?: SandboxSettings;
+  /** User-supplied OpenCode config JSON string (deep-merged on top of system config in sandbox) */
+  opencodeUserConfig?: string;
 }
 
 /**

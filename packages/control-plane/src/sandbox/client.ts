@@ -40,6 +40,7 @@ export interface CreateSandboxRequest {
   branch?: string;
   codeServerEnabled?: boolean;
   sandboxSettings?: SandboxSettings;
+  opencodeUserConfig?: string;
 }
 
 export interface CreateSandboxResponse {
@@ -68,6 +69,7 @@ export interface RestoreSandboxRequest {
   branch?: string;
   codeServerEnabled?: boolean;
   sandboxSettings?: SandboxSettings;
+  opencodeUserConfig?: string;
 }
 
 export interface RestoreSandboxResponse {
@@ -258,6 +260,7 @@ export class ModalClient {
           branch: request.branch || null,
           code_server_enabled: request.codeServerEnabled ?? false,
           sandbox_settings: request.sandboxSettings ?? null,
+          opencode_user_config: request.opencodeUserConfig ?? null,
         }),
       });
 
@@ -343,6 +346,7 @@ export class ModalClient {
           timeout_seconds: request.timeoutSeconds || null,
           code_server_enabled: request.codeServerEnabled ?? false,
           sandbox_settings: request.sandboxSettings ?? null,
+          opencode_user_config: request.opencodeUserConfig ?? null,
         }),
       });
 

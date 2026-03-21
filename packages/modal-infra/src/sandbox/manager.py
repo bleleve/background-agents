@@ -53,6 +53,7 @@ class SandboxConfig:
     settings: dict[str, Any] | None = (
         None  # Sandbox settings (tunnelPorts, etc.) from control plane
     )
+    opencode_user_config: str | None = None  # User-supplied OpenCode config JSON string
 
 
 @dataclass
@@ -276,6 +277,9 @@ class SandboxManager:
 
         if config.session_config:
             env_vars["SESSION_CONFIG"] = config.session_config.model_dump_json()
+
+        if config.opencode_user_config:
+            env_vars["OPENCODE_USER_CONFIG"] = config.opencode_user_config
 
         # Determine image to use (priority: session snapshot > repo image > base image)
         if config.snapshot_id:
@@ -530,6 +534,7 @@ class SandboxManager:
         timeout_seconds: int = DEFAULT_SANDBOX_TIMEOUT_SECONDS,
         code_server_enabled: bool = False,
         settings: dict[str, Any] | None = None,
+        opencode_user_config: str | None = None,
     ) -> SandboxHandle:
         """
         Create a new sandbox from a filesystem snapshot Image.
@@ -602,6 +607,9 @@ class SandboxManager:
         )
 
         self._inject_vcs_env_vars(env_vars, clone_token)
+
+        if opencode_user_config:
+            env_vars["OPENCODE_USER_CONFIG"] = opencode_user_config
 
         code_server_password: str | None = None
         if code_server_enabled:

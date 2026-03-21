@@ -67,6 +67,8 @@ export interface SandboxStorage {
   getSession(): SessionRow | null;
   /** Get user env vars for sandbox injection */
   getUserEnvVars(): Promise<Record<string, string> | undefined>;
+  /** Get user-supplied OpenCode config JSON string for sandbox injection */
+  getOpencodeUserConfig(): Promise<string | undefined>;
   /** Update sandbox status */
   updateSandboxStatus(status: SandboxStatus): void;
   /** Update sandbox for spawn (status, auth token, sandbox ID, created_at) */
@@ -350,6 +352,7 @@ export class SandboxLifecycleManager {
       });
 
       const userEnvVars = await this.storage.getUserEnvVars();
+      const opencodeUserConfig = await this.storage.getOpencodeUserConfig();
       const { provider, model: modelId } = this.resolveProviderAndModel(session);
 
       // Look up pre-built repo image (graceful fallback on failure)
@@ -399,6 +402,7 @@ export class SandboxLifecycleManager {
         branch: session.base_branch,
         codeServerEnabled,
         sandboxSettings,
+        opencodeUserConfig,
       };
 
       const result = await this.provider.createSandbox(createConfig);
@@ -513,6 +517,7 @@ export class SandboxLifecycleManager {
       });
 
       const userEnvVars = await this.storage.getUserEnvVars();
+      const opencodeUserConfig = await this.storage.getOpencodeUserConfig();
       const { provider, model: modelId } = this.resolveProviderAndModel(session);
 
       // Child sessions get a shorter timeout (same logic as doSpawn)
@@ -536,6 +541,7 @@ export class SandboxLifecycleManager {
         branch: session.base_branch,
         codeServerEnabled,
         sandboxSettings,
+        opencodeUserConfig,
       });
 
       if (result.success) {

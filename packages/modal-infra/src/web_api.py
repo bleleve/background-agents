@@ -182,6 +182,7 @@ async def api_create_sandbox(
             repo_image_sha=request.get("repo_image_sha") or None,
             code_server_enabled=bool(request.get("code_server_enabled", False)),
             settings=request.get("sandbox_settings") or None,
+            opencode_user_config=request.get("opencode_user_config") or None,
         )
 
         handle = await manager.create_sandbox(config)
@@ -529,6 +530,7 @@ async def api_restore_sandbox(
 
         code_server_enabled = bool(request.get("code_server_enabled", False))
         sandbox_settings = request.get("sandbox_settings") or None
+        opencode_user_config = request.get("opencode_user_config") or None
 
         # Restore sandbox from snapshot
         handle = await manager.restore_from_snapshot(
@@ -542,6 +544,7 @@ async def api_restore_sandbox(
             timeout_seconds=timeout_seconds,
             code_server_enabled=code_server_enabled,
             settings=sandbox_settings,
+            opencode_user_config=opencode_user_config,
         )
 
         return {
