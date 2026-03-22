@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
 import { useRepos } from "@/hooks/use-repos";
@@ -20,21 +20,22 @@ interface ConfigEditorProps {
   disabled?: boolean;
 }
 
-function ConfigEditor({ apiUrl, disabled = false }: ConfigEditorProps) {
+export function ConfigEditor({ apiUrl, disabled = false }: ConfigEditorProps) {
   const { data, isLoading } = useSWR<ConfigResponse>(apiUrl, fetcher);
   const [localConfig, setLocalConfig] = useState<string | null>(null);
-  const [initialized, setInitialized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [jsonError, setJsonError] = useState<string | null>(null);
 
-  // Sync SWR data into local state once on initial load
-  if (!initialized && data !== undefined) {
-    setLocalConfig(data.config ?? "");
-    setInitialized(true);
-  }
+  useEffect(() => {
+    if (data === undefined) {
+      return;
+    }
 
-  const configValue = initialized ? (localConfig ?? "") : (data?.config ?? "");
+    setLocalConfig(data.config ?? "");
+  }, [apiUrl, data]);
+
+  const configValue = localConfig ?? data?.config ?? "";
 
   const handleChange = (value: string) => {
     setLocalConfig(value);
@@ -65,7 +66,6 @@ function ConfigEditor({ apiUrl, disabled = false }: ConfigEditorProps) {
       if (response.ok) {
         toast.success("OpenCode config saved.");
         mutate(apiUrl);
-        setInitialized(false);
       } else {
         const errorData = await response.json();
         toast.error(errorData?.error || "Failed to save config");
@@ -87,7 +87,6 @@ function ConfigEditor({ apiUrl, disabled = false }: ConfigEditorProps) {
       if (response.ok || response.status === 204) {
         toast.success("OpenCode config cleared.");
         setLocalConfig("");
-        setInitialized(false);
         mutate(apiUrl);
       } else {
         toast.error("Failed to clear config");
