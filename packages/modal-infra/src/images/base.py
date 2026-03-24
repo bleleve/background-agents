@@ -132,26 +132,26 @@ base_image = (
         "PyJWT[crypto]",  # For GitHub App token generation (includes cryptography)
     )
     # Install asdf
-    .run_commands(
-        "https://github.com/asdf-vm/asdf/releases/download/v0.18.1/asdf-v0.18.1-linux-amd64.tar.gz"
-        " | tar -xz -C /usr/local",
-        "echo '. /usr/local/asdf/asdf.sh' >> ~/.bashrc",
-        "echo '. /usr/local/asdf/completions/asdf.bash' >> ~/.bashrc",
-        "source ~/.bashrc",
-        "asdf --version",
-    )
+    # .run_commands(
+    #     "https://github.com/asdf-vm/asdf/releases/download/v0.18.1/asdf-v0.18.1-linux-amd64.tar.gz"
+    #     " | tar -xz -C /usr/local",
+    #     "echo '. /usr/local/asdf/asdf.sh' >> ~/.bashrc",
+    #     "echo '. /usr/local/asdf/completions/asdf.bash' >> ~/.bashrc",
+    #     "source ~/.bashrc",
+    #     "asdf --version",
+    # )
     # Install Signoz MCP server
     .run_commands(
         "curl https://s3.us-west-1.amazonaws.com/static.fountain.com/fountain_mcp_binaries/signoz-mcp-server -o /usr/local/bin/signoz-mcp-server",
         "chmod +x /usr/local/bin/signoz-mcp-server",
     )
     # # Install Spacelift CLI
-    .run_commands(
-        "asdf plugin add spacectl",
-        "asdf install spacectl latest",
-        "asdf global spacectl latest",
-        "spacectl --version",
-    )
+    # .run_commands(
+    #     "asdf plugin add spacectl",
+    #     "asdf install spacectl latest",
+    #     "asdf global spacectl latest",
+    #     "spacectl --version",
+    # )
     .run_commands("uvx awslabs.eks-mcp-server@0.1.25 -h")
     # Install OpenCode CLI and plugin for custom tools
     # CACHE_BUSTER is embedded in a no-op echo so Modal invalidates this layer on bump.
