@@ -93,23 +93,27 @@ base_image = (
         f"curl -fsSL https://github.com/rwx-cloud/rwx/releases/download/v{RWX_VERSION}/rwx-linux-x86_64 -o /usr/local/bin/rwx",
         "chmod +x /usr/local/bin/rwx",
         "rwx --version",
+    .run_commands(
+        "curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash -"
     )
     # Install GitHub CLI (for agent-direct GitHub interaction via gh API)
-    .run_commands(
-        "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg"
-        " | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg",
-        "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg]"
-        " https://cli.github.com/packages stable main'"
-        " > /etc/apt/sources.list.d/github-cli.list",
-        "apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*",
-    )
+    .run_commands("brew install gh")
+    # .run_commands(
+    #     "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg"
+    #     " | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg",
+    #     "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg]"
+    #     " https://cli.github.com/packages stable main'"
+    #     " > /etc/apt/sources.list.d/github-cli.list",
+    #     "apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*",
+    # )
     # Install rwx (for agent-direct GitHub interaction via rwx API)
-    .run_commands(
-        "curl -fsSL https://github.com/rwx-cloud/rwx/releases/download/v3.9.2/rwx-linux-x86_64"
-        " | tee /usr/local/bin/rwx > /dev/null",
-        "chmod +x /usr/local/bin/rwx",
-        "rwx --version",
-    )
+    .run_commands("brew install rwx-cloud/tap/rwx")
+    # .run_commands(
+    #     "curl -fsSL https://github.com/rwx-cloud/rwx/releases/download/v3.9.2/rwx-linux-x86_64"
+    #     " | tee /usr/local/bin/rwx > /dev/null",
+    #     "chmod +x /usr/local/bin/rwx",
+    #     "rwx --version",
+    # )
     # Install Node.js 22 LTS
     .run_commands(
         # Add NodeSource repository for Node.js 22
@@ -118,6 +122,10 @@ base_image = (
         # Verify installation
         "node --version",
         "npm --version",
+    )
+    .run_commands(
+        "brew install opentofu",
+        "tofu --version",
     )
     # Install pnpm and Bun
     .run_commands(
