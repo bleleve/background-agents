@@ -31,6 +31,7 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   INTERNAL_CALLBACK_SECRET?: string;
   LOG_LEVEL?: string;
+  LINEAR_COMMENT_MAX_LENGTH?: string;
 }
 
 // ─── OAuth Types ─────────────────────────────────────────────────────────────

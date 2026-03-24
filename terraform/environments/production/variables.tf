@@ -192,6 +192,12 @@ variable "linear_api_key" {
   sensitive   = true
 }
 
+variable "linear_comment_max_length" {
+  description = "Maximum character length for Linear issue comments included in the agent prompt. Leave empty to include full comment content."
+  type        = string
+  default     = ""
+}
+
 # =============================================================================
 # API Keys
 # =============================================================================

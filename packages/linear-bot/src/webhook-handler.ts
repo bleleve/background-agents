@@ -548,14 +548,18 @@ async function handleNewSession(
   // ─── Build and send prompt ────────────────────────────────────────────
 
   // Prefer Linear's promptContext (includes issue, comments, guidance)
+  const commentMaxLength =
+    env.LINEAR_COMMENT_MAX_LENGTH !== undefined
+      ? parseInt(env.LINEAR_COMMENT_MAX_LENGTH, 10)
+      : undefined;
+
   let prompt = webhook.agentSession.promptContext
     ? buildPromptContextPrompt(webhook.agentSession.promptContext)
-    : buildPrompt(issue, issueDetails, comment);
+    : buildPrompt(issue, issueDetails, comment, commentMaxLength);
 
   if (integrationConfig.issueSessionInstructions) {
     prompt += `\n\n## Additional Instructions\n\n${integrationConfig.issueSessionInstructions}`;
   }
-
   const callbackContext: CallbackContext = {
     source: "linear",
     issueId: issue.id,
@@ -666,7 +670,8 @@ export async function handleAgentSessionEvent(
 export function buildPrompt(
   issue: { identifier: string; title: string; description?: string | null; url: string },
   issueDetails: LinearIssueDetails | null,
-  comment?: { body: string } | null
+  comment?: { body: string } | null,
+  commentMaxLength?: number
 ): string {
   const parts: string[] = [
     `Linear Issue: ${issue.identifier}`,
@@ -721,7 +726,7 @@ export function buildPrompt(
           buildUntrustedUserContentBlock({
             source: "linear_issue_comment",
             author,
-            content: c.body.slice(0, 200),
+            content: commentMaxLength !== undefined ? c.body.slice(0, commentMaxLength) : c.body,
           })
         );
       }
