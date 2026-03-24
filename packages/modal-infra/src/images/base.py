@@ -32,9 +32,12 @@ AGENT_BROWSER_VERSION = "0.21.2"
 TTYD_VERSION = "1.7.7"
 TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 
+# rwx CLI — pinned Linux x86_64 binary; see https://github.com/rwx-cloud/rwx/releases
+RWX_VERSION = "3.9.4"
+
 # Cache buster - change this to force Modal image rebuild
-# v45: add ttyd web terminal
-CACHE_BUSTER = "v45-ttyd"
+# v49: ttyd web terminal + deb-native CLIs (gh/tofu/rwx), drop Homebrew
+CACHE_BUSTER = "v49-ttyd-rwx-deb-native"
 
 # Base image with all development tools
 base_image = (
@@ -47,6 +50,7 @@ base_image = (
         "ca-certificates",
         "gnupg",
         "openssh-client",
+        "apt-transport-https",
         "jq",
         "unzip",  # Required for Bun installation
         # Shared libraries required by headless Chromium
@@ -66,27 +70,39 @@ base_image = (
         "libpango-1.0-0",
         "libcairo2",
     )
+    # OpenTofu
     .run_commands(
-        "curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash -"
+        "install -m 0755 -d /etc/apt/keyrings",
+        "curl -fsSL https://get.opentofu.org/opentofu.gpg | tee /etc/apt/keyrings/opentofu.gpg >/dev/null",
+        "curl -fsSL https://packages.opentofu.org/opentofu/tofu/gpgkey | gpg --no-tty --batch --dearmor -o /etc/apt/keyrings/opentofu-repo.gpg >/dev/null",
+        "chmod a+r /etc/apt/keyrings/opentofu.gpg /etc/apt/keyrings/opentofu-repo.gpg",
+        (
+            "echo 'deb [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] "
+            "https://packages.opentofu.org/opentofu/tofu/any/ any main' > /etc/apt/sources.list.d/opentofu.list"
+        ),
+        (
+            "echo 'deb-src [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] "
+            "https://packages.opentofu.org/opentofu/tofu/any/ any main' >> /etc/apt/sources.list.d/opentofu.list"
+        ),
+        "chmod a+r /etc/apt/sources.list.d/opentofu.list",
+        "apt-get update && apt-get install -y tofu && rm -rf /var/lib/apt/lists/*",
+        "tofu --version",
+    )
+    # rwx (for agent-direct GitHub interaction via rwx API)
+    .run_commands(
+        f"curl -fsSL https://github.com/rwx-cloud/rwx/releases/download/v{RWX_VERSION}/rwx-linux-x86_64 -o /usr/local/bin/rwx",
+        "chmod +x /usr/local/bin/rwx",
+        "rwx --version",
     )
     # Install GitHub CLI (for agent-direct GitHub interaction via gh API)
-    .run_commands("brew install gh")
-    # .run_commands(
-    #     "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg"
-    #     " | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg",
-    #     "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg]"
-    #     " https://cli.github.com/packages stable main'"
-    #     " > /etc/apt/sources.list.d/github-cli.list",
-    #     "apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*",
-    # )
-    # Install rwx (for agent-direct GitHub interaction via rwx API)
-    .run_commands("brew install rwx-cloud/tap/rwx")
-    # .run_commands(
-    #     "curl -fsSL https://github.com/rwx-cloud/rwx/releases/download/v3.9.2/rwx-linux-x86_64"
-    #     " | tee /usr/local/bin/rwx > /dev/null",
-    #     "chmod +x /usr/local/bin/rwx",
-    #     "rwx --version",
-    # )
+    .run_commands(
+        "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg"
+        " | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg",
+        "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg]"
+        " https://cli.github.com/packages stable main'"
+        " > /etc/apt/sources.list.d/github-cli.list",
+        "apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*",
+    )
     # Install Node.js 22 LTS
     .run_commands(
         # Add NodeSource repository for Node.js 22
@@ -95,10 +111,6 @@ base_image = (
         # Verify installation
         "node --version",
         "npm --version",
-    )
-    .run_commands(
-        "brew install opentofu",
-        "tofu --version",
     )
     # Install pnpm and Bun
     .run_commands(
@@ -119,18 +131,27 @@ base_image = (
         "pydantic>=2.0",  # Required for sandbox types
         "PyJWT[crypto]",  # For GitHub App token generation (includes cryptography)
     )
+    # Install asdf
+    .run_commands(
+        "https://github.com/asdf-vm/asdf/releases/download/v0.18.1/asdf-v0.18.1-linux-amd64.tar.gz"
+        " | tar -xz -C /usr/local",
+        "echo '. /usr/local/asdf/asdf.sh' >> ~/.bashrc",
+        "echo '. /usr/local/asdf/completions/asdf.bash' >> ~/.bashrc",
+        "source ~/.bashrc",
+        "asdf --version",
+    )
     # Install Signoz MCP server
     .run_commands(
         "curl https://s3.us-west-1.amazonaws.com/static.fountain.com/fountain_mcp_binaries/signoz-mcp-server -o /usr/local/bin/signoz-mcp-server",
         "chmod +x /usr/local/bin/signoz-mcp-server",
-        "signoz-mcp-server --version",
     )
     # # Install Spacelift CLI
-    # .run_commands(
-    #     "curl -fsSL https://github.com/Homebrew/install/blob/c59081d10324881a6eabbe77f86ae9fe33f70450/install.sh | bash",
-    #     "brew install spacelift-io/spacelift/spacectl",
-    #     "spacectl --version",
-    # )
+    .run_commands(
+        "asdf plugin add spacectl",
+        "asdf install spacectl latest",
+        "asdf global spacectl latest",
+        "spacectl --version",
+    )
     .run_commands("uvx awslabs.eks-mcp-server@0.1.25 -h")
     # Install OpenCode CLI and plugin for custom tools
     # CACHE_BUSTER is embedded in a no-op echo so Modal invalidates this layer on bump.
