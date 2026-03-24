@@ -38,6 +38,12 @@ RWX_VERSION = "3.10.0"
 # Cache buster - change this to force Modal image rebuild
 # v51: rwx 3.10.0 + ttyd + deb-native CLIs (gh/tofu/rwx)
 CACHE_BUSTER = "v51-ttyd-rwx-3.10.0"
+# rwx CLI — pinned Linux x86_64 binary; see https://github.com/rwx-cloud/rwx/releases
+RWX_VERSION = "3.9.4"
+
+# Cache buster - change this to force Modal image rebuild
+# v48: drop Homebrew (no root); install gh/tofu via apt, rwx via release binary
+CACHE_BUSTER = "v48-deb-native-clis"
 
 # Base image with all development tools
 base_image = (
@@ -94,26 +100,37 @@ base_image = (
         "chmod +x /usr/local/bin/rwx",
         "rwx --version",
     .run_commands(
-        "curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash -"
+        "install -m 0755 -d /etc/apt/keyrings",
+        "curl -fsSL https://get.opentofu.org/opentofu.gpg | tee /etc/apt/keyrings/opentofu.gpg >/dev/null",
+        "curl -fsSL https://packages.opentofu.org/opentofu/tofu/gpgkey | gpg --no-tty --batch --dearmor -o /etc/apt/keyrings/opentofu-repo.gpg >/dev/null",
+        "chmod a+r /etc/apt/keyrings/opentofu.gpg /etc/apt/keyrings/opentofu-repo.gpg",
+        (
+            "echo 'deb [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] "
+            "https://packages.opentofu.org/opentofu/tofu/any/ any main' > /etc/apt/sources.list.d/opentofu.list"
+        ),
+        (
+            "echo 'deb-src [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] "
+            "https://packages.opentofu.org/opentofu/tofu/any/ any main' >> /etc/apt/sources.list.d/opentofu.list"
+        ),
+        "chmod a+r /etc/apt/sources.list.d/opentofu.list",
+        "apt-get update && apt-get install -y tofu && rm -rf /var/lib/apt/lists/*",
+        "tofu --version",
+    )
+    # rwx (for agent-direct GitHub interaction via rwx API)
+    .run_commands(
+        f"curl -fsSL https://github.com/rwx-cloud/rwx/releases/download/v{RWX_VERSION}/rwx-linux-x86_64 -o /usr/local/bin/rwx",
+        "chmod +x /usr/local/bin/rwx",
+        "rwx --version",
     )
     # Install GitHub CLI (for agent-direct GitHub interaction via gh API)
-    .run_commands("brew install gh")
-    # .run_commands(
-    #     "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg"
-    #     " | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg",
-    #     "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg]"
-    #     " https://cli.github.com/packages stable main'"
-    #     " > /etc/apt/sources.list.d/github-cli.list",
-    #     "apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*",
-    # )
-    # Install rwx (for agent-direct GitHub interaction via rwx API)
-    .run_commands("brew install rwx-cloud/tap/rwx")
-    # .run_commands(
-    #     "curl -fsSL https://github.com/rwx-cloud/rwx/releases/download/v3.9.2/rwx-linux-x86_64"
-    #     " | tee /usr/local/bin/rwx > /dev/null",
-    #     "chmod +x /usr/local/bin/rwx",
-    #     "rwx --version",
-    # )
+    .run_commands(
+        "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg"
+        " | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg",
+        "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg]"
+        " https://cli.github.com/packages stable main'"
+        " > /etc/apt/sources.list.d/github-cli.list",
+        "apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*",
+    )
     # Install Node.js 22 LTS
     .run_commands(
         # Add NodeSource repository for Node.js 22
@@ -122,10 +139,6 @@ base_image = (
         # Verify installation
         "node --version",
         "npm --version",
-    )
-    .run_commands(
-        "brew install opentofu",
-        "tofu --version",
     )
     # Install pnpm and Bun
     .run_commands(
