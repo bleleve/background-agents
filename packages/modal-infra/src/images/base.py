@@ -39,11 +39,11 @@ RWX_VERSION = "3.10.0"
 # v51: rwx 3.10.0 + ttyd + deb-native CLIs (gh/tofu/rwx)
 CACHE_BUSTER = "v51-ttyd-rwx-3.10.0"
 # rwx CLI — pinned Linux x86_64 binary; see https://github.com/rwx-cloud/rwx/releases
-RWX_VERSION = "3.9.4"
+RWX_VERSION = "3.10.0"
 
 # Cache buster - change this to force Modal image rebuild
 # v48: drop Homebrew (no root); install gh/tofu via apt, rwx via release binary
-CACHE_BUSTER = "v48-deb-native-clis"
+CACHE_BUSTER = "v49-deb-native-clis"
 
 # Base image with all development tools
 base_image = (
