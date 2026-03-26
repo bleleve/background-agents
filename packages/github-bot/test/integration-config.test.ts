@@ -25,7 +25,7 @@ function createMockEnv(fetchImpl: (url: string, init?: RequestInit) => Promise<R
   return {
     GITHUB_KV: { get: vi.fn(), put: vi.fn() },
     CONTROL_PLANE: { fetch: vi.fn(fetchImpl) },
-    DEFAULT_MODEL: "anthropic/claude-haiku-4-5",
+    DEFAULT_MODEL: "anthropic/claude-sonnet-4-6",
     INTERNAL_CALLBACK_SECRET: "test-secret",
   } as unknown as Env;
 }
@@ -77,7 +77,7 @@ describe("getGitHubConfig", () => {
     const result = await getGitHubConfig(env, "acme/widgets", log);
 
     expect(result).toEqual({
-      model: "anthropic/claude-haiku-4-5",
+      model: "anthropic/claude-sonnet-4-6",
       reasoningEffort: null,
       autoReviewOnOpen: false,
       enabledRepos: [],
@@ -103,7 +103,7 @@ describe("getGitHubConfig", () => {
     const result = await getGitHubConfig(env, "acme/widgets", log);
 
     expect(result).toEqual({
-      model: "anthropic/claude-haiku-4-5",
+      model: "anthropic/claude-sonnet-4-6",
       reasoningEffort: null,
       autoReviewOnOpen: false,
       enabledRepos: [],
@@ -127,7 +127,7 @@ describe("getGitHubConfig", () => {
     const result = await getGitHubConfig(env, "acme/widgets");
 
     expect(result).toEqual({
-      model: "anthropic/claude-haiku-4-5",
+      model: "anthropic/claude-sonnet-4-6",
       reasoningEffort: null,
       autoReviewOnOpen: false,
       enabledRepos: [],
@@ -146,7 +146,7 @@ describe("getGitHubConfig", () => {
     const result = await getGitHubConfig(env, "acme/widgets", log);
 
     expect(result).toEqual({
-      model: "anthropic/claude-haiku-4-5",
+      model: "anthropic/claude-sonnet-4-6",
       reasoningEffort: null,
       autoReviewOnOpen: true,
       enabledRepos: null,
