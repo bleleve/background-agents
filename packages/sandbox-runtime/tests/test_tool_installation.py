@@ -177,11 +177,13 @@ class TestInstallTools:
         js_files = list(tool_dest.glob("*.js"))
         assert len(js_files) == 3
 
-    def test_gitignore_created_when_missing(self, tmp_path):
-        """.opencode should be added to .gitignore when no .gitignore exists."""
+    def test_git_exclude_written_on_install(self, tmp_path):
+        """.opencode should be added to .git/info/exclude (not .gitignore)."""
         sup = _make_supervisor()
         workdir = tmp_path / "workspace"
         workdir.mkdir()
+        # Simulate a git repo by creating .git/info/
+        (workdir / ".git" / "info").mkdir(parents=True)
 
         legacy_tool = tmp_path / "app" / "sandbox" / "inspect-plugin.js"
         legacy_tool.parent.mkdir(parents=True)
@@ -190,17 +192,19 @@ class TestInstallTools:
         with _patch_paths(legacy=legacy_tool, tools=tmp_path / "no-tools"):
             sup._install_tools(workdir)
 
-        gitignore = workdir / ".gitignore"
-        assert gitignore.exists()
-        assert ".opencode" in gitignore.read_text().splitlines()
+        exclude = workdir / ".git" / "info" / "exclude"
+        assert exclude.exists()
+        assert ".opencode" in exclude.read_text().splitlines()
 
-    def test_gitignore_appended_when_entry_missing(self, tmp_path):
-        """.opencode should be appended to an existing .gitignore that lacks it."""
+    def test_gitignore_not_modified_by_install(self, tmp_path):
+        """.gitignore must not be touched — changes to it would end up in the PR."""
         sup = _make_supervisor()
         workdir = tmp_path / "workspace"
         workdir.mkdir()
+        (workdir / ".git" / "info").mkdir(parents=True)
 
-        (workdir / ".gitignore").write_text("node_modules\ndist\n")
+        original_gitignore = "node_modules\ndist\n"
+        (workdir / ".gitignore").write_text(original_gitignore)
 
         legacy_tool = tmp_path / "app" / "sandbox" / "inspect-plugin.js"
         legacy_tool.parent.mkdir(parents=True)
@@ -209,96 +213,102 @@ class TestInstallTools:
         with _patch_paths(legacy=legacy_tool, tools=tmp_path / "no-tools"):
             sup._install_tools(workdir)
 
-        lines = (workdir / ".gitignore").read_text().splitlines()
-        assert ".opencode" in lines
-        assert "node_modules" in lines
-        assert "dist" in lines
+        assert (workdir / ".gitignore").read_text() == original_gitignore
 
-    def test_gitignore_not_duplicated_when_already_present(self, tmp_path):
-        """.opencode should not be added again if already in .gitignore."""
+
+class TestExcludeOpencodeFromGit:
+    """Unit tests for _exclude_opencode_from_git() in isolation."""
+
+    def _make_git_repo(self, path: Path) -> Path:
+        """Create a minimal fake git repo directory structure."""
+        (path / ".git" / "info").mkdir(parents=True)
+        return path
+
+    def test_creates_exclude_file_when_missing(self, tmp_path):
+        """Should create .git/info/exclude containing .opencode."""
         sup = _make_supervisor()
-        workdir = tmp_path / "workspace"
-        workdir.mkdir()
+        workdir = self._make_git_repo(tmp_path / "repo")
+        workdir.mkdir(exist_ok=True)
 
-        (workdir / ".gitignore").write_text("node_modules\n.opencode\ndist\n")
+        sup._exclude_opencode_from_git(workdir)
 
-        legacy_tool = tmp_path / "app" / "sandbox" / "inspect-plugin.js"
-        legacy_tool.parent.mkdir(parents=True)
-        legacy_tool.write_text("// legacy")
+        exclude = workdir / ".git" / "info" / "exclude"
+        assert exclude.exists()
+        assert ".opencode" in exclude.read_text().splitlines()
 
-        with _patch_paths(legacy=legacy_tool, tools=tmp_path / "no-tools"):
-            sup._install_tools(workdir)
-
-        content = (workdir / ".gitignore").read_text()
-        assert content.count(".opencode") == 1
-
-    def test_gitignore_appended_without_trailing_newline(self, tmp_path):
-        """Appending .opencode should not merge with the last existing line."""
+    def test_appends_to_existing_exclude_file(self, tmp_path):
+        """Should append .opencode to an existing exclude file."""
         sup = _make_supervisor()
-        workdir = tmp_path / "workspace"
-        workdir.mkdir()
+        workdir = self._make_git_repo(tmp_path / "repo")
+        workdir.mkdir(exist_ok=True)
+        exclude = workdir / ".git" / "info" / "exclude"
+        exclude.write_text("# git ls-files --others --exclude-from=.git/info/exclude\n*.log\n")
 
-        # No trailing newline in the existing file
-        (workdir / ".gitignore").write_text("node_modules")
+        sup._exclude_opencode_from_git(workdir)
 
-        legacy_tool = tmp_path / "app" / "sandbox" / "inspect-plugin.js"
-        legacy_tool.parent.mkdir(parents=True)
-        legacy_tool.write_text("// legacy")
-
-        with _patch_paths(legacy=legacy_tool, tools=tmp_path / "no-tools"):
-            sup._install_tools(workdir)
-
-        lines = (workdir / ".gitignore").read_text().splitlines()
-        assert "node_modules" in lines
-        assert ".opencode" in lines
-
-
-class TestEnsureOpencodeGitignored:
-    """Unit tests for _ensure_opencode_gitignored() in isolation."""
-
-    def test_creates_gitignore_in_empty_dir(self, tmp_path):
-        sup = _make_supervisor()
-        workdir = tmp_path / "repo"
-        workdir.mkdir()
-
-        sup._ensure_opencode_gitignored(workdir)
-
-        gitignore = workdir / ".gitignore"
-        assert gitignore.exists()
-        assert gitignore.read_text().strip() == ".opencode"
-
-    def test_appends_to_existing_file(self, tmp_path):
-        sup = _make_supervisor()
-        workdir = tmp_path / "repo"
-        workdir.mkdir()
-        (workdir / ".gitignore").write_text("*.log\n")
-
-        sup._ensure_opencode_gitignored(workdir)
-
-        lines = (workdir / ".gitignore").read_text().splitlines()
+        lines = exclude.read_text().splitlines()
         assert ".opencode" in lines
         assert "*.log" in lines
 
-    def test_idempotent_when_entry_present(self, tmp_path):
+    def test_idempotent_when_entry_already_present(self, tmp_path):
+        """Calling twice must not duplicate the .opencode entry."""
         sup = _make_supervisor()
-        workdir = tmp_path / "repo"
-        workdir.mkdir()
+        workdir = self._make_git_repo(tmp_path / "repo")
+        workdir.mkdir(exist_ok=True)
+        exclude = workdir / ".git" / "info" / "exclude"
         original = "*.log\n.opencode\n"
-        (workdir / ".gitignore").write_text(original)
+        exclude.write_text(original)
 
-        sup._ensure_opencode_gitignored(workdir)
+        sup._exclude_opencode_from_git(workdir)
 
-        assert (workdir / ".gitignore").read_text() == original
+        assert exclude.read_text() == original
+
+    def test_no_op_when_no_git_directory(self, tmp_path):
+        """Should not create any files when workdir is not a git repo."""
+        sup = _make_supervisor()
+        workdir = tmp_path / "not-a-repo"
+        workdir.mkdir()
+
+        sup._exclude_opencode_from_git(workdir)
+
+        assert not (workdir / ".git").exists()
+
+    def test_appended_without_trailing_newline(self, tmp_path):
+        """Appending .opencode should produce a clean line, not merge with last line."""
+        sup = _make_supervisor()
+        workdir = self._make_git_repo(tmp_path / "repo")
+        workdir.mkdir(exist_ok=True)
+        exclude = workdir / ".git" / "info" / "exclude"
+        exclude.write_text("*.log")  # no trailing newline
+
+        sup._exclude_opencode_from_git(workdir)
+
+        lines = exclude.read_text().splitlines()
+        assert "*.log" in lines
+        assert ".opencode" in lines
 
     def test_partial_match_not_treated_as_present(self, tmp_path):
-        """A line like '.opencode-extra' must not suppress adding '.opencode'."""
+        """A line '.opencode-extra' must not suppress adding '.opencode'."""
         sup = _make_supervisor()
-        workdir = tmp_path / "repo"
-        workdir.mkdir()
-        (workdir / ".gitignore").write_text(".opencode-extra\n")
+        workdir = self._make_git_repo(tmp_path / "repo")
+        workdir.mkdir(exist_ok=True)
+        exclude = workdir / ".git" / "info" / "exclude"
+        exclude.write_text(".opencode-extra\n")
 
-        sup._ensure_opencode_gitignored(workdir)
+        sup._exclude_opencode_from_git(workdir)
 
-        lines = (workdir / ".gitignore").read_text().splitlines()
+        lines = exclude.read_text().splitlines()
         assert ".opencode" in lines
         assert ".opencode-extra" in lines
+
+    def test_gitignore_is_never_touched(self, tmp_path):
+        """Writing to .git/info/exclude must never modify .gitignore."""
+        sup = _make_supervisor()
+        workdir = self._make_git_repo(tmp_path / "repo")
+        workdir.mkdir(exist_ok=True)
+        original = "node_modules\n"
+        (workdir / ".gitignore").write_text(original)
+
+        sup._exclude_opencode_from_git(workdir)
+
+        assert (workdir / ".gitignore").read_text() == original

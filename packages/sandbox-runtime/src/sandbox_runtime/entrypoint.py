@@ -327,26 +327,36 @@ class SandboxSupervisor:
         if not package_json.exists():
             package_json.write_text('{"name": "opencode-tools", "type": "module"}')
 
-        # Ensure .opencode is gitignored in the cloned repo so it never ends up
-        # in a pull request created by the agent.
-        self._ensure_opencode_gitignored(workdir)
+        # Ensure .opencode is excluded from git tracking in the cloned repo.
+        # We write to .git/info/exclude (not .gitignore) so the rule is
+        # local to this sandbox clone and can never be staged, committed,
+        # or pushed by the agent.
+        self._exclude_opencode_from_git(workdir)
 
-    def _ensure_opencode_gitignored(self, workdir: Path) -> None:
-        """Add .opencode to the repo root .gitignore if not already present."""
-        gitignore_path = workdir / ".gitignore"
+    def _exclude_opencode_from_git(self, workdir: Path) -> None:
+        """Add .opencode to .git/info/exclude so it is never committed.
+
+        .git/info/exclude is equivalent to .gitignore but lives inside .git/,
+        which git never tracks. Writing here has no effect on the working tree
+        and cannot appear in any commit or pull request.
+        """
+        exclude_path = workdir / ".git" / "info" / "exclude"
         entry = ".opencode"
 
-        if gitignore_path.exists():
-            existing = gitignore_path.read_text()
-            # Match the entry as a whole line to avoid false positives
-            lines = existing.splitlines()
-            if any(line.strip() == entry for line in lines):
+        if not exclude_path.parent.exists():
+            # No .git directory — workdir is not a git repo, nothing to do.
+            return
+
+        if exclude_path.exists():
+            existing = exclude_path.read_text()
+            # Match the entry as a whole line to avoid false positives.
+            if any(line.strip() == entry for line in existing.splitlines()):
                 return
-            # Append with a leading newline to avoid joining with the last line
             suffix = "" if existing.endswith("\n") else "\n"
-            gitignore_path.write_text(existing + suffix + entry + "\n")
+            exclude_path.write_text(existing + suffix + entry + "\n")
         else:
-            gitignore_path.write_text(entry + "\n")
+            exclude_path.parent.mkdir(parents=True, exist_ok=True)
+            exclude_path.write_text(entry + "\n")
 
     def _setup_openai_oauth(self) -> None:
         """Write OpenCode auth.json for ChatGPT OAuth if refresh token is configured."""
