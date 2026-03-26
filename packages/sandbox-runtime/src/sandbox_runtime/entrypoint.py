@@ -327,6 +327,27 @@ class SandboxSupervisor:
         if not package_json.exists():
             package_json.write_text('{"name": "opencode-tools", "type": "module"}')
 
+        # Ensure .opencode is gitignored in the cloned repo so it never ends up
+        # in a pull request created by the agent.
+        self._ensure_opencode_gitignored(workdir)
+
+    def _ensure_opencode_gitignored(self, workdir: Path) -> None:
+        """Add .opencode to the repo root .gitignore if not already present."""
+        gitignore_path = workdir / ".gitignore"
+        entry = ".opencode"
+
+        if gitignore_path.exists():
+            existing = gitignore_path.read_text()
+            # Match the entry as a whole line to avoid false positives
+            lines = existing.splitlines()
+            if any(line.strip() == entry for line in lines):
+                return
+            # Append with a leading newline to avoid joining with the last line
+            suffix = "" if existing.endswith("\n") else "\n"
+            gitignore_path.write_text(existing + suffix + entry + "\n")
+        else:
+            gitignore_path.write_text(entry + "\n")
+
     def _setup_openai_oauth(self) -> None:
         """Write OpenCode auth.json for ChatGPT OAuth if refresh token is configured."""
         refresh_token = os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN")
