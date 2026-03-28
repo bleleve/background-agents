@@ -2,7 +2,11 @@
  * CI Testing Tool — run the repository RWX build-and-test workflow when present.
  *
  * When `.rwx/*.yml` exists, runs `rwx run .rwx/build-and-test.yml --wait --fail-fast` from the
- * repo root. No git push is required. Otherwise, directs the agent to project docs for testing.
+ * repo root. No git push is required. Always run `git add` on all new/changed files before
+ * ci-testing. If ci-testing reports "The patch did not include the following untracked file", the
+ * run result is invalid — stage the file and re-run.
+ *
+ * If no RWX suite exists, directs the agent to project docs for testing.
  */
 import { tool } from "@opencode-ai/plugin";
 import { execFile } from "node:child_process";
@@ -39,7 +43,7 @@ function trimOutput(s) {
 export default tool({
   name: "ci-testing",
   description:
-    "Run automated tests for the current repository. If `.rwx/*.yml` exists, runs the RWX workflow `.rwx/build-and-test.yml` (no git push needed). If tests fail, read the errors, fix the code, and call this tool again until tests pass (up to 3 times). If there is no RWX suite, follow CLAUDE.md (or README) for how to test and iterate until green.",
+    "Run automated tests for the current repository. If `.rwx/*.yml` exists, runs the RWX workflow `.rwx/build-and-test.yml` (no git push needed). Always run git add on all new/changed files before ci-testing. If ci-testing reports 'The patch did not include the following untracked file', the run result is invalid — stage the file and re-run. If tests fail, read the errors, fix the code, and call this tool again until tests pass (up to 3 times). If there is no RWX suite, follow CLAUDE.md (or README) for how to test and iterate until green.",
   args: {},
   async execute() {
     const repoRoot = process.cwd();
