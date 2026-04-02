@@ -11,7 +11,7 @@ resource "null_resource" "control_plane_build" {
   }
 
   provisioner "local-exec" {
-    command     = "npm run build"
+    command     = "npm run build -w @open-inspect/shared && npm run build"
     working_dir = "${var.project_root}/packages/control-plane"
   }
 }
