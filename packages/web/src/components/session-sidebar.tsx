@@ -231,7 +231,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
           </Button>
           <Link href="/" className="flex items-center gap-2">
             <InspectIcon className="w-5 h-5" />
-            <span className="font-semibold text-foreground">Inspect</span>
+            <span className="font-semibold text-foreground">Reef</span>
           </Link>
         </div>
         <div className="flex items-center gap-2">

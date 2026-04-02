@@ -1,8 +1,8 @@
 # AGENTS.md
 
-Open-Inspect is a background coding agent system that spawns sandboxed dev environments to work on
-GitHub repositories. Single-tenant design. Stack: Cloudflare Workers (TypeScript), Modal (Python),
-Next.js (React), Terraform.
+Open-Inspect is also called "Reef". It is a background coding agent system that spawns sandboxed dev
+environments to work on GitHub repositories. Single-tenant design. Stack: Cloudflare Workers
+(TypeScript), Modal (Python), Next.js (React), Terraform.
 
 ## Architecture
 

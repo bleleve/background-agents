@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Open-Inspect",
+  title: "Reef",
   description: "Background coding agent for your team",
 };
 

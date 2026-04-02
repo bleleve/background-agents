@@ -74,9 +74,28 @@ async function sendPrompt(
   return result.messageId;
 }
 
-function stripMention(body: string, botUsername: string): string {
-  const escaped = botUsername.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return body.replace(new RegExp(`@${escaped}`, "gi"), "").trim();
+function escapeForRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getTriggerMentions(env: Env): string[] {
+  // Keep existing @GITHUB_BOT_USERNAME behavior, but also allow @reef as a stable alias.
+  // (Minimal change: no config wiring, just a hard-coded alias.)
+  return [env.GITHUB_BOT_USERNAME, "reef"];
+}
+
+function hasAnyMention(body: string, mentions: string[]): boolean {
+  const bodyLower = body.toLowerCase();
+  return mentions.some((m) => bodyLower.includes(`@${m.toLowerCase()}`));
+}
+
+function stripMentions(body: string, mentions: string[]): string {
+  let result = body;
+  for (const mention of mentions) {
+    const escaped = escapeForRegex(mention);
+    result = result.replace(new RegExp(`@${escaped}`, "gi"), "");
+  }
+  return result.trim();
 }
 
 function fireAndForgetReaction(
@@ -352,7 +371,7 @@ export async function handleIssueComment(
     return { outcome: "skipped", skip_reason: "not_a_pr" };
   }
 
-  if (!comment.body.toLowerCase().includes(`@${env.GITHUB_BOT_USERNAME.toLowerCase()}`)) {
+  if (!hasAnyMention(comment.body, getTriggerMentions(env))) {
     log.debug("handler.no_mention", {
       trace_id: traceId,
       issue_number: issue.number,
@@ -386,7 +405,7 @@ export async function handleIssueComment(
   if (!gating.allowed) return { outcome: "skipped", skip_reason: gating.reason };
   const { ghToken, headers } = gating;
 
-  const commentBody = stripMention(comment.body, env.GITHUB_BOT_USERNAME);
+  const commentBody = stripMentions(comment.body, getTriggerMentions(env));
 
   const meta = { trace_id: traceId, repo: repoFullName, pull_number: issue.number };
   fireAndForgetReaction(
@@ -447,7 +466,7 @@ export async function handleReviewComment(
   const repoName = repo.name;
   const repoFullName = `${owner}/${repoName}`.toLowerCase();
 
-  if (!comment.body.toLowerCase().includes(`@${env.GITHUB_BOT_USERNAME.toLowerCase()}`)) {
+  if (!hasAnyMention(comment.body, getTriggerMentions(env))) {
     log.debug("handler.no_mention", {
       trace_id: traceId,
       pull_number: pr.number,
@@ -481,7 +500,7 @@ export async function handleReviewComment(
   if (!gating.allowed) return { outcome: "skipped", skip_reason: gating.reason };
   const { ghToken, headers } = gating;
 
-  const commentBody = stripMention(comment.body, env.GITHUB_BOT_USERNAME);
+  const commentBody = stripMentions(comment.body, getTriggerMentions(env));
 
   const meta = { trace_id: traceId, repo: repoFullName, pull_number: pr.number };
   fireAndForgetReaction(

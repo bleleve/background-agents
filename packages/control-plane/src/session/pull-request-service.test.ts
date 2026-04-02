@@ -224,7 +224,7 @@ describe("SessionPullRequestService", () => {
       .calls[0];
     expect(createPrCall[0]).toEqual({ authType: "oauth", token: "user-token" });
     expect(createPrCall[1].body).toContain(
-      "*Created with [Open-Inspect](https://app.example.com/session/session-name-1)*"
+      "*Created with [Reef](https://app.example.com/session/session-name-1)*"
     );
     expect(harness.deps.broadcastArtifactCreated).toHaveBeenCalledWith({
       id: "id-1",
