@@ -84,13 +84,22 @@ function getTriggerMentions(env: Env): string[] {
   return [env.GITHUB_BOT_USERNAME, "reef"];
 }
 
+function stripMarkdownBlockquotes(body: string): string {
+  // GitHub "quote reply" uses Markdown blockquotes (`>`). Mentions inside quoted text should not
+  // trigger the bot.
+  return body
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith(">"))
+    .join("\n");
+}
+
 function hasAnyMention(body: string, mentions: string[]): boolean {
-  const bodyLower = body.toLowerCase();
+  const bodyLower = stripMarkdownBlockquotes(body).toLowerCase();
   return mentions.some((m) => bodyLower.includes(`@${m.toLowerCase()}`));
 }
 
 function stripMentions(body: string, mentions: string[]): string {
-  let result = body;
+  let result = stripMarkdownBlockquotes(body);
   for (const mention of mentions) {
     const escaped = escapeForRegex(mention);
     result = result.replace(new RegExp(`@${escaped}`, "gi"), "");
