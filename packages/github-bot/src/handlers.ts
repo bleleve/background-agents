@@ -80,32 +80,17 @@ function escapeForRegex(value: string): string {
 
 function getTriggerMentions(env: Env): string[] {
   // Keep existing @GITHUB_BOT_USERNAME behavior, but also allow @reef as a stable alias.
-  // GitHub App logins end with [bot]; users often type the handle without that suffix.
-  // List the full login first so stripMentions removes it before the shorter alias.
-  const full = env.GITHUB_BOT_USERNAME;
-  const withoutBotSuffix = full.replace(/\[bot\]$/i, "");
-  const mentions = [full];
-  if (withoutBotSuffix !== full) mentions.push(withoutBotSuffix);
-  mentions.push("reef");
-  return mentions;
-}
-
-function stripMarkdownBlockquotes(body: string): string {
-  // GitHub "quote reply" uses Markdown blockquotes (`>`). Mentions inside quoted text should not
-  // trigger the bot.
-  return body
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith(">"))
-    .join("\n");
+  // (Minimal change: no config wiring, just a hard-coded alias.)
+  return [env.GITHUB_BOT_USERNAME, "reef"];
 }
 
 function hasAnyMention(body: string, mentions: string[]): boolean {
-  const bodyLower = stripMarkdownBlockquotes(body).toLowerCase();
+  const bodyLower = body.toLowerCase();
   return mentions.some((m) => bodyLower.includes(`@${m.toLowerCase()}`));
 }
 
 function stripMentions(body: string, mentions: string[]): string {
-  let result = stripMarkdownBlockquotes(body);
+  let result = body;
   for (const mention of mentions) {
     const escaped = escapeForRegex(mention);
     result = result.replace(new RegExp(`@${escaped}`, "gi"), "");
