@@ -27,6 +27,15 @@ declare module "next-auth/jwt" {
 
 export const authOptions: NextAuthOptions = {
   debug: process.env.NODE_ENV === "development" || process.env.NEXTAUTH_DEBUG === "true",
+  // Keep the signed-in session alive longer than the default to avoid frequent re-auth.
+  // (This does not change the GitHub access token lifetime; it only affects the NextAuth session/JWT.)
+  session: {
+    strategy: "jwt",
+    maxAge: 60 * 60 * 24 * 90, // 90 days
+  },
+  jwt: {
+    maxAge: 60 * 60 * 24 * 90, // 90 days
+  },
   providers: [
     GitHubProvider({
       clientId: process.env.GITHUB_CLIENT_ID!,
