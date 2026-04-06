@@ -1,6 +1,24 @@
-# Activate modal-infra venv if it exists (provides ruff for Python linting)
-if [ -f packages/modal-infra/.venv/bin/activate ]; then
-  . packages/modal-infra/.venv/bin/activate
+#!/usr/bin/env sh
+set -e
+
+REPO_ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
+VENV_PYTHON="$REPO_ROOT/packages/modal-infra/.venv/bin/python"
+VENV_ACTIVATE="$REPO_ROOT/packages/modal-infra/.venv/bin/activate"
+
+# Activate modal-infra venv if it exists.
+if [ -f "$VENV_ACTIVATE" ]; then
+  . "$VENV_ACTIVATE"
+fi
+
+# Ensure Ruff is available for Python lint-staged tasks.
+if ! command -v ruff >/dev/null 2>&1; then
+  if [ -x "$VENV_PYTHON" ]; then
+    "$VENV_PYTHON" -m pip install --disable-pip-version-check "ruff>=0.9.0"
+  else
+    echo "Ruff not found and modal-infra venv is missing."
+    echo "Create it with: python3 -m venv packages/modal-infra/.venv"
+    exit 1
+  fi
 fi
 
 npx lint-staged
