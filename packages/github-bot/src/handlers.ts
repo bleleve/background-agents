@@ -80,8 +80,14 @@ function escapeForRegex(value: string): string {
 
 function getTriggerMentions(env: Env): string[] {
   // Keep existing @GITHUB_BOT_USERNAME behavior, but also allow @reef as a stable alias.
-  // (Minimal change: no config wiring, just a hard-coded alias.)
-  return [env.GITHUB_BOT_USERNAME, "reef"];
+  // GitHub App logins end with [bot]; users often type the handle without that suffix.
+  // List the full login first so stripMentions removes it before the shorter alias.
+  const full = env.GITHUB_BOT_USERNAME;
+  const withoutBotSuffix = full.replace(/\[bot\]$/i, "");
+  const mentions = [full];
+  if (withoutBotSuffix !== full) mentions.push(withoutBotSuffix);
+  mentions.push("reef");
+  return mentions;
 }
 
 function stripMarkdownBlockquotes(body: string): string {

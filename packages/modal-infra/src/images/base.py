@@ -42,7 +42,6 @@ CACHE_BUSTER = "v51-ttyd-rwx-3.10.0"
 RWX_VERSION = "3.10.0"
 
 # Cache buster - change this to force Modal image rebuild
-# v48: drop Homebrew (no root); install gh/tofu via apt, rwx via release binary
 CACHE_BUSTER = "v49-deb-native-clis"
 
 # Base image with all development tools
