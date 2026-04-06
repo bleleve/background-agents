@@ -490,6 +490,26 @@ describe("handleIssueComment", () => {
     expect(generateInstallationToken).not.toHaveBeenCalled();
   });
 
+  it("triggers on @mention without [bot] suffix", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: IssueCommentPayload = {
+      ...issueCommentPayload,
+      comment: {
+        ...issueCommentPayload.comment,
+        body: "@test-bot please fix the error handling",
+      },
+    };
+
+    const result = await handleIssueComment(env, log, payload, "trace-2-short");
+
+    expect(result.outcome).toBe("processed");
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain("please fix the error handling");
+    expect(promptBody.content).not.toMatch(/@test-bot/);
+  });
+
   it("returns early if comment is from the bot (loop prevention)", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
@@ -560,6 +580,26 @@ describe("handleReviewComment", () => {
 
     expect(result).toEqual({ outcome: "skipped", skip_reason: "no_mention" });
     expect(generateInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it("triggers on @mention without [bot] suffix", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: ReviewCommentPayload = {
+      ...reviewCommentPayload,
+      comment: {
+        ...reviewCommentPayload.comment,
+        body: "@test-bot can you fix this?",
+      },
+    };
+
+    const result = await handleReviewComment(env, log, payload, "trace-3-short");
+
+    expect(result.outcome).toBe("processed");
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain("can you fix this?");
+    expect(promptBody.content).not.toMatch(/@test-bot/);
   });
 
   it("returns early if comment is from the bot (loop prevention)", async () => {

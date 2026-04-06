@@ -36,8 +36,8 @@ TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 RWX_VERSION = "3.10.0"
 
 # Cache buster - change this to force Modal image rebuild
-# v50: rwx 3.10.0 + ttyd + deb-native CLIs (gh/tofu/rwx)
-CACHE_BUSTER = "v50-ttyd-rwx-3.10.0"
+# v51: rwx 3.10.0 + ttyd + deb-native CLIs (gh/tofu/rwx)
+CACHE_BUSTER = "v51-ttyd-rwx-3.10.0"
 
 # Base image with all development tools
 base_image = (
@@ -153,6 +153,9 @@ base_image = (
     #     "spacectl --version",
     # )
     .run_commands("uvx awslabs.eks-mcp-server@0.1.25 -h")
+    # Install skill-validator
+    # .run_commands("apt-get install -y golang-go")
+    # .run_commands("go install github.com/agent-ecosystem/skill-validator/cmd/skill-validator@1fe10b0b3ebacbb85f64e3664f712c497b71c1a9")
     # Install OpenCode CLI and plugin for custom tools
     # CACHE_BUSTER is embedded in a no-op echo so Modal invalidates this layer on bump.
     .run_commands(
