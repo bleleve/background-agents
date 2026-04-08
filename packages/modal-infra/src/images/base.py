@@ -33,16 +33,11 @@ TTYD_VERSION = "1.7.7"
 TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 
 # rwx CLI — pinned Linux x86_64 binary; see https://github.com/rwx-cloud/rwx/releases
-RWX_VERSION = "3.10.0"
+RWX_VERSION = "3.12.0"
 
 # Cache buster - change this to force Modal image rebuild
-# v51: rwx 3.10.0 + ttyd + deb-native CLIs (gh/tofu/rwx)
-CACHE_BUSTER = "v51-ttyd-rwx-3.10.0"
-# rwx CLI — pinned Linux x86_64 binary; see https://github.com/rwx-cloud/rwx/releases
-RWX_VERSION = "3.10.0"
-
-# Cache buster - change this to force Modal image rebuild
-CACHE_BUSTER = "v49-deb-native-clis"
+# v51: rwx 3.12.0 + ttyd + deb-native CLIs (gh/tofu/rwx)
+CACHE_BUSTER = "v51-ttyd-rwx-3.12.0"
 
 # Base image with all development tools
 base_image = (
@@ -76,28 +71,6 @@ base_image = (
         "libcairo2",
     )
     # OpenTofu
-    .run_commands(
-        "install -m 0755 -d /etc/apt/keyrings",
-        "curl -fsSL https://get.opentofu.org/opentofu.gpg | tee /etc/apt/keyrings/opentofu.gpg >/dev/null",
-        "curl -fsSL https://packages.opentofu.org/opentofu/tofu/gpgkey | gpg --no-tty --batch --dearmor -o /etc/apt/keyrings/opentofu-repo.gpg >/dev/null",
-        "chmod a+r /etc/apt/keyrings/opentofu.gpg /etc/apt/keyrings/opentofu-repo.gpg",
-        (
-            "echo 'deb [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] "
-            "https://packages.opentofu.org/opentofu/tofu/any/ any main' > /etc/apt/sources.list.d/opentofu.list"
-        ),
-        (
-            "echo 'deb-src [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] "
-            "https://packages.opentofu.org/opentofu/tofu/any/ any main' >> /etc/apt/sources.list.d/opentofu.list"
-        ),
-        "chmod a+r /etc/apt/sources.list.d/opentofu.list",
-        "apt-get update && apt-get install -y tofu && rm -rf /var/lib/apt/lists/*",
-        "tofu --version",
-    )
-    # rwx (for agent-direct GitHub interaction via rwx API)
-    .run_commands(
-        f"curl -fsSL https://github.com/rwx-cloud/rwx/releases/download/v{RWX_VERSION}/rwx-linux-x86_64 -o /usr/local/bin/rwx",
-        "chmod +x /usr/local/bin/rwx",
-        "rwx --version",
     .run_commands(
         "install -m 0755 -d /etc/apt/keyrings",
         "curl -fsSL https://get.opentofu.org/opentofu.gpg | tee /etc/apt/keyrings/opentofu.gpg >/dev/null",

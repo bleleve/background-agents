@@ -201,7 +201,7 @@ export interface AgentSessionWebhook {
   agentSession: {
     id: string;
     issue?: AgentSessionWebhookIssue;
-    comment?: { body: string };
+    comment?: { body?: string; bodyData?: unknown };
     promptContext?: string;
   };
   agentActivity?: { body?: string };

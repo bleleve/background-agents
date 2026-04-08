@@ -16,6 +16,7 @@ import {
   fetchIssueDetails,
   updateAgentSession,
   getRepoSuggestions,
+  normalizeLinearCommentBody,
 } from "./utils/linear-client";
 import { buildInternalAuthHeaders } from "./utils/internal";
 import { classifyRepo } from "./classifier";
@@ -50,6 +51,12 @@ export function escapeHtml(s: string): string {
 
 function isAgentSessionThreadPlaceholder(content: string): boolean {
   return content.trim() === AGENT_SESSION_THREAD_PLACEHOLDER;
+}
+
+function parseCommentMaxLength(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function buildUntrustedUserContentBlock(params: {
@@ -201,7 +208,8 @@ async function handleFollowUp(
   const existingSession = await lookupIssueSession(env, issue.id);
   if (!existingSession) return;
 
-  const followUpContent = agentActivity?.body || comment?.body || "Follow-up on the issue.";
+  const normalizedCommentBody = comment ? normalizeLinearCommentBody(comment) : "";
+  const followUpContent = agentActivity?.body || normalizedCommentBody || "Follow-up on the issue.";
   const followUpMetadata = agentActivity?.body
     ? { followUpSource: "linear_agent_activity", followUpAuthor: "linear" }
     : { followUpSource: "linear_comment", followUpAuthor: "unknown" };
@@ -288,6 +296,7 @@ async function handleNewSession(
   const startTime = Date.now();
   const agentSessionId = webhook.agentSession.id;
   const comment = webhook.agentSession.comment;
+  const normalizedCommentBody = comment ? normalizeLinearCommentBody(comment) : "";
   const orgId = webhook.organizationId;
 
   const client = await getLinearClient(env, orgId);
@@ -392,7 +401,7 @@ async function handleNewSession(
       projectInfo?.name,
       issue.team?.name ?? null,
       issue.team?.key ?? null,
-      comment?.body,
+      normalizedCommentBody || undefined,
       traceId
     );
 
@@ -548,10 +557,7 @@ async function handleNewSession(
   // ─── Build and send prompt ────────────────────────────────────────────
 
   // Prefer Linear's promptContext (includes issue, comments, guidance)
-  const commentMaxLength =
-    env.LINEAR_COMMENT_MAX_LENGTH !== undefined
-      ? parseInt(env.LINEAR_COMMENT_MAX_LENGTH, 10)
-      : undefined;
+  const commentMaxLength = parseCommentMaxLength(env.LINEAR_COMMENT_MAX_LENGTH);
 
   let prompt = webhook.agentSession.promptContext
     ? buildPromptContextPrompt(webhook.agentSession.promptContext)
@@ -670,9 +676,16 @@ export async function handleAgentSessionEvent(
 export function buildPrompt(
   issue: { identifier: string; title: string; description?: string | null; url: string },
   issueDetails: LinearIssueDetails | null,
-  comment?: { body: string } | null,
+  comment?: { body?: unknown; bodyData?: unknown } | null,
   commentMaxLength?: number
 ): string {
+  const effectiveCommentMaxLength =
+    typeof commentMaxLength === "number" &&
+    Number.isFinite(commentMaxLength) &&
+    commentMaxLength > 0
+      ? Math.floor(commentMaxLength)
+      : undefined;
+  const normalizedCommentBody = comment ? normalizeLinearCommentBody(comment) : "";
   const parts: string[] = [
     `Linear Issue: ${issue.identifier}`,
     `URL: ${issue.url}`,
@@ -717,7 +730,15 @@ export function buildPrompt(
     // Include recent comments for context
     const filteredComments = issueDetails.comments
       .slice(-5)
-      .filter((c) => !isAgentSessionThreadPlaceholder(c.body));
+      .filter((c) => !isAgentSessionThreadPlaceholder(c.body))
+      .map((c) => ({
+        ...c,
+        promptBody:
+          effectiveCommentMaxLength !== undefined
+            ? c.body.slice(0, effectiveCommentMaxLength)
+            : c.body,
+      }))
+      .filter((c) => c.promptBody.trim().length > 0);
     if (filteredComments.length > 0) {
       parts.push("", "---", "**Recent comments:**");
       for (const c of filteredComments) {
@@ -726,14 +747,14 @@ export function buildPrompt(
           buildUntrustedUserContentBlock({
             source: "linear_issue_comment",
             author,
-            content: commentMaxLength !== undefined ? c.body.slice(0, commentMaxLength) : c.body,
+            content: c.promptBody,
           })
         );
       }
     }
   }
 
-  if (comment?.body && !isAgentSessionThreadPlaceholder(comment.body)) {
+  if (normalizedCommentBody && !isAgentSessionThreadPlaceholder(normalizedCommentBody)) {
     parts.push(
       "",
       "---",
@@ -741,7 +762,7 @@ export function buildPrompt(
       buildUntrustedUserContentBlock({
         source: "linear_agent_instruction",
         author: "unknown",
-        content: comment.body,
+        content: normalizedCommentBody,
       })
     );
   }

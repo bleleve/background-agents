@@ -92,6 +92,15 @@ export class ModalSandboxProvider implements SandboxProvider {
         tunnelUrls: result.tunnelUrls,
       };
     } catch (error) {
+      if (error instanceof ModalApiError) {
+        throw this.classifyErrorWithStatus(
+          `Create sandbox failed with HTTP ${error.status}`,
+          error.status
+        );
+      }
+      if (error instanceof SandboxProviderError) {
+        throw error;
+      }
       throw this.classifyError("Failed to create sandbox", error);
     }
   }
@@ -196,8 +205,8 @@ export class ModalSandboxProvider implements SandboxProvider {
    * Uses status code directly for accurate transient/permanent classification.
    */
   private classifyErrorWithStatus(message: string, status: number): SandboxProviderError {
-    // Transient: 502, 503, 504 (gateway/availability issues)
-    if (status === 502 || status === 503 || status === 504) {
+    // Transient: 502, 503, 504, 524 (gateway/availability/edge timeout issues)
+    if (status === 502 || status === 503 || status === 504 || status === 524) {
       return new SandboxProviderError(message, "transient");
     }
 
@@ -224,6 +233,7 @@ export class ModalSandboxProvider implements SandboxProvider {
         errorMessage.includes("502") ||
         errorMessage.includes("503") ||
         errorMessage.includes("504") ||
+        errorMessage.includes("524") ||
         errorMessage.includes("bad gateway") ||
         errorMessage.includes("service unavailable") ||
         errorMessage.includes("gateway timeout")

@@ -168,6 +168,87 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("**Agent instruction:**");
     expect(prompt).toContain("Please ship this fix");
   });
+
+  it("uses markdown-rich webhook comment bodyData when body is empty", () => {
+    const prompt = buildPrompt(
+      {
+        identifier: "ENG-126",
+        title: "Real title",
+        description: "Real description",
+        url: "https://linear.app/acme/issue/ENG-126/test",
+      },
+      null,
+      {
+        body: "",
+        bodyData: {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Please include markdown comment context" }],
+            },
+          ],
+        },
+      }
+    );
+
+    expect(prompt).toContain("**Agent instruction:**");
+    expect(prompt).toContain("Please include markdown comment context");
+  });
+
+  it("treats invalid commentMaxLength as unset and keeps comment content", () => {
+    const prompt = buildPrompt(
+      {
+        identifier: "ENG-127",
+        title: "Real title",
+        description: "Real description",
+        url: "https://linear.app/acme/issue/ENG-127/test",
+      },
+      {
+        id: "issue-4",
+        identifier: "ENG-127",
+        title: "Real title",
+        description: "Real description",
+        url: "https://linear.app/acme/issue/ENG-127/test",
+        priority: 0,
+        priorityLabel: "No priority",
+        labels: [],
+        team: { id: "team-1", key: "ENG", name: "Engineering" },
+        comments: [{ body: "Markdown comment that should still appear", user: { name: "Martin" } }],
+      },
+      null,
+      Number.NaN
+    );
+
+    expect(prompt).toContain("**Recent comments:**");
+    expect(prompt).toContain("Markdown comment that should still appear");
+  });
+
+  it("omits empty recent comment blocks", () => {
+    const prompt = buildPrompt(
+      {
+        identifier: "ENG-128",
+        title: "Real title",
+        description: "Real description",
+        url: "https://linear.app/acme/issue/ENG-128/test",
+      },
+      {
+        id: "issue-5",
+        identifier: "ENG-128",
+        title: "Real title",
+        description: "Real description",
+        url: "https://linear.app/acme/issue/ENG-128/test",
+        priority: 0,
+        priorityLabel: "No priority",
+        labels: [],
+        team: { id: "team-1", key: "ENG", name: "Engineering" },
+        comments: [{ body: "", user: { name: "Martin" } }],
+      }
+    );
+
+    expect(prompt).not.toContain("**Recent comments:**");
+    expect(prompt).not.toContain('<user_content source="linear_issue_comment"');
+  });
 });
 
 describe("buildPromptContextPrompt", () => {

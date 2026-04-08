@@ -226,6 +226,22 @@ describe("ModalSandboxProvider", () => {
         }
       });
 
+      it("classifies HTTP 524 as transient", async () => {
+        const client = createMockModalClient({
+          createSandbox: vi.fn(async () => {
+            throw new Error("Modal API error: 524 error code: 524");
+          }),
+        });
+        const provider = new ModalSandboxProvider(client);
+
+        try {
+          await provider.createSandbox(testConfig);
+        } catch (e) {
+          expect(e).toBeInstanceOf(SandboxProviderError);
+          expect((e as SandboxProviderError).errorType).toBe("transient");
+        }
+      });
+
       it("classifies 'bad gateway' (lowercase) as transient", async () => {
         const client = createMockModalClient({
           createSandbox: vi.fn(async () => {
@@ -467,6 +483,23 @@ describe("ModalSandboxProvider", () => {
   });
 
   describe("HTTP status handling", () => {
+    it("classifies HTTP 524 from createSandbox as transient", async () => {
+      const client = createMockModalClient({
+        createSandbox: vi.fn(async () => {
+          throw new ModalApiError("Modal API error: 524 error code: 524", 524);
+        }),
+      });
+      const provider = new ModalSandboxProvider(client);
+
+      try {
+        await provider.createSandbox(testConfig);
+        expect.fail("Should have thrown");
+      } catch (e) {
+        expect(e).toBeInstanceOf(SandboxProviderError);
+        expect((e as SandboxProviderError).errorType).toBe("transient");
+      }
+    });
+
     it("classifies HTTP 502 from restoreFromSnapshot as transient", async () => {
       const client = createMockModalClient({
         restoreSandbox: vi.fn(async () => {
