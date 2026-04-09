@@ -76,10 +76,14 @@ Create `.env.local`:
 # GitHub App (for user authentication)
 GITHUB_CLIENT_ID=your_github_app_client_id
 GITHUB_CLIENT_SECRET=your_github_app_client_secret
+# Optional. Defaults to https://github.com/login/oauth (set for GitHub Enterprise Server).
+GITHUB_ISSUER=https://github.com/login/oauth
 
 # NextAuth
 NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=your_random_secret  # Generate: openssl rand -base64 32
+# Optional alias for some Auth.js/OpenNext environments
+AUTH_SECRET=your_random_secret
 
 # Access Control (optional - leave empty to allow all authenticated users)
 ALLOWED_USERS=username1,username2          # Comma-separated GitHub usernames

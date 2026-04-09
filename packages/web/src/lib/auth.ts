@@ -2,6 +2,16 @@ import type { NextAuthOptions } from "next-auth";
 import GitHubProvider from "next-auth/providers/github";
 import { checkAccessAllowed, parseAllowlist } from "./access-control";
 
+const DEFAULT_GITHUB_ISSUER = "https://github.com/login/oauth";
+
+function resolveGitHubIssuer(rawIssuer: string | undefined): string {
+  const issuer = rawIssuer?.trim();
+  if (!issuer) return DEFAULT_GITHUB_ISSUER;
+  // Backward-compatible normalization for prior docs/env values.
+  if (issuer === "https://github.com") return DEFAULT_GITHUB_ISSUER;
+  return issuer;
+}
+
 // Extend NextAuth types to include GitHub-specific user info
 declare module "next-auth" {
   interface Session {
@@ -40,6 +50,7 @@ export const authOptions: NextAuthOptions = {
     GitHubProvider({
       clientId: process.env.GITHUB_CLIENT_ID!,
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+      issuer: resolveGitHubIssuer(process.env.GITHUB_ISSUER),
       authorization: {
         params: {
           scope: "read:user user:email repo",
