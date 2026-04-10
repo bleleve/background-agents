@@ -388,3 +388,23 @@ variable "allowed_email_domains" {
   type        = string
   default     = ""
 }
+
+variable "langfuse_public_key" {
+  description = "Langfuse public key for OpenCode tracing in sandboxes (optional)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "langfuse_secret_key" {
+  description = "Langfuse secret key for OpenCode tracing in sandboxes (optional)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "langfuse_baseurl" {
+  description = "Langfuse base URL for self-hosted deployments (optional)"
+  type        = string
+  default     = ""
+}

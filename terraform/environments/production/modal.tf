@@ -39,7 +39,10 @@ module "modal_app" {
     {
       name = "llm-api-keys"
       values = {
-        ANTHROPIC_API_KEY = var.anthropic_api_key
+        ANTHROPIC_API_KEY   = var.anthropic_api_key
+        LANGFUSE_PUBLIC_KEY = var.langfuse_public_key
+        LANGFUSE_SECRET_KEY = var.langfuse_secret_key
+        LANGFUSE_BASEURL    = var.langfuse_baseurl
       }
     },
     {

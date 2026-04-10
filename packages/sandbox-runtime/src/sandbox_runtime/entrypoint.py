@@ -68,6 +68,7 @@ class SandboxSupervisor:
     DEFAULT_START_TIMEOUT_SECONDS = 240
     CLONE_DEPTH_COMMITS = 100
     SIDECAR_TIMEOUT_SECONDS = 5
+    LANGFUSE_PLUGIN_NAME = "opencode-plugin-langfuse"
 
     def __init__(self):
         self.opencode_process: asyncio.subprocess.Process | None = None
@@ -554,6 +555,7 @@ class SandboxSupervisor:
             except json.JSONDecodeError:
                 self.log.warn("opencode.user_config_parse_error",
                               reason="Failed to parse OPENCODE_CONFIG_CONTENT, ignoring")
+        self._configure_langfuse(opencode_config)
 
         # Determine working directory - use repo path if cloned, otherwise /workspace
         workdir = self.workspace_path
@@ -604,6 +606,37 @@ class SandboxSupervisor:
         await self._wait_for_health()
         self.opencode_ready.set()
         self.log.info("opencode.ready")
+
+    def _configure_langfuse(self, opencode_config: dict) -> None:
+        """Enable Langfuse OpenCode plugin when required credentials are present."""
+        has_public_key = bool(os.environ.get("LANGFUSE_PUBLIC_KEY"))
+        has_secret_key = bool(os.environ.get("LANGFUSE_SECRET_KEY"))
+
+        if not (has_public_key and has_secret_key):
+            if has_public_key or has_secret_key:
+                self.log.warn(
+                    "langfuse.config_incomplete",
+                    has_public_key=has_public_key,
+                    has_secret_key=has_secret_key,
+                )
+            return
+
+        experimental = opencode_config.get("experimental")
+        if isinstance(experimental, dict):
+            experimental["openTelemetry"] = True
+        else:
+            opencode_config["experimental"] = {"openTelemetry": True}
+
+        plugins = opencode_config.get("plugin")
+        if isinstance(plugins, list):
+            if self.LANGFUSE_PLUGIN_NAME not in plugins:
+                plugins.append(self.LANGFUSE_PLUGIN_NAME)
+        elif isinstance(plugins, str) and plugins:
+            if plugins != self.LANGFUSE_PLUGIN_NAME:
+                opencode_config["plugin"] = [plugins, self.LANGFUSE_PLUGIN_NAME]
+        else:
+            opencode_config["plugin"] = [self.LANGFUSE_PLUGIN_NAME]
+        self.log.info("langfuse.plugin_enabled")
 
     async def _forward_opencode_logs(self) -> None:
         """Forward OpenCode stdout to supervisor stdout."""

@@ -167,6 +167,8 @@ base_image = (
         "npm install -g @opencode-ai/plugin@latest zod",
         "npm install -g oxlint@latest",
         "oxlint --version",
+        # Langfuse OpenCode plugin (loaded when LANGFUSE_* env vars are provided)
+        "npm install -g opencode-plugin-langfuse@latest",
     )
     # Install code-server for browser-based VS Code editing (direct .deb from GitHub releases)
     .run_commands(

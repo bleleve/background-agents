@@ -135,6 +135,7 @@ class AgentBridge:
     HTTP_CONNECT_TIMEOUT = 30.0
     HTTP_DEFAULT_TIMEOUT = 30.0
     OPENCODE_REQUEST_TIMEOUT = 10.0
+    OPENCODE_SESSION_CREATE_TIMEOUT_SECONDS = 60.0
     OPENCODE_STOP_RETRIES = 3
     FINAL_STATE_FETCH_RETRIES = 3
     HTTP_RETRY_BACKOFF_SECONDS = 0.5
@@ -675,10 +676,12 @@ class AgentBridge:
         if not self.http_client:
             raise RuntimeError("HTTP client not initialized")
 
+        # First session creation may trigger OpenCode plugin dependency reification
+        # (for example opencode-plugin-langfuse), which can exceed normal request timeouts.
         resp = await self.http_client.post(
             f"{self.opencode_base_url}/session",
             json={},
-            timeout=self.OPENCODE_REQUEST_TIMEOUT,
+            timeout=self.OPENCODE_SESSION_CREATE_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
         data = resp.json()
