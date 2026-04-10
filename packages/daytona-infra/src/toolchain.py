@@ -9,7 +9,7 @@ from daytona import CreateSnapshotParams, Daytona, Image
 OPENCODE_VERSION = "latest"
 CODE_SERVER_VERSION = "4.109.5"
 AGENT_BROWSER_VERSION = "0.21.2"
-SANDBOX_VERSION = "daytona-v1"
+SANDBOX_VERSION = "daytona-v2-oxlint"
 
 
 def build_base_image(repo_root: Path) -> Image:
@@ -47,6 +47,8 @@ def build_base_image(repo_root: Path) -> Image:
         .run_commands(
             f"npm install -g opencode-ai@{OPENCODE_VERSION}",
             "npm install -g @opencode-ai/plugin@latest zod",
+            "npm install -g oxlint@latest",
+            "oxlint --version",
             f"curl -fsSL -o /tmp/code-server.deb "
             f"https://github.com/coder/code-server/releases/download/v{CODE_SERVER_VERSION}/"
             f"code-server_{CODE_SERVER_VERSION}_amd64.deb",

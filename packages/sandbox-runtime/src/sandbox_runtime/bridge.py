@@ -129,12 +129,17 @@ class AgentBridge:
     HEARTBEAT_INTERVAL = 30.0
     RECONNECT_BACKOFF_BASE = 2.0
     RECONNECT_MAX_DELAY = 60.0
-    SSE_INACTIVITY_TIMEOUT = 120.0
+    SSE_INACTIVITY_TIMEOUT = 300.0
     SSE_INACTIVITY_TIMEOUT_MIN = 5.0
     SSE_INACTIVITY_TIMEOUT_MAX = 3600.0
     HTTP_CONNECT_TIMEOUT = 30.0
     HTTP_DEFAULT_TIMEOUT = 30.0
     OPENCODE_REQUEST_TIMEOUT = 10.0
+    OPENCODE_STOP_RETRIES = 3
+    FINAL_STATE_FETCH_RETRIES = 3
+    HTTP_RETRY_BACKOFF_SECONDS = 0.5
+    SSE_WATCHDOG_INTERVAL_SECONDS = 30.0
+    SSE_EVENT_LOG_SAMPLE_EVERY = 20
     GIT_PUSH_TIMEOUT_SECONDS = 120.0
     GIT_PUSH_TERMINATE_GRACE_SECONDS = 5.0
     PROMPT_MAX_DURATION = 5400.0
@@ -917,6 +922,12 @@ class AgentBridge:
 
         start_time = time.time()
         loop = asyncio.get_running_loop()
+        last_event_at = loop.time()
+        last_event_type = "none"
+        event_type_counts: dict[str, int] = {}
+        heartbeat_count = 0
+        event_count = 0
+        watchdog_task: asyncio.Task[None] | None = None
 
         def buffer_part(oc_msg_id: str, part: dict[str, Any], delta: Any) -> None:
             nonlocal pending_parts_total
@@ -998,7 +1009,23 @@ class AgentBridge:
                     ev["isSubtask"] = True
             return events
 
+        async def emit_watchdog() -> None:
+            while True:
+                await asyncio.sleep(self.SSE_WATCHDOG_INTERVAL_SECONDS)
+                now_loop = loop.time()
+                self.log.info(
+                    "bridge.sse_watchdog",
+                    message_id=message_id,
+                    elapsed_ms=int((time.time() - start_time) * 1000),
+                    last_event_type=last_event_type,
+                    last_event_age_ms=int((now_loop - last_event_at) * 1000),
+                    heartbeat_count=heartbeat_count,
+                    pending_parts_total=pending_parts_total,
+                    tracked_child_sessions=len(tracked_child_session_ids),
+                )
+
         try:
+            watchdog_task = asyncio.create_task(emit_watchdog())
             deadline = asyncio.get_running_loop().time() + self.sse_inactivity_timeout
             async with asyncio.timeout_at(deadline) as timeout_ctx:
                 async with self.http_client.stream(
@@ -1012,10 +1039,24 @@ class AgentBridge:
                         )
 
                     prompt_start = loop.time()
+                    prompt_request_start = loop.time()
+                    self.log.info(
+                        "bridge.prompt_async_request_start",
+                        message_id=message_id,
+                        timeout_ms=int(self.OPENCODE_REQUEST_TIMEOUT * 1000),
+                    )
                     prompt_response = await self.http_client.post(
                         async_url,
                         json=request_body,
                         timeout=self.OPENCODE_REQUEST_TIMEOUT,
+                    )
+                    prompt_request_latency_ms = int((loop.time() - prompt_request_start) * 1000)
+                    self.log.info(
+                        "bridge.prompt_async_request_complete",
+                        message_id=message_id,
+                        status_code=prompt_response.status_code,
+                        latency_ms=prompt_request_latency_ms,
+                        response_size_bytes=len(prompt_response.content or b""),
                     )
                     if prompt_response.status_code not in [200, 204]:
                         error_body = prompt_response.text
@@ -1031,6 +1072,30 @@ class AgentBridge:
                     async for event in self._parse_sse_stream(sse_response, timeout_ctx):
                         event_type = event.get("type")
                         props = event.get("properties", {})
+                        event_type_name = event_type if isinstance(event_type, str) else "unknown"
+                        event_session_id = props.get("sessionID") or props.get("part", {}).get(
+                            "sessionID"
+                        )
+                        now_loop = loop.time()
+                        since_last_chunk_ms = int((now_loop - last_event_at) * 1000)
+                        last_event_at = now_loop
+                        last_event_type = event_type_name
+                        event_type_counts[event_type_name] = event_type_counts.get(event_type_name, 0) + 1
+                        event_count += 1
+                        if event_type_name == "server.heartbeat":
+                            heartbeat_count += 1
+
+                        if event_count % self.SSE_EVENT_LOG_SAMPLE_EVERY == 0:
+                            self.log.info(
+                                "bridge.sse_event_received",
+                                message_id=message_id,
+                                event_type=event_type_name,
+                                event_session_id=event_session_id,
+                                raw_event_bytes=len(
+                                    json.dumps(event, separators=(",", ":"), ensure_ascii=False)
+                                ),
+                                since_last_chunk_ms=since_last_chunk_ms,
+                            )
 
                         if event_type == "server.connected":
                             pass
@@ -1258,6 +1323,7 @@ class AgentBridge:
 
         except TimeoutError:
             elapsed = time.time() - start_time
+            now_loop = loop.time()
             self.log.error(
                 "bridge.sse_inactivity_timeout",
                 timeout_name="sse_inactivity",
@@ -1265,6 +1331,18 @@ class AgentBridge:
                 elapsed_ms=int(elapsed * 1000),
                 operation="bridge.sse",
                 message_id=message_id,
+            )
+            self.log.error(
+                "bridge.sse_timeout_snapshot",
+                message_id=message_id,
+                last_event_type=last_event_type,
+                last_event_age_ms=int((now_loop - last_event_at) * 1000),
+                heartbeat_count=heartbeat_count,
+                event_type_counts=event_type_counts,
+                allowed_assistant_msg_ids_count=len(allowed_assistant_msg_ids),
+                pending_parts_total=pending_parts_total,
+                tracked_child_sessions=len(tracked_child_session_ids),
+                compaction_occurred=compaction_occurred,
             )
             await self._request_opencode_stop(reason="inactivity_timeout")
             async for final_event in self._fetch_final_message_state(
@@ -1283,6 +1361,11 @@ class AgentBridge:
         except httpx.ReadError as e:
             self.log.error("bridge.sse_read_error", exc=e)
             raise SSEConnectionError(f"SSE read error: {e}")
+        finally:
+            if watchdog_task:
+                watchdog_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await watchdog_task
 
     async def _fetch_final_message_state(
         self,

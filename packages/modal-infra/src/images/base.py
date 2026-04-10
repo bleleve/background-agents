@@ -36,8 +36,8 @@ TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 RWX_VERSION = "3.12.0"
 
 # Cache buster - change this to force Modal image rebuild
-# v51: rwx 3.12.0 + ttyd + deb-native CLIs (gh/tofu/rwx)
-CACHE_BUSTER = "v51-ttyd-rwx-3.12.0"
+# v52: add global oxlint + rwx 3.12.0 + ttyd + deb-native CLIs (gh/tofu/rwx)
+CACHE_BUSTER = "v52-oxlint-ttyd-rwx-3.12.0"
 
 # Base image with all development tools
 base_image = (
@@ -165,6 +165,8 @@ base_image = (
         # Install @opencode-ai/plugin globally for custom tools
         # This ensures tools can import the plugin without needing to run bun add
         "npm install -g @opencode-ai/plugin@latest zod",
+        "npm install -g oxlint@latest",
+        "oxlint --version",
     )
     # Install code-server for browser-based VS Code editing (direct .deb from GitHub releases)
     .run_commands(
