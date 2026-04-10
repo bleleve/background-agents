@@ -49,22 +49,39 @@ export function buildCodeReviewPrompt(params: {
   const { owner, repo, number, title, body, author, base, head, isPublic, codeReviewInstructions } =
     params;
 
-  // Temporarily disable PR review submission. Restore these instructions when
-  // the bot should submit a GitHub review again.
-  // gh api repos/${owner}/${repo}/pulls/${number}/reviews \
-  //   --method POST \
-  //   -f body="<your review summary>" \
-  //   -f event="COMMENT|APPROVE|REQUEST_CHANGES"
+  const prTitleBlock = buildUntrustedUserContentBlock({
+    source: "github_pr_title",
+    author: "github",
+    content: title,
+  });
+  const prAuthorBlock = buildUntrustedUserContentBlock({
+    source: "github_pr_author",
+    author: "github",
+    content: `@${author}`,
+  });
+  const prBranchesBlock = buildUntrustedUserContentBlock({
+    source: "github_pr_branches",
+    author: "github",
+    content: `base: ${base}\nhead: ${head}`,
+  });
+  const prDescriptionBlock = buildUntrustedUserContentBlock({
+    source: "github_pr_description",
+    author: "github",
+    content: body ?? "_No description provided._",
+  });
 
   return `You are reviewing Pull Request #${number} in ${owner}/${repo}.
-The repository has been cloned and you are on the ${head} branch.
+The repository has been cloned and you are on the PR head branch.
 
 ## PR Details
-- **Title**: ${title}
-- **Author**: @${author}
-- **Branch**: ${base} ← ${head}
+- **Title**:
+${prTitleBlock}
+- **Author**:
+${prAuthorBlock}
+- **Branches**:
+${prBranchesBlock}
 - **Description**:
-${body ?? "_No description provided._"}
+${prDescriptionBlock}
 
 ## Instructions
 1. Run \`gh pr diff ${number}\` to see the full diff
@@ -164,5 +181,86 @@ ${buildUntrustedUserContentBlock({
      --method POST \\
      -f body="<summary of what you did or your response>"${replyInstruction}
 ${buildCustomInstructionsSection(commentActionInstructions)}
+${buildCommentGuidelines(isPublic)}`;
+}
+
+export function buildFailedChecksPrompt(params: {
+  owner: string;
+  repo: string;
+  number: number;
+  title: string;
+  author: string;
+  base: string;
+  head: string;
+  attempt: number;
+  maxAttempts: number;
+  checkSuiteConclusion: string;
+  isPublic: boolean;
+}): string {
+  const {
+    owner,
+    repo,
+    number,
+    title,
+    author,
+    base,
+    head,
+    attempt,
+    maxAttempts,
+    checkSuiteConclusion,
+    isPublic,
+  } = params;
+
+  const prTitleBlock = buildUntrustedUserContentBlock({
+    source: "github_pr_title",
+    author: "github",
+    content: title,
+  });
+  const prAuthorBlock = buildUntrustedUserContentBlock({
+    source: "github_pr_author",
+    author: "github",
+    content: `@${author}`,
+  });
+  const prBranchesBlock = buildUntrustedUserContentBlock({
+    source: "github_pr_branches",
+    author: "github",
+    content: `base: ${base}\nhead: ${head}`,
+  });
+  const checkConclusionBlock = buildUntrustedUserContentBlock({
+    source: "github_check_suite_conclusion",
+    author: "github",
+    content: checkSuiteConclusion,
+  });
+
+  return `You are fixing failed CI checks for Pull Request #${number} in ${owner}/${repo}.
+The repository has been cloned and you are on the PR head branch.
+
+## Iteration
+- This is auto-fix attempt ${attempt} of ${maxAttempts} for this PR.
+
+## PR Details
+- **Title**:
+${prTitleBlock}
+- **Author**:
+${prAuthorBlock}
+- **Branches**:
+${prBranchesBlock}
+- **Check Suite Conclusion**:
+${checkConclusionBlock}
+
+## Instructions
+1. Inspect failing checks for this PR:
+   - Run \`gh pr checks ${number}\`
+   - Inspect failing workflow logs as needed (for example with \`gh run list\` and \`gh run view --log-failed\`)
+2. Make the smallest safe code changes needed to fix the failures.
+3. Run relevant local validation (tests/lint/typecheck) for the failures you fixed.
+4. Commit your changes to the current PR branch and push.
+5. Do not open a new PR. Update this existing PR branch only.
+6. After pushing, post a short summary comment on the PR:
+
+   gh api repos/${owner}/${repo}/issues/${number}/comments \\
+     --method POST \\
+     -f body="<what failed, what you changed, and what you validated>"
+
 ${buildCommentGuidelines(isPublic)}`;
 }

@@ -106,3 +106,13 @@ export interface ReviewCommentPayload {
   repository: { owner: { login: string }; name: string; private: boolean };
   sender: { login: string };
 }
+
+export interface CheckSuiteCompletedPayload {
+  action: "completed";
+  check_suite: {
+    conclusion: string | null;
+    pull_requests: Array<{ number: number }>;
+  };
+  repository: { owner: { login: string }; name: string; private: boolean };
+  sender: { login: string };
+}

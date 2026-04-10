@@ -4,10 +4,16 @@ import type {
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
+  CheckSuiteCompletedPayload,
 } from "./types";
 import type { Logger } from "./logger";
+import { extractSessionIdFromBranch } from "@open-inspect/shared";
 import { generateInstallationToken, postReaction, checkSenderPermission } from "./github-auth";
-import { buildCodeReviewPrompt, buildCommentActionPrompt } from "./prompts";
+import {
+  buildCodeReviewPrompt,
+  buildCommentActionPrompt,
+  buildFailedChecksPrompt,
+} from "./prompts";
 import { buildInternalAuthHeaders } from "./utils/internal";
 import { getGitHubConfig, type ResolvedGitHubConfig } from "./utils/integration-config";
 
@@ -126,6 +132,73 @@ function fireAndForgetReaction(
     },
     () => log.warn("acknowledgment.failed", meta)
   );
+}
+
+const FAILED_CHECK_SUITE_CONCLUSIONS = new Set([
+  "failure",
+  "timed_out",
+  "cancelled",
+  "action_required",
+  "startup_failure",
+]);
+const MAX_FAILED_CHECK_FIX_ATTEMPTS = 3;
+const FAILED_CHECK_FIX_COUNTER_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+interface GitHubPullRequestDetails {
+  number: number;
+  title: string;
+  body: string | null;
+  user: { login: string };
+  head: { ref: string; sha: string };
+  base: { ref: string };
+  draft: boolean;
+  state: string;
+}
+
+function getFailedCheckAttemptKey(repoFullName: string, pullNumber: number): string {
+  return `failed-check-fix:${repoFullName}:pr:${pullNumber}`;
+}
+
+async function readFailedCheckAttempt(
+  env: Env,
+  repoFullName: string,
+  pullNumber: number
+): Promise<number> {
+  const rawAttempt = await env.GITHUB_KV.get(getFailedCheckAttemptKey(repoFullName, pullNumber));
+  const parsedAttempt = Number.parseInt(rawAttempt ?? "0", 10);
+  return Number.isFinite(parsedAttempt) && parsedAttempt >= 0 ? parsedAttempt : 0;
+}
+
+async function writeFailedCheckAttempt(
+  env: Env,
+  repoFullName: string,
+  pullNumber: number,
+  attempt: number
+): Promise<void> {
+  await env.GITHUB_KV.put(getFailedCheckAttemptKey(repoFullName, pullNumber), String(attempt), {
+    expirationTtl: FAILED_CHECK_FIX_COUNTER_TTL_SECONDS,
+  });
+}
+
+async function fetchPullRequestDetails(
+  token: string,
+  owner: string,
+  repo: string,
+  pullNumber: number
+): Promise<GitHubPullRequestDetails | null> {
+  const response = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${pullNumber}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Open-Inspect",
+      },
+    }
+  );
+  if (!response.ok) return null;
+  return (await response.json()) as GitHubPullRequestDetails;
 }
 
 type CallerGatingResult =
@@ -368,6 +441,153 @@ export async function handlePullRequestOpened(
     message_id: messageId,
     handler_action: "auto_review",
   };
+}
+
+export async function handleCheckSuiteCompleted(
+  env: Env,
+  log: Logger,
+  payload: CheckSuiteCompletedPayload,
+  traceId: string
+): Promise<HandlerResult> {
+  const { check_suite: checkSuite, repository: repo } = payload;
+  const owner = repo.owner.login;
+  const repoName = repo.name;
+  const repoFullName = `${owner}/${repoName}`.toLowerCase();
+  const conclusion = checkSuite.conclusion;
+
+  if (!conclusion || !FAILED_CHECK_SUITE_CONCLUSIONS.has(conclusion)) {
+    log.debug("handler.non_failed_check_suite", {
+      trace_id: traceId,
+      repo: repoFullName,
+      conclusion,
+    });
+    return { outcome: "skipped", skip_reason: "non_failed_check_suite" };
+  }
+
+  if (!checkSuite.pull_requests.length) {
+    log.debug("handler.check_suite_no_pull_requests", {
+      trace_id: traceId,
+      repo: repoFullName,
+      conclusion,
+    });
+    return { outcome: "skipped", skip_reason: "no_pull_requests" };
+  }
+
+  const config = await getGitHubConfig(env, repoFullName, log);
+  if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
+    log.debug("handler.repo_not_enabled", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "repo_not_enabled" };
+  }
+
+  const [ghToken, headers] = await Promise.all([
+    generateInstallationToken({
+      appId: env.GITHUB_APP_ID,
+      privateKey: env.GITHUB_APP_PRIVATE_KEY,
+      installationId: env.GITHUB_APP_INSTALLATION_ID,
+    }),
+    getAuthHeaders(env, traceId),
+  ]);
+
+  for (const pullRef of checkSuite.pull_requests) {
+    const pullNumber = pullRef.number;
+    const pr = await fetchPullRequestDetails(ghToken, owner, repoName, pullNumber);
+    if (!pr) {
+      log.warn("handler.failed_check_pr_fetch_failed", {
+        trace_id: traceId,
+        repo: repoFullName,
+        pull_number: pullNumber,
+      });
+      continue;
+    }
+
+    if (pr.state !== "open") {
+      log.debug("handler.failed_check_pr_not_open", {
+        trace_id: traceId,
+        repo: repoFullName,
+        pull_number: pullNumber,
+        pr_state: pr.state,
+      });
+      continue;
+    }
+
+    const sessionId = extractSessionIdFromBranch(pr.head.ref);
+    if (!sessionId) {
+      log.debug("handler.failed_check_branch_not_session_branch", {
+        trace_id: traceId,
+        repo: repoFullName,
+        pull_number: pullNumber,
+        head_ref: pr.head.ref,
+      });
+      continue;
+    }
+
+    const currentAttempt = await readFailedCheckAttempt(env, repoFullName, pullNumber);
+    if (currentAttempt >= MAX_FAILED_CHECK_FIX_ATTEMPTS) {
+      log.info("handler.failed_check_max_attempts_reached", {
+        trace_id: traceId,
+        repo: repoFullName,
+        pull_number: pullNumber,
+        max_attempts: MAX_FAILED_CHECK_FIX_ATTEMPTS,
+      });
+      return { outcome: "skipped", skip_reason: "max_failed_check_attempts_reached" };
+    }
+
+    const nextAttempt = currentAttempt + 1;
+    await writeFailedCheckAttempt(env, repoFullName, pullNumber, nextAttempt);
+
+    const meta = {
+      trace_id: traceId,
+      repo: repoFullName,
+      pull_number: pullNumber,
+      check_suite_conclusion: conclusion,
+      attempt: nextAttempt,
+      max_attempts: MAX_FAILED_CHECK_FIX_ATTEMPTS,
+    };
+
+    fireAndForgetReaction(
+      log,
+      ghToken,
+      `https://api.github.com/repos/${owner}/${repoName}/issues/${pullNumber}/reactions`,
+      meta
+    );
+
+    log.info("session.reused", { ...meta, session_id: sessionId, action: "failed_checks" });
+
+    const prompt = buildFailedChecksPrompt({
+      owner,
+      repo: repoName,
+      number: pullNumber,
+      title: pr.title,
+      author: pr.user.login,
+      base: pr.base.ref,
+      head: pr.head.ref,
+      attempt: nextAttempt,
+      maxAttempts: MAX_FAILED_CHECK_FIX_ATTEMPTS,
+      checkSuiteConclusion: conclusion,
+      isPublic: !repo.private,
+    });
+
+    const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
+      content: prompt,
+      authorId: `github:${env.GITHUB_BOT_USERNAME}`,
+    });
+    log.info("prompt.sent", {
+      ...meta,
+      session_id: sessionId,
+      message_id: messageId,
+      source: "github",
+      content_length: prompt.length,
+    });
+
+    return {
+      outcome: "processed",
+      session_id: sessionId,
+      message_id: messageId,
+      handler_action: "failed_checks",
+    };
+  }
+
+  return { outcome: "skipped", skip_reason: "no_eligible_pull_request" };
 }
 
 export async function handleIssueComment(
