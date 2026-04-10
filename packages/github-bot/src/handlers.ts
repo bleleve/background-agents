@@ -134,13 +134,7 @@ function fireAndForgetReaction(
   );
 }
 
-const FAILED_CHECK_SUITE_CONCLUSIONS = new Set([
-  "failure",
-  "timed_out",
-  "cancelled",
-  "action_required",
-  "startup_failure",
-]);
+const FAILED_CHECK_SUITE_CONCLUSIONS = new Set(["failure"]);
 const MAX_FAILED_CHECK_FIX_ATTEMPTS = 3;
 const FAILED_CHECK_FIX_COUNTER_TTL_SECONDS = 30 * 24 * 60 * 60;
 

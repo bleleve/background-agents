@@ -14,6 +14,39 @@ function buildCommentGuidelines(isPublicRepo: boolean): string {
 - Compose your full response before posting any comments.`;
 }
 
+function buildInlineSuggestionWorkflow(params: {
+  owner: string;
+  repo: string;
+  number: number;
+}): string {
+  const { owner, repo, number } = params;
+  return `- Find the exact fix line in a file that is part of the PR diff (line must be on the RIGHT side).
+- Get PR head SHA for \`commit_id\`:
+
+   SHA="$(gh pr view ${number} --repo ${owner}/${repo} --json headRefOid --jq .headRefOid)"
+
+- Write the markdown body to a temp file (to avoid escaping bugs):
+
+   cat >/tmp/pr-suggestion.md <<'EOF'
+   <what is wrong and why>
+
+   \`\`\`suggestion
+   <replacement code with exact indentation>
+   \`\`\`
+   EOF
+
+- Post the inline review comment:
+
+   gh api -X POST "repos/${owner}/${repo}/pulls/${number}/comments" \\
+     -f commit_id="$SHA" \\
+     -f path="<file path from PR diff>" \\
+     -F line="<line number on RIGHT side>" \\
+     -f side="RIGHT" \\
+     -F body=@/tmp/pr-suggestion.md
+
+- Confirm the API response \`html_url\` is a diff comment with an **Apply suggestion** button.`;
+}
+
 function buildUntrustedUserContentBlock(params: {
   source: string;
   author: string;
@@ -92,16 +125,10 @@ ${prDescriptionBlock}
    - Code clarity and maintainability
 3. You may read individual files in the repo for additional context beyond the diff
 4. Do not submit a pull request review.
-5. Leave feedback only as inline comments on specific changed files/lines when you find an issue worth calling out.
-6. For each inline comment you post, use:
+5. Leave feedback only as inline suggestion comments on specific changed files/lines when you find an issue worth calling out.
+6. For each inline suggestion comment, use this flow:
 
-   gh api repos/${owner}/${repo}/pulls/${number}/comments \\
-     --method POST \\
-     -f body="<comment>" \\
-     -f path="<file path>" \\
-     -f commit_id="$(gh api repos/${owner}/${repo}/pulls/${number} --jq '.head.sha')" \\
-     -f line=<line number> \\
-     -f side="RIGHT"
+${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
 7. If you do not find any actionable file-specific feedback, do not submit a review or a general PR comment.
 ${buildCustomInstructionsSection(codeReviewInstructions)}
@@ -157,7 +184,7 @@ export function buildCommentActionPrompt(params: {
 
   let replyInstruction = "";
   if (commentId) {
-    replyInstruction = `\n5. If you need to reply to the specific review thread:\n\n   gh api repos/${owner}/${repo}/pulls/${number}/comments/${commentId}/replies \\\n     --method POST \\\n     -f body="<your reply>"`;
+    replyInstruction = `\n6. If you need to reply to the specific review thread:\n\n   gh api repos/${owner}/${repo}/pulls/${number}/comments/${commentId}/replies \\\n     --method POST \\\n     -f body="<your reply>"`;
   }
 
   return `${intro}${prDetails}${codeLocation}
@@ -174,12 +201,13 @@ ${buildUntrustedUserContentBlock({
 2. Run \`gh pr view ${number} --comments\` to see prior conversation on this PR
 3. Address the request:
    - If code changes are needed, make them and push to the current branch
-   - If it's a question, respond with your analysis
-4. When done, post a summary comment on the PR:
+   - If it's a question, reply in-thread when possible
+4. For code feedback to the PR author, post inline suggestion comments (not top-level PR comments) using this flow:
 
-   gh api repos/${owner}/${repo}/issues/${number}/comments \\
-     --method POST \\
-     -f body="<summary of what you did or your response>"${replyInstruction}
+${buildInlineSuggestionWorkflow({ owner, repo, number })}
+
+5. Do not post summary issue comments on the PR.
+${replyInstruction}
 ${buildCustomInstructionsSection(commentActionInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
 }
@@ -256,11 +284,9 @@ ${checkConclusionBlock}
 3. Run relevant local validation (tests/lint/typecheck) for the failures you fixed.
 4. Commit your changes to the current PR branch and push.
 5. Do not open a new PR. Update this existing PR branch only.
-6. After pushing, post a short summary comment on the PR:
+6. When you need to ask the PR author to apply a code change manually, post an inline suggestion comment (not a top-level PR comment) using this flow:
 
-   gh api repos/${owner}/${repo}/issues/${number}/comments \\
-     --method POST \\
-     -f body="<what failed, what you changed, and what you validated>"
+${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
 ${buildCommentGuidelines(isPublic)}`;
 }

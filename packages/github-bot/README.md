@@ -165,21 +165,31 @@ mechanism as the Slack bot). The token is sent as a `Bearer` token in the `Autho
 
 ## Prompt Construction
 
-Two prompt templates in `src/prompts.ts`:
+Three prompt templates in `src/prompts.ts`:
 
 **`buildCodeReviewPrompt`** — Includes PR title, body, author, branches, and instructions to:
 
 - Run `gh pr diff` for the full diff
 - Avoid submitting a review via `gh api .../reviews` for now
-- Post inline comments via `gh api .../comments`
+- Post inline `suggestion` comments via `gh api .../pulls/{n}/comments`
+- Use `gh pr view ... --json headRefOid` for `commit_id`, temp markdown files for body, and
+  `side=RIGHT`
 
 **`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and
 instructions to:
 
 - Check prior conversation via `gh pr view --comments`
 - Make code changes and push, or respond with analysis
-- Post a summary comment via `gh api .../issues/{n}/comments`
+- Post inline `suggestion` comments via `gh api .../pulls/{n}/comments` (instead of summary PR
+  comments)
 - Reply to a specific review thread (when `commentId` is present)
+
+**`buildFailedChecksPrompt`** — Includes check context and instructions to:
+
+- Inspect failing checks and logs
+- Make minimal safe fixes and validate locally
+- Push fixes to the existing PR branch
+- Use inline `suggestion` comments for any manual follow-up code changes the PR author must apply
 
 The prompts embed only metadata from the webhook payload. The agent gathers everything else.
 
