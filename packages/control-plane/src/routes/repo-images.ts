@@ -30,6 +30,7 @@ import {
 } from "./shared";
 
 const logger = createLogger("router:repo-images");
+const DEFAULT_IMAGE_BUILD_BRANCH = "main";
 
 function requireModalRepoImages(env: Env): Response | null {
   if (isModalSandboxBackend(env.SANDBOX_PROVIDER)) {
@@ -202,12 +203,44 @@ async function handleTriggerBuild(
   const buildId = `img-${owner}-${name}-${now}`;
 
   try {
+    // Resolve repo once so we can use the real default branch when available.
+    let resolvedRepo: { repoId: number; defaultBranch: string } | null = null;
+    let defaultBranch = DEFAULT_IMAGE_BUILD_BRANCH;
+    try {
+      const provider = createRouteSourceControlProvider(env);
+      const resolved = await resolveInstalledRepo(provider, owner, name);
+      if (resolved) {
+        resolvedRepo = {
+          repoId: resolved.repoId,
+          defaultBranch: resolved.defaultBranch,
+        };
+        defaultBranch = resolved.defaultBranch || DEFAULT_IMAGE_BUILD_BRANCH;
+      } else {
+        logger.warn("repo_image.repo_not_installed", {
+          repo_owner: owner,
+          repo_name: name,
+          fallback_branch: defaultBranch,
+          request_id: ctx.request_id,
+          trace_id: ctx.trace_id,
+        });
+      }
+    } catch (e) {
+      logger.warn("repo_image.default_branch_resolve_failed", {
+        error: e instanceof Error ? e.message : String(e),
+        repo_owner: owner,
+        repo_name: name,
+        fallback_branch: defaultBranch,
+        request_id: ctx.request_id,
+        trace_id: ctx.trace_id,
+      });
+    }
+
     // Register the build in D1
     await store.registerBuild({
       id: buildId,
       repoOwner: owner,
       repoName: name,
-      baseBranch: "main",
+      baseBranch: defaultBranch,
     });
 
     // Construct callback URL
@@ -230,11 +263,9 @@ async function handleTriggerBuild(
 
       let repoSecrets: Record<string, string> = {};
       try {
-        const provider = createRouteSourceControlProvider(env);
-        const resolved = await resolveInstalledRepo(provider, owner, name);
-        if (resolved) {
+        if (resolvedRepo) {
           const repoStore = new RepoSecretsStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY);
-          repoSecrets = await repoStore.getDecryptedSecrets(resolved.repoId);
+          repoSecrets = await repoStore.getDecryptedSecrets(resolvedRepo.repoId);
         }
       } catch (e) {
         logger.warn("repo_image.repo_secrets_failed", {
@@ -266,7 +297,7 @@ async function handleTriggerBuild(
       {
         repoOwner: owner,
         repoName: name,
-        defaultBranch: "main",
+        defaultBranch,
         buildId,
         callbackUrl,
         userEnvVars,
@@ -278,6 +309,7 @@ async function handleTriggerBuild(
       build_id: buildId,
       repo_owner: owner,
       repo_name: name,
+      base_branch: defaultBranch,
       request_id: ctx.request_id,
       trace_id: ctx.trace_id,
     });

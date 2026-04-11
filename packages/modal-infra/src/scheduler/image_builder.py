@@ -343,7 +343,9 @@ def _git_ls_remote_sha(
     clone_token: str,
 ) -> str | None:
     """
-    Run git ls-remote to get the HEAD SHA for a branch.
+    Run git ls-remote to get the SHA for a ref.
+
+    `branch="HEAD"` queries the repository's default branch tip.
 
     Returns the SHA string, or None on failure.
     """
@@ -353,8 +355,9 @@ def _git_ls_remote_sha(
         url = f"https://github.com/{repo_owner}/{repo_name}.git"
 
     try:
+        ref = "HEAD" if branch == "HEAD" else f"refs/heads/{branch}"
         result = subprocess.run(
-            ["git", "ls-remote", url, f"refs/heads/{branch}"],
+            ["git", "ls-remote", url, ref],
             capture_output=True,
             text=True,
             timeout=30,
@@ -491,11 +494,12 @@ async def rebuild_repo_images():
         for repo in enabled_repos:
             repo_owner = repo.get("repoOwner", "")
             repo_name = repo.get("repoName", "")
+            default_branch = repo.get("defaultBranch", "HEAD")
 
             if not repo_owner or not repo_name:
                 continue
 
-            remote_sha = _git_ls_remote_sha(repo_owner, repo_name, "main", clone_token)
+            remote_sha = _git_ls_remote_sha(repo_owner, repo_name, default_branch, clone_token)
             if not remote_sha:
                 continue
 

@@ -33,11 +33,11 @@ TTYD_VERSION = "1.7.7"
 TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 
 # rwx CLI — pinned Linux x86_64 binary; see https://github.com/rwx-cloud/rwx/releases
-RWX_VERSION = "3.12.0"
+RWX_VERSION = "3.13.0"
 
 # Cache buster - change this to force Modal image rebuild
-# v52: add global oxlint + rwx 3.12.0 + ttyd + deb-native CLIs (gh/tofu/rwx)
-CACHE_BUSTER = "v52-oxlint-ttyd-rwx-3.12.0"
+# v54
+CACHE_BUSTER = "v54-locales-all"
 
 # Base image with all development tools
 base_image = (
