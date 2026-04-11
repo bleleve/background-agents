@@ -37,7 +37,7 @@ RWX_VERSION = "3.13.0"
 
 # Cache buster - change this to force Modal image rebuild
 # v54
-CACHE_BUSTER = "v54-locales-all"
+CACHE_BUSTER = "v55-locales-all"
 
 # Base image with all development tools
 base_image = (
@@ -52,6 +52,8 @@ base_image = (
         "openssh-client",
         "apt-transport-https",
         "jq",
+        "locales",
+        "locales-all",
         "unzip",  # Required for Bun installation
         # Shared libraries required by headless Chromium
         "libnss3",
