@@ -188,7 +188,7 @@ docker compose up -d postgres redis
 - `start.sh` runs for every non-build session startup (fresh, repo-image, snapshot-restore)
 - `start.sh` failures are strict: if present and it fails, session startup fails
 - Default timeouts:
-  - `SETUP_TIMEOUT_SECONDS` (default `300`)
+  - `SETUP_TIMEOUT_SECONDS` (default `1800`)
   - `START_TIMEOUT_SECONDS` (default `120`)
 - Both hooks receive `OPENINSPECT_BOOT_MODE` (`build`, `fresh`, `repo_image`, `snapshot_restore`)
 

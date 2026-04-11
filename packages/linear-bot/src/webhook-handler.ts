@@ -148,6 +148,13 @@ async function handleStop(webhook: AgentSessionWebhook, env: Env, traceId: strin
   const agentSessionId = webhook.agentSession.id;
   const issueId = webhook.agentSession.issue?.id;
 
+  if (!issueId) {
+    log.warn("agent_session.stop_missing_issue", {
+      trace_id: traceId,
+      agent_session_id: agentSessionId,
+    });
+  }
+
   if (issueId) {
     const existingSession = await lookupIssueSession(env, issueId);
     if (existingSession) {
@@ -172,6 +179,12 @@ async function handleStop(webhook: AgentSessionWebhook, env: Env, traceId: strin
         });
       }
       await env.LINEAR_KV.delete(`issue:${issueId}`);
+    } else {
+      log.info("agent_session.stop_without_existing_session", {
+        trace_id: traceId,
+        issue_id: issueId,
+        agent_session_id: agentSessionId,
+      });
     }
   }
 
@@ -195,6 +208,15 @@ async function handleFollowUp(
   const agentActivity = webhook.agentActivity;
   const orgId = webhook.organizationId;
 
+  log.info("agent_session.followup_received", {
+    trace_id: traceId,
+    issue_id: issue.id,
+    issue_identifier: issue.identifier,
+    agent_session_id: agentSessionId,
+    has_agent_activity: Boolean(agentActivity?.body),
+    has_comment: Boolean(comment),
+  });
+
   const client = await getLinearClient(env, orgId);
   if (!client) {
     log.error("agent_session.no_oauth_token", {
@@ -206,7 +228,15 @@ async function handleFollowUp(
   }
 
   const existingSession = await lookupIssueSession(env, issue.id);
-  if (!existingSession) return;
+  if (!existingSession) {
+    log.warn("agent_session.followup_missing_existing_session", {
+      trace_id: traceId,
+      issue_id: issue.id,
+      issue_identifier: issue.identifier,
+      agent_session_id: agentSessionId,
+    });
+    return;
+  }
 
   const normalizedCommentBody = comment ? normalizeLinearCommentBody(comment) : "";
   const followUpContent = agentActivity?.body || normalizedCommentBody || "Follow-up on the issue.";
@@ -242,9 +272,30 @@ async function handleFollowUp(
           sessionContextSummary = lastContent.slice(0, 500);
         }
       }
+    } else {
+      log.warn("control_plane.fetch_events_failed", {
+        trace_id: traceId,
+        session_id: existingSession.sessionId,
+        issue_identifier: issue.identifier,
+        http_status: eventsRes.status,
+      });
     }
-  } catch {
-    /* best effort */
+  } catch (error) {
+    log.warn("control_plane.fetch_events_failed", {
+      trace_id: traceId,
+      session_id: existingSession.sessionId,
+      issue_identifier: issue.identifier,
+      error: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+
+  if (!webhook.appUserId) {
+    log.warn("agent_session.missing_app_user_id", {
+      trace_id: traceId,
+      issue_identifier: issue.identifier,
+      agent_session_id: agentSessionId,
+      mode: "follow_up",
+    });
   }
 
   const promptRes = await env.CONTROL_PLANE.fetch(
@@ -272,9 +323,23 @@ async function handleFollowUp(
       body: `Follow-up sent to existing session.\n\n[View session](${env.WEB_APP_URL}/session/${existingSession.sessionId})`,
     });
   } else {
+    let promptErrBody = "";
+    try {
+      promptErrBody = await promptRes.text();
+    } catch {
+      /* ignore */
+    }
     await emitAgentActivity(client, agentSessionId, {
       type: "error",
       body: "Failed to send follow-up to the existing session.",
+    });
+    log.error("control_plane.send_followup_prompt", {
+      trace_id: traceId,
+      session_id: existingSession.sessionId,
+      issue_identifier: issue.identifier,
+      http_status: promptRes.status,
+      response_body: promptErrBody.slice(0, 500),
+      duration_ms: Date.now() - startTime,
     });
   }
 
@@ -322,6 +387,14 @@ async function handleNewSession(
 
   // Fetch full issue details for context
   const issueDetails = await fetchIssueDetails(client, issue.id);
+  if (!issueDetails) {
+    log.warn("linear.issue_details_missing", {
+      trace_id: traceId,
+      issue_id: issue.id,
+      issue_identifier: issue.identifier,
+      agent_session_id: agentSessionId,
+    });
+  }
   const labels = issueDetails?.labels || issue.labels || [];
   const labelNames = labels.map((l) => l.name);
   const projectInfo = issueDetails?.project || issue.project;
@@ -464,6 +537,14 @@ async function handleNewSession(
   let userModel: string | undefined;
   let userReasoningEffort: string | undefined;
   const appUserId = webhook.appUserId;
+  if (!appUserId) {
+    log.warn("agent_session.missing_app_user_id", {
+      trace_id: traceId,
+      issue_identifier: issue.identifier,
+      agent_session_id: agentSessionId,
+      mode: "new_session",
+    });
+  }
   if (appUserId) {
     const prefs = await getUserPreferences(env, appUserId);
     if (prefs?.model) {
@@ -638,37 +719,74 @@ export async function handleAgentSessionEvent(
   env: Env,
   traceId: string
 ): Promise<void> {
+  const startTime = Date.now();
   const agentSessionId = webhook.agentSession.id;
   const issue = webhook.agentSession.issue;
 
-  log.info("agent_session.received", {
-    trace_id: traceId,
-    action: webhook.action,
-    agent_session_id: agentSessionId,
-    issue_id: issue?.id,
-    issue_identifier: issue?.identifier,
-    has_comment: Boolean(webhook.agentSession.comment),
-    org_id: webhook.organizationId,
-  });
+  try {
+    log.info("agent_session.received", {
+      trace_id: traceId,
+      action: webhook.action,
+      agent_session_id: agentSessionId,
+      issue_id: issue?.id,
+      issue_identifier: issue?.identifier,
+      has_comment: Boolean(webhook.agentSession.comment),
+      org_id: webhook.organizationId,
+    });
 
-  // Stop handling
-  if (webhook.action === "stopped" || webhook.action === "cancelled") {
-    return handleStop(webhook, env, traceId);
+    // Stop handling
+    if (webhook.action === "stopped" || webhook.action === "cancelled") {
+      log.info("agent_session.route", {
+        trace_id: traceId,
+        route: "stop",
+        action: webhook.action,
+        agent_session_id: agentSessionId,
+      });
+      return handleStop(webhook, env, traceId);
+    }
+
+    if (!issue) {
+      log.warn("agent_session.no_issue", { trace_id: traceId, agent_session_id: agentSessionId });
+      return;
+    }
+
+    // Follow-up handling (action: "prompted" with existing session)
+    const existingSession = await lookupIssueSession(env, issue.id);
+    if (existingSession && webhook.action === "prompted") {
+      log.info("agent_session.route", {
+        trace_id: traceId,
+        route: "follow_up",
+        action: webhook.action,
+        issue_id: issue.id,
+        issue_identifier: issue.identifier,
+        session_id: existingSession.sessionId,
+        agent_session_id: agentSessionId,
+      });
+      return handleFollowUp(webhook, issue, env, traceId);
+    }
+
+    log.info("agent_session.route", {
+      trace_id: traceId,
+      route: "new_session",
+      action: webhook.action,
+      issue_id: issue.id,
+      issue_identifier: issue.identifier,
+      has_existing_session: Boolean(existingSession),
+      agent_session_id: agentSessionId,
+    });
+    return handleNewSession(webhook, issue, env, traceId);
+  } catch (error) {
+    log.error("agent_session.unhandled_error", {
+      trace_id: traceId,
+      action: webhook.action,
+      issue_id: issue?.id,
+      issue_identifier: issue?.identifier,
+      agent_session_id: agentSessionId,
+      duration_ms: Date.now() - startTime,
+      error: error instanceof Error ? error : new Error(String(error)),
+    });
+    throw error;
   }
-
-  if (!issue) {
-    log.warn("agent_session.no_issue", { trace_id: traceId, agent_session_id: agentSessionId });
-    return;
-  }
-
-  // Follow-up handling (action: "prompted" with existing session)
-  const existingSession = await lookupIssueSession(env, issue.id);
-  if (existingSession && webhook.action === "prompted") {
-    return handleFollowUp(webhook, issue, env, traceId);
-  }
-
-  // New session
-  return handleNewSession(webhook, issue, env, traceId);
 }
 
 // ─── Prompt Builder ──────────────────────────────────────────────────────────
