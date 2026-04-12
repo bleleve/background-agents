@@ -48,6 +48,7 @@ module "linear_bot_worker" {
     { name = "LINEAR_CLIENT_ID", value = var.linear_client_id },
     { name = "WORKER_URL", value = "https://open-inspect-linear-bot-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev" },
     { name = "LINEAR_COMMENT_MAX_LENGTH", value = var.linear_comment_max_length },
+    { name = "LINEAR_BOT_DEBUG_MODE", value = "true" },
   ]
 
   secrets = [

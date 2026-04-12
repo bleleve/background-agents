@@ -39,6 +39,8 @@ describe("buildCodeReviewPrompt", () => {
     );
     expect(prompt).toContain("cat >/tmp/pr-suggestion.md");
     expect(prompt).toContain("```suggestion");
+    expect(prompt).toContain("-F start_line=");
+    expect(prompt).toContain("remove code, not just add code");
     expect(prompt).toContain("Apply suggestion");
   });
 
@@ -71,6 +73,7 @@ describe("buildCodeReviewPrompt", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
     expect(prompt).toContain("repos/acme/widgets/pulls/42/comments");
     expect(prompt).toContain('-f side="RIGHT"');
+    expect(prompt).toContain('-f start_side="RIGHT"');
   });
 
   it("includes custom instructions section when codeReviewInstructions provided", () => {
@@ -201,6 +204,7 @@ describe("buildCommentActionPrompt", () => {
     );
     expect(prompt).toContain("cat >/tmp/pr-suggestion.md");
     expect(prompt).toContain("```suggestion");
+    expect(prompt).toContain("-F start_line=");
     expect(prompt).not.toContain("repos/acme/widgets/issues/42/comments");
   });
 
@@ -299,6 +303,7 @@ describe("buildFailedChecksPrompt", () => {
     );
     expect(prompt).toContain("cat >/tmp/pr-suggestion.md");
     expect(prompt).toContain("```suggestion");
+    expect(prompt).toContain("-F start_line=");
     expect(prompt).not.toContain("repos/acme/widgets/issues/42/comments");
   });
 

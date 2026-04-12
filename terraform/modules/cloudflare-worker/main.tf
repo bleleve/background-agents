@@ -64,6 +64,11 @@ resource "cloudflare_worker" "this" {
       head_sampling_rate = 1
       invocation_logs    = true
     }
+    traces = {
+      enabled = true
+      head_sampling_rate = 1
+      persist = true
+    }
   }
 }
 

@@ -20,7 +20,7 @@ function buildInlineSuggestionWorkflow(params: {
   number: number;
 }): string {
   const { owner, repo, number } = params;
-  return `- Find the exact fix line in a file that is part of the PR diff (line must be on the RIGHT side).
+  return `- Find the exact replacement range in a file that is part of the PR diff (RIGHT side only). Include obsolete lines in the selected range so suggestions can remove code, not just add code.
 - Get PR head SHA for \`commit_id\`:
 
    SHA="$(gh pr view ${number} --repo ${owner}/${repo} --json headRefOid --jq .headRefOid)"
@@ -31,12 +31,13 @@ function buildInlineSuggestionWorkflow(params: {
    <what is wrong and why>
 
    \`\`\`suggestion
-   <replacement code with exact indentation>
+   <replacement code with exact indentation for the selected range>
    \`\`\`
    EOF
 
-- Post the inline review comment:
+- Post the inline review comment using one of these forms:
 
+   # Single-line replacement
    gh api -X POST "repos/${owner}/${repo}/pulls/${number}/comments" \\
      -f commit_id="$SHA" \\
      -f path="<file path from PR diff>" \\
@@ -44,6 +45,17 @@ function buildInlineSuggestionWorkflow(params: {
      -f side="RIGHT" \\
      -F body=@/tmp/pr-suggestion.md
 
+   # Multi-line replacement (including removals)
+   gh api -X POST "repos/${owner}/${repo}/pulls/${number}/comments" \\
+     -f commit_id="$SHA" \\
+     -f path="<file path from PR diff>" \\
+     -F start_line="<first line on RIGHT side>" \\
+     -f start_side="RIGHT" \\
+     -F line="<last line on RIGHT side>" \\
+     -f side="RIGHT" \\
+     -F body=@/tmp/pr-suggestion.md
+
+- In the suggestion block, provide the full replacement for the selected range. When lines should be removed, omit them from the replacement.
 - Confirm the API response \`html_url\` is a diff comment with an **Apply suggestion** button.`;
 }
 
