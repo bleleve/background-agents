@@ -210,6 +210,10 @@ class AgentBridge:
         # Tracks the message ID of the currently executing prompt
         self._inflight_message_id: str | None = None
 
+        # Tracks whether at least one prompt has already been sent in this
+        # OpenCode session. None means unknown (for loaded sessions).
+        self._has_sent_prompt_in_session: bool | None = None
+
     @property
     def ws_url(self) -> str:
         """WebSocket URL for control plane connection."""
@@ -692,6 +696,7 @@ class AgentBridge:
             opencode_session_id=self.opencode_session_id,
             action="created",
         )
+        self._has_sent_prompt_in_session = False
 
         await self._save_session_id()
 
@@ -779,6 +784,7 @@ class AgentBridge:
         model: str | None,
         opencode_message_id: str | None = None,
         reasoning_effort: str | None = None,
+        include_prompt_suffix: bool = True,
     ) -> dict[str, Any]:
         """Build request body for OpenCode prompt requests.
 
@@ -790,7 +796,7 @@ class AgentBridge:
                                  and assistant responses will have parentID pointing to it.
             reasoning_effort: Optional reasoning effort level (e.g., "high", "max")
         """
-        prompt_suffix = os.environ.get("PROMPT_SUFFIX", "").strip()
+        prompt_suffix = os.environ.get("PROMPT_SUFFIX", "").strip() if include_prompt_suffix else ""
         prompt_text = f"{content}\n\n{prompt_suffix}" if prompt_suffix else content
         request_body: dict[str, Any] = {"parts": [{"type": "text", "text": prompt_text}]}
 
@@ -902,8 +908,13 @@ class AgentBridge:
             raise RuntimeError("OpenCode session not initialized")
 
         opencode_message_id = OpenCodeIdentifier.ascending("message")
+        include_prompt_suffix = await self._should_include_prompt_suffix()
         request_body = self._build_prompt_request_body(
-            content, model, opencode_message_id, reasoning_effort
+            content,
+            model,
+            opencode_message_id,
+            reasoning_effort,
+            include_prompt_suffix=include_prompt_suffix,
         )
 
         sse_url = f"{self.opencode_base_url}/event"
@@ -1071,6 +1082,7 @@ class AgentBridge:
                         raise RuntimeError(
                             f"Async prompt failed: {prompt_response.status_code} - {error_body}"
                         )
+                    self._has_sent_prompt_in_session = True
 
                     async for event in self._parse_sse_stream(sse_response, timeout_ctx):
                         event_type = event.get("type")
@@ -1732,11 +1744,57 @@ class AgentBridge:
                                 opencode_session_id=self.opencode_session_id,
                             )
                             self.opencode_session_id = None
+                            self._has_sent_prompt_in_session = None
+                        else:
+                            self._has_sent_prompt_in_session = await self._session_has_user_prompt()
                     except Exception:
                         self.opencode_session_id = None
+                        self._has_sent_prompt_in_session = None
 
             except Exception as e:
                 self.log.error("opencode.session.load_error", exc=e)
+
+    async def _session_has_user_prompt(self) -> bool:
+        """Return True when the current OpenCode session already has a user message."""
+        if not self.http_client or not self.opencode_session_id:
+            return False
+
+        messages_url = f"{self.opencode_base_url}/session/{self.opencode_session_id}/message"
+        try:
+            response = await self.http_client.get(
+                messages_url,
+                timeout=self.OPENCODE_REQUEST_TIMEOUT,
+            )
+            if response.status_code != 200:
+                self.log.warn(
+                    "opencode.session.messages_unavailable",
+                    status_code=response.status_code,
+                )
+                return False
+
+            messages = response.json()
+            if not isinstance(messages, list):
+                return False
+
+            return any(
+                isinstance(msg, dict)
+                and isinstance(msg.get("info"), dict)
+                and msg.get("info", {}).get("role") == "user"
+                for msg in messages
+            )
+        except Exception as e:
+            self.log.warn("opencode.session.messages_lookup_error", exc=e)
+            return False
+
+    async def _should_include_prompt_suffix(self) -> bool:
+        """Use PROMPT_SUFFIX only on the first prompt in the OpenCode session."""
+        if not os.environ.get("PROMPT_SUFFIX", "").strip():
+            return False
+
+        if self._has_sent_prompt_in_session is None:
+            self._has_sent_prompt_in_session = await self._session_has_user_prompt()
+
+        return not self._has_sent_prompt_in_session
 
     async def _save_session_id(self) -> None:
         """Save OpenCode session ID to file for persistence."""

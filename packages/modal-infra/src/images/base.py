@@ -35,9 +35,12 @@ TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 # rwx CLI — pinned Linux x86_64 binary; see https://github.com/rwx-cloud/rwx/releases
 RWX_VERSION = "3.13.0"
 
+# RTK CLI — pinned Linux x86_64 musl binary; see https://github.com/rtk-ai/rtk/releases
+RTK_VERSION = "0.35.0"
+
 # Cache buster - change this to force Modal image rebuild
-# v54
-CACHE_BUSTER = "v55-locales-all"
+# v57: install Node.js 22.19.0 via nvm and make it the default
+CACHE_BUSTER = "v57-locales-all-rtk-0.35.0-nvm-node-22.19.0"
 
 # Base image with all development tools
 base_image = (
@@ -96,6 +99,14 @@ base_image = (
         "chmod +x /usr/local/bin/rwx",
         "rwx --version",
     )
+    # RTK CLI (used by RTK OpenCode plugin to rewrite shell commands)
+    .run_commands(
+        f"curl -fsSL https://github.com/rtk-ai/rtk/releases/download/v{RTK_VERSION}/rtk-x86_64-unknown-linux-musl.tar.gz -o /tmp/rtk.tar.gz",
+        "tar -xzf /tmp/rtk.tar.gz -C /usr/local/bin rtk",
+        "chmod +x /usr/local/bin/rtk",
+        "rm /tmp/rtk.tar.gz",
+        "rtk --version",
+    )
     # Install GitHub CLI (for agent-direct GitHub interaction via gh API)
     .run_commands(
         "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg"
@@ -105,11 +116,25 @@ base_image = (
         " > /etc/apt/sources.list.d/github-cli.list",
         "apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*",
     )
-    # Install Node.js 22 LTS
+    # Install Node.js 22.19.0 via nvm
     .run_commands(
-        # Add NodeSource repository for Node.js 22
-        "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
-        "apt-get install -y nodejs",
+        'export BASH_ENV="/root/.bash_env" && touch "${BASH_ENV}"',
+        'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | PROFILE="${BASH_ENV}" bash',
+        (
+            'export BASH_ENV="/root/.bash_env" && '
+            'bash -lc "source \\"${BASH_ENV}\\" && '
+            "nvm install 22.19.0 && "
+            "nvm alias default 22.19.0 && "
+            'nvm use default"'
+        ),
+        (
+            'export BASH_ENV="/root/.bash_env" && '
+            'bash -lc "source \\"${BASH_ENV}\\" && '
+            'NODE_BIN_DIR=\\"$(dirname \\"$(nvm which default)\\")\\" && '
+            'ln -sf \\"${NODE_BIN_DIR}/node\\" /usr/local/bin/node && '
+            'ln -sf \\"${NODE_BIN_DIR}/npm\\" /usr/local/bin/npm && '
+            'ln -sf \\"${NODE_BIN_DIR}/npx\\" /usr/local/bin/npx"'
+        ),
         # Verify installation
         "node --version",
         "npm --version",

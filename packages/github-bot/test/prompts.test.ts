@@ -42,6 +42,8 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("-F start_line=");
     expect(prompt).toContain("remove code, not just add code");
     expect(prompt).toContain("Apply suggestion");
+    expect(prompt).toContain("self-contained and valid when applied in isolation");
+    expect(prompt).toContain("skip the suggestion block and explain the change as plain text");
   });
 
   it("handles null body gracefully", () => {

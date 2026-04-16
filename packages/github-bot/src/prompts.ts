@@ -56,6 +56,7 @@ function buildInlineSuggestionWorkflow(params: {
      -F body=@/tmp/pr-suggestion.md
 
 - In the suggestion block, provide the full replacement for the selected range. When lines should be removed, omit them from the replacement.
+- The suggestion block must be self-contained and valid when applied in isolation. Do not suggest code that calls a function, method, or variable that does not already exist at that location. If a fix requires changes in multiple places (e.g. extracting a helper and calling it), skip the suggestion block and explain the change as plain text instead.
 - Confirm the API response \`html_url\` is a diff comment with an **Apply suggestion** button.`;
 }
 

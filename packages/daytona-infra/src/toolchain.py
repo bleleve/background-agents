@@ -9,7 +9,8 @@ from daytona import CreateSnapshotParams, Daytona, Image
 OPENCODE_VERSION = "latest"
 CODE_SERVER_VERSION = "4.109.5"
 AGENT_BROWSER_VERSION = "0.21.2"
-SANDBOX_VERSION = "daytona-v2-oxlint"
+RTK_VERSION = "0.35.0"
+SANDBOX_VERSION = "daytona-v3-rtk-0.35.0"
 
 
 def build_base_image(repo_root: Path) -> Image:
@@ -49,6 +50,12 @@ def build_base_image(repo_root: Path) -> Image:
             "npm install -g @opencode-ai/plugin@latest zod",
             "npm install -g oxlint@latest",
             "oxlint --version",
+            f"curl -fsSL -o /tmp/rtk.tar.gz "
+            f"https://github.com/rtk-ai/rtk/releases/download/v{RTK_VERSION}/rtk-x86_64-unknown-linux-musl.tar.gz",
+            "tar -xzf /tmp/rtk.tar.gz -C /usr/local/bin rtk",
+            "chmod +x /usr/local/bin/rtk",
+            "rm /tmp/rtk.tar.gz",
+            "rtk --version",
             f"curl -fsSL -o /tmp/code-server.deb "
             f"https://github.com/coder/code-server/releases/download/v{CODE_SERVER_VERSION}/"
             f"code-server_{CODE_SERVER_VERSION}_amd64.deb",

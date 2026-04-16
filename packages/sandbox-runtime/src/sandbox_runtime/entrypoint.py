@@ -69,6 +69,8 @@ class SandboxSupervisor:
     CLONE_DEPTH_COMMITS = 100
     SIDECAR_TIMEOUT_SECONDS = 5
     LANGFUSE_PLUGIN_NAME = "opencode-plugin-langfuse"
+    RTK_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/rtk.ts"
+    CODEX_AUTH_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/codex-auth-plugin.ts"
 
     def __init__(self):
         self.opencode_process: asyncio.subprocess.Process | None = None
@@ -396,6 +398,30 @@ class SandboxSupervisor:
         except Exception as e:
             self.log.warn("openai_oauth.setup_error", exc=e)
 
+    def _deploy_opencode_plugins(self, opencode_dir: Path) -> None:
+        """Deploy bundled OpenCode plugins into .opencode/plugins."""
+        plugins_to_copy: list[tuple[Path, str, str]] = []
+
+        rtk_source = Path(self.RTK_PLUGIN_SOURCE_PATH)
+        if rtk_source.exists():
+            plugins_to_copy.append((rtk_source, "rtk.ts", "rtk.plugin_deployed"))
+
+        codex_source = Path(self.CODEX_AUTH_PLUGIN_SOURCE_PATH)
+        if codex_source.exists() and os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN"):
+            plugins_to_copy.append(
+                (codex_source, "codex-auth-plugin.ts", "openai_oauth.plugin_deployed")
+            )
+
+        if not plugins_to_copy:
+            return
+
+        plugin_dir = opencode_dir / "plugins"
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+
+        for source_path, filename, event_name in plugins_to_copy:
+            shutil.copy(source_path, plugin_dir / filename)
+            self.log.info(event_name)
+
     async def start_code_server(self) -> None:
         """Start code-server for browser-based VS Code editing."""
         password = os.environ.get("CODE_SERVER_PASSWORD")
@@ -564,14 +590,8 @@ class SandboxSupervisor:
 
         self._install_tools(workdir)
 
-        # Deploy codex auth proxy plugin if OpenAI OAuth is configured
         opencode_dir = workdir / ".opencode"
-        plugin_source = Path("/app/sandbox_runtime/plugins/codex-auth-plugin.ts")
-        if plugin_source.exists() and os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN"):
-            plugin_dir = opencode_dir / "plugins"
-            plugin_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy(plugin_source, plugin_dir / "codex-auth-plugin.ts")
-            self.log.info("openai_oauth.plugin_deployed")
+        self._deploy_opencode_plugins(opencode_dir)
 
         env = {
             **os.environ,

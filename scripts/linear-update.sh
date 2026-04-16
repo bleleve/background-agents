@@ -33,17 +33,17 @@ curl -X PUT 'https://open-inspect-linear-bot-fountain.fountain.workers.dev/confi
     { "owner": "onboardiq", "name": "wx-system" }
   ],
   "8cd17929-a187-453d-bb97-298b89292cc5": [
-    { "owner": "onboardiq", "name": "wx-system", "label": "wx-system" },
     { "owner": "onboardiq", "name": "fountain-ai", "label": "fountain-ai" },
     { "owner": "onboardiq", "name": "enterprise-wave", "label": "enterprise-wave" },
     { "owner": "onboardiq", "name": "dent", "label": "dent" },
     { "owner": "onboardiq", "name": "monolith", "label": "monolith" },
     { "owner": "onboardiq", "name": "sourcery", "label": "sourcery" },
     { "owner": "onboardiq", "name": "wheregologin", "label": "wheregologin" }
+    { "owner": "onboardiq", "name": "wx-system"},
   ],
   "9cf110e3-8085-4191-b6c6-da67fb914d65": [
     { "owner": "onboardiq", "name": "data-mcp", "label": "data-mcp" },
-    { "owner": "onboardiq", "name": "data-cube", "label": "data-build" },
+    { "owner": "onboardiq", "name": "data-cube", "label": "data-cube" },
     { "owner": "onboardiq", "name": "data-build" }
   ],
   "4e6df924-c330-40a1-92a6-d6432950f907": [
@@ -63,5 +63,14 @@ curl -X PUT 'https://open-inspect-linear-bot-fountain.fountain.workers.dev/confi
     { "owner": "onboardiq", "name": "wx-system", "label": "wx-system" },
     { "owner": "onboardiq", "name": "monolith", "label": "monolith" },
     { "owner": "onboardiq", "name": "fountain-ai" }
+  ],
+  "55af9edb-3fdc-4613-ac1b-d025e75f9777": [
+    { "owner": "onboardiq", "name": "wx-system", "label": "wx-system" },
+    { "owner": "onboardiq", "name": "fountain-ai", "label": "fountain-ai" },
+    { "owner": "onboardiq", "name": "enterprise-wave", "label": "enterprise-wave" },
+    { "owner": "onboardiq", "name": "dent", "label": "dent" },
+    { "owner": "onboardiq", "name": "sourcery", "label": "sourcery" },
+    { "owner": "onboardiq", "name": "wheregologin", "label": "wheregologin" },
+    { "owner": "onboardiq", "name": "monolith" }
   ]
 }'
