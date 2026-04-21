@@ -475,7 +475,7 @@ async function handleNewSession(
       projectInfo?.name,
       issue.team?.name ?? null,
       issue.team?.key ?? null,
-      normalizedCommentBody || undefined,
+      comment?.body,
       traceId
     );
 
