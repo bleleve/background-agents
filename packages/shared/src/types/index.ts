@@ -41,7 +41,13 @@ export type EventType =
   | "push_error"
   | "user_message";
 export type ParticipantRole = "owner" | "member";
-export type SpawnSource = "user" | "agent" | "automation";
+export type SpawnSource =
+  | "user"
+  | "agent"
+  | "automation"
+  | "github-bot"
+  | "linear-bot"
+  | "slack-bot";
 export type ConfidenceLevel = "high" | "medium" | "low";
 
 // Participant in a session
@@ -122,6 +128,26 @@ export interface ManualPullRequestArtifactMetadata {
   base: string;
   createPrUrl: string;
   provider?: string;
+}
+
+/** Metadata stored on screenshot artifacts. */
+export interface ScreenshotArtifactMetadata {
+  /** R2 object key */
+  objectKey: string;
+  /** MIME type: image/png, image/jpeg, image/webp */
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  /** File size in bytes */
+  sizeBytes: number;
+  /** Viewport dimensions at capture time */
+  viewport?: { width: number; height: number };
+  /** URL that was screenshotted */
+  sourceUrl?: string;
+  /** Whether this is a full-page screenshot */
+  fullPage?: boolean;
+  /** Whether element annotations are overlaid */
+  annotated?: boolean;
+  /** Caption or description provided by the agent */
+  caption?: string;
 }
 
 // Pull request info
@@ -209,8 +235,10 @@ export type SandboxEvent =
   | {
       type: "artifact";
       artifactType: string;
+      artifactId?: string;
       url: string;
       metadata?: Record<string, unknown>;
+      messageId?: string;
       sandboxId: string;
       timestamp: number;
     }
@@ -322,6 +350,7 @@ export interface SessionState {
   reasoningEffort?: string;
   isProcessing?: boolean;
   parentSessionId?: string | null;
+  totalCost?: number;
   codeServerUrl?: string | null;
   codeServerPassword?: string | null;
   tunnelUrls?: Record<string, string> | null;
@@ -562,6 +591,58 @@ export interface ChildSessionDetail {
   sandbox: { status: SandboxStatus } | null;
   artifacts: Array<{ type: string; url: string; metadata: unknown }>;
   recentEvents: Array<{ type: string; data: unknown; createdAt: number }>;
+}
+
+// ─── Analytics ───────────────────────────────────────────────────────────────
+
+export const ANALYTICS_DAYS = [7, 14, 30, 90] as const;
+export type AnalyticsDays = (typeof ANALYTICS_DAYS)[number];
+
+export const ANALYTICS_BREAKDOWN_BY = ["user", "repo"] as const;
+export type AnalyticsBreakdownBy = (typeof ANALYTICS_BREAKDOWN_BY)[number];
+
+export interface AnalyticsStatusBreakdown {
+  created: number;
+  active: number;
+  completed: number;
+  failed: number;
+  archived: number;
+  cancelled: number;
+}
+
+export interface AnalyticsSummaryResponse {
+  totalSessions: number;
+  activeUsers: number;
+  totalCost: number;
+  avgCost: number;
+  totalPrs: number;
+  statusBreakdown: AnalyticsStatusBreakdown;
+}
+
+export interface AnalyticsTimeseriesPoint {
+  date: string;
+  groups: Record<string, number>;
+}
+
+export interface AnalyticsTimeseriesResponse {
+  series: AnalyticsTimeseriesPoint[];
+}
+
+export interface AnalyticsBreakdownEntry {
+  key: string;
+  sessions: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  cost: number;
+  prs: number;
+  messageCount: number;
+  avgDuration: number;
+  lastActive: number;
+}
+
+export interface AnalyticsBreakdownResponse {
+  entries: AnalyticsBreakdownEntry[];
 }
 
 // ─── Automation Engine ────────────────────────────────────────────────────────

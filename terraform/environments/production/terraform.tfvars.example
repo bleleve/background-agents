@@ -12,7 +12,14 @@
 # Provider Authentication
 # =============================================================================
 
-# Cloudflare API token with Workers, KV, R2, and D1 permissions
+# Cloudflare API token.
+# Required account permissions:
+#   - Workers Scripts: Edit
+#   - Workers KV Storage: Edit
+#   - Workers R2 Storage: Edit
+#   - D1: Edit
+# Optional if you manage Cloudflare routes/custom domains:
+#   - Workers Routes: Edit
 # Create at: https://dash.cloudflare.com/profile/api-tokens
 cloudflare_api_token = ""
 
@@ -51,10 +58,11 @@ modal_workspace = ""
 
 # Daytona REST API
 # Only required when sandbox_provider = "daytona"
-# Create an API key at https://app.daytona.io and seed the base snapshot
-# with packages/daytona-infra/src/bootstrap.py before enabling.
+# Create an API key at https://app.daytona.io with permissions:
+#   Sandboxes: Read, Write  |  Snapshots: Read, Write, Delete
+# Seed the base snapshot with packages/daytona-infra/src/bootstrap.py before enabling.
 daytona_api_url = ""           # e.g., "https://app.daytona.io/api"
-daytona_api_key = ""
+daytona_api_key = ""           # Requires Sandboxes (Read/Write) + Snapshots (Read/Write/Delete)
 daytona_base_snapshot = ""     # Name of the seeded Daytona snapshot
 # daytona_target = ""          # Optional Daytona target name
 
@@ -186,10 +194,14 @@ enable_service_bindings = false
 # Access Control
 # =============================================================================
 # Comma-separated list of GitHub usernames allowed to sign in
-# Leave empty to allow all GitHub users
+# Set at least one access-control allowlist unless you intentionally opt into
+# open access with unsafe_allow_all_users = true.
 allowed_users = ""
 
 # Comma-separated list of email domains allowed to sign in
-# Leave empty to allow all email domains
 # Example: "example.com,corp.io"
 allowed_email_domains = ""
+
+# Explicitly bypass the Terraform access-control safety check and allow any
+# authenticated GitHub user to sign in when both allowlists are empty.
+unsafe_allow_all_users = false

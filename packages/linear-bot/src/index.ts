@@ -48,9 +48,10 @@ function isAgentSessionWebhookPayload(payload: unknown): payload is AgentSession
   const type = readStringField(payload, "type");
   const action = readStringField(payload, "action");
   const organizationId = readStringField(payload, "organizationId");
+  const webhookId = readStringField(payload, "webhookId");
   const agentSession = payload.agentSession;
 
-  if (!type || !action || !organizationId || !isObjectRecord(agentSession)) {
+  if (!type || !action || !organizationId || !isObjectRecord(agentSession) || !webhookId) {
     return false;
   }
 
@@ -211,21 +212,30 @@ app.post("/webhook", async (c) => {
         return c.json({ error: "Invalid payload" }, 400);
       }
 
-      const eventKey = `${agentSessionId}:${action}`;
+      // Deduplicate by Linear webhook delivery ID.
+      const webhookId = readStringField(payload, "webhookId");
+      if (!webhookId) {
+        log.warn("webhook.invalid_payload", {
+          trace_id: traceId,
+          reason: "missing_webhook_id",
+        });
+        return c.json({ error: "Invalid payload" }, 400);
+      }
+
       let isDuplicate: boolean;
       try {
-        isDuplicate = await isDuplicateEvent(c.env, eventKey);
+        isDuplicate = await isDuplicateEvent(c.env, webhookId);
       } catch (error) {
         log.error("webhook.deduplication_failed", {
           trace_id: traceId,
-          event_key: eventKey,
+          event_key: webhookId,
           error: error instanceof Error ? error : new Error(String(error)),
         });
         return c.json({ error: "Deduplication failed" }, 500);
       }
 
       if (isDuplicate) {
-        log.info("webhook.deduplicated", { trace_id: traceId, event_key: eventKey });
+        log.info("webhook.deduplicated", { trace_id: traceId, event_key: webhookId });
         return c.json({ ok: true, skipped: true, reason: "duplicate" });
       }
 

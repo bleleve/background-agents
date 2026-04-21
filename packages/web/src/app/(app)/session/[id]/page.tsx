@@ -16,6 +16,9 @@ import {
 import { useSessionSocket } from "@/hooks/use-session-socket";
 import { SafeMarkdown } from "@/components/safe-markdown";
 import { ToolCallGroup } from "@/components/tool-call-group";
+import { ScreenshotArtifactCard } from "@/components/screenshot-artifact-card";
+import { MediaLightbox } from "@/components/media-lightbox";
+import { Button } from "@/components/ui/button";
 import { useSidebarContext } from "@/components/sidebar-layout";
 import {
   SessionRightSidebar,
@@ -31,7 +34,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { DEFAULT_MODEL, getDefaultReasoningEffort, type ModelCategory } from "@open-inspect/shared";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
 import { ReasoningEffortPills } from "@/components/reasoning-effort-pills";
-import type { SandboxEvent } from "@/types/session";
+import type { Artifact, SandboxEvent } from "@/types/session";
 import {
   SidebarIcon,
   ModelIcon,
@@ -293,6 +296,7 @@ function SessionPageContent() {
   );
 
   const [prompt, setPrompt] = useState("");
+  const [selectedMediaArtifactId, setSelectedMediaArtifactId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_MODEL);
   const [reasoningEffort, setReasoningEffort] = useState<string | undefined>(
     getDefaultReasoningEffort(DEFAULT_MODEL)
@@ -390,6 +394,9 @@ function SessionPageContent() {
       loadOlderEvents={loadOlderEvents}
       modelOptions={enabledModelOptions}
       fallbackSessionInfo={fallbackSessionInfo}
+      sessionId={sessionId}
+      selectedMediaArtifactId={selectedMediaArtifactId}
+      setSelectedMediaArtifactId={setSelectedMediaArtifactId}
     />
   );
 }
@@ -425,6 +432,9 @@ function SessionContent({
   loadOlderEvents,
   modelOptions,
   fallbackSessionInfo,
+  sessionId,
+  selectedMediaArtifactId,
+  setSelectedMediaArtifactId,
 }: {
   sessionState: SessionState;
   connected: boolean;
@@ -456,6 +466,9 @@ function SessionContent({
   loadOlderEvents: () => void;
   modelOptions: ModelCategory[];
   fallbackSessionInfo: FallbackSessionInfo;
+  sessionId: string;
+  selectedMediaArtifactId: string | null;
+  setSelectedMediaArtifactId: (artifactId: string | null) => void;
 }) {
   const { isOpen, toggle } = useSidebarContext();
   const isBelowLg = useMediaQuery("(max-width: 1023px)");
@@ -685,6 +698,14 @@ function SessionContent({
 
   // Deduplicate and group events for rendering
   const groupedEvents = useMemo(() => dedupeAndGroupEvents(events), [events]);
+  const screenshotArtifacts = useMemo(
+    () => artifacts.filter((artifact) => artifact.type === "screenshot"),
+    [artifacts]
+  );
+  const selectedMediaArtifact = useMemo(
+    () => screenshotArtifacts.find((artifact) => artifact.id === selectedMediaArtifactId) ?? null,
+    [screenshotArtifacts, selectedMediaArtifactId]
+  );
 
   const sessionDisplayInfo = useMemo(
     () => resolveSessionDisplayInfo(sessionState, fallbackSessionInfo),
@@ -699,14 +720,15 @@ function SessionContent({
         <div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             {!isOpen && (
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={toggle}
-                className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition"
                 title={`Open sidebar (${SHORTCUT_LABELS.TOGGLE_SIDEBAR})`}
                 aria-label={`Open sidebar (${SHORTCUT_LABELS.TOGGLE_SIDEBAR})`}
               >
                 <SidebarIcon className="w-4 h-4" />
-              </button>
+              </Button>
             )}
             <div>
               {isRenaming ? (
@@ -729,8 +751,16 @@ function SessionContent({
                 />
               ) : (
                 <h1
-                  className="font-medium text-foreground max-w-40 truncate cursor-text"
+                  className="text-sm font-medium text-foreground max-w-40 truncate cursor-text"
                   onClick={handleStartRename}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleStartRename();
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
                   title="Click to rename"
                 >
                   {resolvedTitle}
@@ -771,11 +801,11 @@ function SessionContent({
 
       {/* Connection error banner */}
       {(authError || connectionError) && (
-        <div className="bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 px-4 py-3 flex items-center justify-between">
-          <p className="text-sm text-red-700 dark:text-red-400">{authError || connectionError}</p>
+        <div className="bg-destructive-muted border-b border-destructive-border px-4 py-3 flex items-center justify-between">
+          <p className="text-sm text-destructive">{authError || connectionError}</p>
           <button
             onClick={reconnect}
-            className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition"
+            className="px-3 py-1.5 text-sm font-medium text-destructive-foreground bg-destructive hover:bg-destructive/90 transition"
           >
             Reconnect
           </button>
@@ -809,7 +839,9 @@ function SessionContent({
                         <EventItem
                           key={group.id}
                           event={group.event}
+                          sessionId={sessionId}
                           currentParticipantId={currentParticipantId}
+                          onOpenMedia={setSelectedMediaArtifactId}
                         />
                       )
                     )
@@ -835,12 +867,14 @@ function SessionContent({
 
         {/* Right sidebar */}
         <SessionRightSidebar
+          sessionId={sessionId}
           sessionState={sessionState}
           participants={participants}
           events={events}
           artifacts={artifacts}
           terminalOpen={terminalOpen}
           onToggleTerminal={toggleTerminal}
+          onOpenMedia={setSelectedMediaArtifactId}
         />
       </main>
 
@@ -849,7 +883,7 @@ function SessionContent({
           className={`fixed inset-0 z-50 lg:hidden ${isDetailsOpen ? "" : "pointer-events-none"}`}
         >
           <div
-            className={`absolute inset-0 bg-black/50 transition-opacity duration-200 ${
+            className={`absolute inset-0 bg-overlay transition-opacity duration-200 ${
               isDetailsOpen ? "opacity-100" : "opacity-0"
             }`}
             onClick={closeDetails}
@@ -888,12 +922,14 @@ function SessionContent({
               </div>
               <div className="overflow-y-auto">
                 <SessionRightSidebarContent
+                  sessionId={sessionId}
                   sessionState={sessionState}
                   participants={participants}
                   events={events}
                   artifacts={artifacts}
                   terminalOpen={terminalOpen}
                   onToggleTerminal={toggleTerminal}
+                  onOpenMedia={setSelectedMediaArtifactId}
                 />
               </div>
             </div>
@@ -918,18 +954,31 @@ function SessionContent({
               </div>
               <div className="flex-1 overflow-y-auto">
                 <SessionRightSidebarContent
+                  sessionId={sessionId}
                   sessionState={sessionState}
                   participants={participants}
                   events={events}
                   artifacts={artifacts}
                   terminalOpen={terminalOpen}
                   onToggleTerminal={toggleTerminal}
+                  onOpenMedia={setSelectedMediaArtifactId}
                 />
               </div>
             </div>
           )}
         </div>
       )}
+
+      <MediaLightbox
+        sessionId={sessionId}
+        artifact={selectedMediaArtifact}
+        open={selectedMediaArtifactId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedMediaArtifactId(null);
+          }
+        }}
+      />
 
       {/* Input */}
       <footer className="border-t border-border-muted flex-shrink-0">
@@ -961,13 +1010,13 @@ function SessionContent({
               {/* Floating action buttons */}
               <div className="absolute bottom-3 right-3 flex items-center gap-2">
                 {isProcessing && prompt.trim() && (
-                  <span className="text-xs text-amber-600 dark:text-amber-400">Waiting...</span>
+                  <span className="text-xs text-warning">Waiting...</span>
                 )}
                 {isProcessing && (
                   <button
                     type="button"
                     onClick={stopExecution}
-                    className="p-2 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
+                    className="p-2 text-destructive hover:bg-destructive-muted transition"
                     title="Stop"
                   >
                     <StopIcon className="w-5 h-5" />
@@ -1043,8 +1092,8 @@ function SessionContent({
 function ConnectionStatus({ connected, connecting }: { connected: boolean; connecting: boolean }) {
   if (connecting) {
     return (
-      <span className="flex items-center gap-1 text-xs text-yellow-600 dark:text-yellow-500">
-        <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+      <span className="flex items-center gap-1 text-xs text-warning">
+        <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
         Connecting...
       </span>
     );
@@ -1060,8 +1109,8 @@ function ConnectionStatus({ connected, connecting }: { connected: boolean; conne
   }
 
   return (
-    <span className="flex items-center gap-1 text-xs text-red-600 dark:text-red-500">
-      <span className="w-2 h-2 rounded-full bg-red-500" />
+    <span className="flex items-center gap-1 text-xs text-destructive">
+      <span className="w-2 h-2 rounded-full bg-destructive" />
       Disconnected
     </span>
   );
@@ -1072,12 +1121,12 @@ function SandboxStatus({ status }: { status?: string }) {
 
   const colors: Record<string, string> = {
     pending: "text-muted-foreground",
-    warming: "text-yellow-600 dark:text-yellow-500",
+    warming: "text-warning",
     syncing: "text-accent",
     ready: "text-success",
     running: "text-accent",
     stopped: "text-muted-foreground",
-    failed: "text-red-600 dark:text-red-500",
+    failed: "text-destructive",
   };
 
   return <span className={`text-xs ${colors[status] || colors.pending}`}>Sandbox: {status}</span>;
@@ -1097,17 +1146,17 @@ function CombinedStatusDot({
   let label: string;
 
   if (!connected && !connecting) {
-    color = "bg-red-500";
+    color = "bg-destructive";
     label = "Disconnected";
   } else if (connecting) {
-    color = "bg-yellow-500";
+    color = "bg-warning";
     pulse = true;
     label = "Connecting...";
   } else if (sandboxStatus === "failed") {
-    color = "bg-red-500";
+    color = "bg-destructive";
     label = `Connected \u00b7 Sandbox: ${sandboxStatus}`;
   } else if (["pending", "warming", "syncing"].includes(sandboxStatus || "")) {
-    color = "bg-yellow-500";
+    color = "bg-warning";
     label = `Connected \u00b7 Sandbox: ${sandboxStatus}`;
   } else {
     color = "bg-success";
@@ -1182,10 +1231,14 @@ function ParticipantsList({
 
 const EventItem = memo(function EventItem({
   event,
+  sessionId,
   currentParticipantId,
+  onOpenMedia,
 }: {
   event: SandboxEvent;
+  sessionId: string;
   currentParticipantId: string | null;
+  onOpenMedia: (artifactId: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1297,7 +1350,7 @@ const EventItem = memo(function EventItem({
       // Only show standalone results if they're errors
       if (!event.error) return null;
       return (
-        <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 py-1">
+        <div className="flex items-center gap-2 text-sm text-destructive py-1">
           <ErrorIcon className="w-4 h-4" />
           <span className="truncate">{event.error}</span>
           <span className="text-xs text-secondary-foreground ml-auto">{time}</span>
@@ -1313,10 +1366,30 @@ const EventItem = memo(function EventItem({
         </div>
       );
 
+    case "artifact":
+      if (event.artifactType !== "screenshot" || !event.artifactId) {
+        return null;
+      }
+
+      return (
+        <div className="space-y-2 border border-border-muted bg-card p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Screenshot</span>
+            <span className="text-xs text-secondary-foreground">{time}</span>
+          </div>
+          <ScreenshotArtifactCard
+            sessionId={sessionId}
+            artifactId={event.artifactId}
+            metadata={event.metadata as Artifact["metadata"] | undefined}
+            onOpen={onOpenMedia}
+          />
+        </div>
+      );
+
     case "error":
       return (
-        <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
-          <span className="w-2 h-2 rounded-full bg-red-500" />
+        <div className="flex items-center gap-2 text-sm text-destructive">
+          <span className="w-2 h-2 rounded-full bg-destructive" />
           Error{event.error ? `: ${event.error}` : ""}
           <span className="text-xs text-secondary-foreground">{time}</span>
         </div>
@@ -1325,8 +1398,8 @@ const EventItem = memo(function EventItem({
     case "execution_complete":
       if (event.success === false) {
         return (
-          <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
-            <span className="w-2 h-2 rounded-full bg-red-500" />
+          <div className="flex items-center gap-2 text-sm text-destructive">
+            <span className="w-2 h-2 rounded-full bg-destructive" />
             Execution failed{event.error ? `: ${event.error}` : ""}
             <span className="text-xs text-secondary-foreground">{time}</span>
           </div>

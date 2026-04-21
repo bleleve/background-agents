@@ -29,8 +29,10 @@ import {
   type AlarmScheduler,
   type IdGenerator,
   type RepoImageLookup,
+  type McpServerLookup,
 } from "../sandbox/lifecycle/manager";
 import { RepoImageStore } from "../db/repo-images";
+import { McpServerStore } from "../db/mcp-servers";
 import { SessionIndexStore } from "../db/session-index";
 import { DEFAULT_EXECUTION_TIMEOUT_MS } from "../sandbox/lifecycle/decisions";
 import {
@@ -133,6 +135,9 @@ const WS_AUTH_TIMEOUT_MS = 30000; // 30 seconds
  */
 const WS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+/** Statuses that indicate a session is finished — metrics are synced to D1 on these transitions. */
+const TERMINAL_STATUSES: SessionStatus[] = ["completed", "failed", "cancelled"];
+
 export class SessionDO extends DurableObject<Env> {
   private sql: SqlStorage;
   private repository: SessionRepository;
@@ -180,10 +185,11 @@ export class SessionDO extends DurableObject<Env> {
     prompt: (request) => this.messagesHandler.enqueuePrompt(request),
     stop: () => this.messagesHandler.stop(),
     sandboxEvent: (request) => this.sandboxHandler.sandboxEvent(request),
+    createMediaArtifact: (request) => this.sandboxHandler.createMediaArtifact(request),
     listParticipants: () => this.participantsHandler.listParticipants(),
     addParticipant: (request) => this.sandboxHandler.addParticipant(request),
     listEvents: (_request, url) => this.messagesHandler.listEvents(url),
-    listArtifacts: () => this.messagesHandler.listArtifacts(),
+    listArtifacts: (_request, url) => this.messagesHandler.listArtifacts(url),
     listMessages: (_request, url) => this.messagesHandler.listMessages(url),
     createPr: (request) => this.pullRequestHandler.createPr(request),
     wsToken: (request) => this.wsTokenHandler.generateWsToken(request),
@@ -403,6 +409,7 @@ export class SessionDO extends DurableObject<Env> {
         },
         isOpenAISecretsConfigured: () =>
           Boolean(this.env.DB && this.env.REPO_SECRETS_ENCRYPTION_KEY),
+        broadcast: (message) => this.broadcast(message),
         generateId: () => generateId(),
         now: () => Date.now(),
         getLog: () => this.log,
@@ -715,6 +722,17 @@ export class SessionDO extends DurableObject<Env> {
     const session = this.repository.getSession();
     const sessionId = session?.session_name || session?.id || this.ctx.id.toString();
 
+    // Create D1-backed lookups if database is available
+    // Create D1-backed lookups if database is available
+    let mcpServerLookup: McpServerLookup | undefined;
+    if (this.env.DB) {
+      const mcpStore = new McpServerStore(this.env.DB, this.env.REPO_SECRETS_ENCRYPTION_KEY);
+      mcpServerLookup = {
+        getDecryptedForSession: (repoOwner, repoName) =>
+          mcpStore.getDecryptedForSession(repoOwner, repoName),
+      };
+    }
+
     const config = {
       ...DEFAULT_LIFECYCLE_CONFIG,
       controlPlaneUrl,
@@ -724,9 +742,10 @@ export class SessionDO extends DurableObject<Env> {
         ...DEFAULT_LIFECYCLE_CONFIG.inactivity,
         timeoutMs: parseInt(this.env.SANDBOX_INACTIVITY_TIMEOUT_MS || "600000", 10),
       },
+      mcpServerLookup,
     };
 
-    // Create repo image lookup if D1 is available
+    // Create repo image lookup if D1 is available (Modal-only — Daytona doesn't use repo images)
     let repoImageLookup: RepoImageLookup | undefined;
     if (this.env.DB && sandboxBackend === "modal") {
       const repoImageStore = new RepoImageStore(this.env.DB);
@@ -1478,6 +1497,35 @@ export class SessionDO extends DurableObject<Env> {
     );
   }
 
+  private syncSessionMetrics(sessionId: string): void {
+    if (!this.env.DB) return;
+
+    const session = this.repository.getSession();
+    if (!session) return;
+
+    const messageCount = this.repository.getMessageCount();
+    const activeDurationMs = this.repository.getActiveDurationMs();
+    const artifacts = this.repository.listArtifacts();
+    const prCount = artifacts.filter((a) => a.type === "pr").length;
+
+    const sessionStore = new SessionIndexStore(this.env.DB);
+    this.ctx.waitUntil(
+      sessionStore
+        .updateMetrics(sessionId, {
+          totalCost: session.total_cost ?? 0,
+          activeDurationMs,
+          messageCount,
+          prCount,
+        })
+        .catch((error) => {
+          this.log.error("session_index.update_metrics.background_error", {
+            session_id: sessionId,
+            error,
+          });
+        })
+    );
+  }
+
   private async transitionSessionStatus(status: SessionStatus): Promise<boolean> {
     const session = this.getSession();
     if (!session) return false;
@@ -1485,6 +1533,9 @@ export class SessionDO extends DurableObject<Env> {
     const publicSessionId = this.getPublicSessionId(session);
     if (session.status === status) {
       this.syncSessionIndexStatus(publicSessionId, status, session.updated_at);
+      if (TERMINAL_STATUSES.includes(status)) {
+        this.syncSessionMetrics(publicSessionId);
+      }
       return false;
     }
 
@@ -1493,6 +1544,10 @@ export class SessionDO extends DurableObject<Env> {
     this.syncSessionIndexStatus(publicSessionId, status, updatedAt);
 
     this.broadcast({ type: "session_status", status });
+
+    if (TERMINAL_STATUSES.includes(status)) {
+      this.syncSessionMetrics(publicSessionId);
+    }
 
     // Notify parent session (if this is a child) so its UI can refresh
     this.notifyParentOfStatusChange(session, publicSessionId, status);
@@ -1595,6 +1650,7 @@ export class SessionDO extends DurableObject<Env> {
       reasoningEffort: session?.reasoning_effort ?? undefined,
       isProcessing,
       parentSessionId: session?.parent_session_id ?? null,
+      totalCost: session?.total_cost ?? 0,
       codeServerUrl: sandbox?.code_server_url ?? null,
       codeServerPassword,
       tunnelUrls: sandbox?.tunnel_urls ? this.safeParseTunnelUrls(sandbox.tunnel_urls) : null,

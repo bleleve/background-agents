@@ -239,8 +239,9 @@ async function handleFollowUp(
   }
 
   const normalizedCommentBody = comment ? normalizeLinearCommentBody(comment) : "";
-  const followUpContent = agentActivity?.body || normalizedCommentBody || "Follow-up on the issue.";
-  const followUpMetadata = agentActivity?.body
+  const followUpContent =
+    agentActivity?.content?.body || normalizedCommentBody || "Follow-up on the issue.";
+  const followUpMetadata = agentActivity?.content?.body
     ? { followUpSource: "linear_agent_activity", followUpAuthor: "linear" }
     : { followUpSource: "linear_comment", followUpAuthor: "unknown" };
 
@@ -589,6 +590,7 @@ async function handleNewSession(
       title: `${issue.identifier}: ${issue.title}`,
       model,
       reasoningEffort,
+      spawnSource: "linear-bot",
     }),
   });
 

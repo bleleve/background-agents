@@ -11,6 +11,7 @@ import { KeyboardShortcutsSettings } from "@/components/settings/keyboard-shortc
 import { IntegrationsSettings } from "@/components/settings/integrations-settings";
 import { SandboxSettingsPage } from "@/components/settings/sandbox-settings";
 import { ImagesSettings } from "@/components/settings/images-settings";
+import { McpServersSettings } from "@/components/settings/mcp-servers-settings";
 import { AppearanceSettings } from "@/components/settings/appearance-settings";
 import { OpenCodeConfigSettings } from "@/components/settings/opencode-config-settings";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
@@ -28,6 +29,7 @@ const CATEGORY_LABELS: Record<SettingsCategory, string> = {
   sandbox: "Sandbox",
   integrations: "Integrations",
   "opencode-config": "OpenCode Config",
+  "mcp-servers": "MCP Servers",
 };
 
 const VALID_CATEGORIES = new Set<string>([
@@ -40,6 +42,7 @@ const VALID_CATEGORIES = new Set<string>([
   "sandbox",
   "integrations",
   "opencode-config",
+  "mcp-servers",
 ]);
 
 function isValidCategory(tab: string | null): tab is SettingsCategory {
@@ -89,6 +92,7 @@ export default function SettingsPage() {
       {activeCategory === "sandbox" && <SandboxSettingsPage />}
       {activeCategory === "integrations" && <IntegrationsSettings />}
       {activeCategory === "opencode-config" && <OpenCodeConfigSettings />}
+      {activeCategory === "mcp-servers" && <McpServersSettings />}
     </>
   );
 

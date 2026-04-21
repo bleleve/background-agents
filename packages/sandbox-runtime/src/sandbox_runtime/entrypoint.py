@@ -71,6 +71,7 @@ class SandboxSupervisor:
     LANGFUSE_PLUGIN_NAME = "opencode-plugin-langfuse"
     RTK_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/rtk.ts"
     CODEX_AUTH_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/codex-auth-plugin.ts"
+    MCP_PACKAGE_INSTALL_TIMEOUT_SECONDS = 180
 
     def __init__(self):
         self.opencode_process: asyncio.subprocess.Process | None = None
@@ -116,7 +117,7 @@ class SandboxSupervisor:
     @property
     def base_branch(self) -> str:
         """The branch to clone/fetch — defaults to 'main'."""
-        return self.session_config.get("branch", "main")
+        return self.session_config.get("branch") or "main"
 
     def _build_repo_url(self, authenticated: bool = True) -> str:
         """Build the HTTPS URL for the repository, optionally with clone credentials."""
@@ -268,6 +269,26 @@ class SandboxSupervisor:
             self.log.error("git.update_error", exc=e)
             return False
 
+    async def _get_head_sha(self) -> str:
+        """Return the HEAD SHA of the repo, or empty string on failure."""
+        if not self.repo_path.exists():
+            return ""
+        try:
+            result = await asyncio.create_subprocess_exec(
+                "git",
+                "rev-parse",
+                "HEAD",
+                cwd=self.repo_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await result.communicate()
+            if result.returncode == 0:
+                return stdout.decode().strip()
+        except Exception as e:
+            self.log.warn("git.rev_parse_error", error=str(e))
+        return ""
+
     async def perform_git_sync(self) -> bool:
         """Clone repository if needed, then sync to the target branch.
 
@@ -310,25 +331,66 @@ class SandboxSupervisor:
         if legacy_tool.exists():
             shutil.copy(legacy_tool, tool_dest / "create-pull-request.js")
 
-        # Copy all .js files from tools/ (including _-prefixed internal modules)
+        # Copy all .js files from tools/ — these must export tool() for OpenCode
         if tools_dir.exists():
             for tool_file in tools_dir.iterdir():
                 if tool_file.is_file() and tool_file.suffix == ".js":
                     shutil.copy(tool_file, tool_dest / tool_file.name)
 
-        # Node modules symlink
-        node_modules = opencode_dir / "node_modules"
-        global_modules = Path("/usr/lib/node_modules")
-        if not node_modules.exists() and global_modules.exists():
-            try:
-                node_modules.symlink_to(global_modules)
-            except Exception as e:
-                self.log.warn("opencode.symlink_error", exc=e)
+        # Copy pre-built deps (package.json, package-lock.json, node_modules)
+        # from the image staging directory.  This gives OpenCode a lockfile
+        # that matches the declared dependencies so Npm.install() finds
+        # everything in sync and skips arborist reify() entirely.
+        deps_cache = Path("/app/opencode-deps")
+        for name in ("package.json", "package-lock.json"):
+            src = deps_cache / name
+            dest = opencode_dir / name
+            if src.exists() and not dest.exists():
+                shutil.copy2(src, dest)
+        cached_modules = deps_cache / "node_modules"
+        local_modules = opencode_dir / "node_modules"
+        if cached_modules.is_dir() and not local_modules.exists():
+            shutil.copytree(cached_modules, local_modules, symlinks=True)
 
-        # Minimal package.json
-        package_json = opencode_dir / "package.json"
-        if not package_json.exists():
-            package_json.write_text('{"name": "opencode-tools", "type": "module"}')
+    def _install_bin_scripts(self) -> None:
+        """Install standalone CLI scripts into /usr/local/bin.
+
+        Scripts in bin/ are standalone CLIs (not OpenCode tool plugins) and must
+        NOT be placed in .opencode/tool/ — OpenCode would import() them during
+        tool discovery, executing module-level code with the parent process argv.
+        """
+        bin_dir = Path("/app/sandbox_runtime/bin")
+        if not bin_dir.is_dir():
+            return
+
+        for script in bin_dir.iterdir():
+            if script.is_file() and script.suffix == ".js":
+                dest = Path("/usr/local/bin") / script.stem
+                shutil.copy(script, dest)
+                dest.chmod(0o755)
+                self.log.info("bin.installed", script=script.stem)
+
+    def _install_skills(self, workdir: Path) -> None:
+        """Copy bundled Skills into the .opencode/skills directory."""
+        skills_dir = Path("/app/sandbox_runtime/skills")
+        if not skills_dir.is_dir():
+            return
+
+        skills_dest = workdir / ".opencode" / "skills"
+        installed_any = False
+
+        for skill_dir in skills_dir.iterdir():
+            skill_file = skill_dir / "SKILL.md"
+            if not skill_dir.is_dir() or not skill_file.exists():
+                continue
+
+            dest_dir = skills_dest / skill_dir.name
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy(skill_file, dest_dir / "SKILL.md")
+            installed_any = True
+
+        if installed_any:
+            self.log.info("opencode.skills_installed", skills_path=str(skills_dest))
 
         # Ensure .opencode is excluded from git tracking in the cloned repo.
         # We write to .git/info/exclude (not .gitignore) so the rule is
@@ -462,6 +524,108 @@ class SandboxSupervisor:
         except Exception as e:
             self.log.warn("code_server.log_forward_error", exc=e)
 
+    def _resolve_mcp_servers(self) -> list[dict]:
+        """Resolve MCP servers from session config."""
+        return self.session_config.get("mcp_servers") or []
+
+    # Validates npm package names before passing to `npm install -g`.
+    # Accepts: "package", "@scope/package", "package@1.0.0", "@scope/package@1.0.0"
+    # Rejects anything with shell metacharacters or path traversal sequences.
+    # NOTE: if a legitimate package is rejected, widen this regex rather than
+    # removing the check — the package name comes from user-supplied config.
+    _NPM_PKG_RE = re.compile(r"^(@[\w.-]+/)?[\w][\w.-]*(@[\w.-]+)?$")
+
+    async def _install_mcp_packages(self, servers: list[dict]) -> None:
+        """Pre-install npm packages for local MCP servers that use npx."""
+        packages: list[str] = []
+        for server in servers:
+            if server.get("type") == "remote":
+                continue
+            cmd = server.get("command", [])
+            if not cmd:
+                continue
+            parts = [c for c in cmd if isinstance(c, str)]
+            if not parts or parts[0] != "npx":
+                continue
+            # Extract package name: prefer -p/--package flag, else first non-flag arg
+            pkg: str | None = None
+            for i, part in enumerate(parts):
+                if part in ("-p", "--package") and i + 1 < len(parts):
+                    pkg = parts[i + 1]
+                    break
+            if pkg is None:
+                non_flags = [p for p in parts[1:] if not p.startswith("-")]
+                pkg = non_flags[0] if non_flags else None
+
+            if pkg:
+                if self._NPM_PKG_RE.match(pkg):
+                    packages.append(pkg)
+                else:
+                    self.log.warn(
+                        "mcp.invalid_package_name",
+                        package=pkg,
+                        note="package skipped — npx will attempt download at runtime",
+                    )
+
+        packages = list(dict.fromkeys(packages))  # deduplicate, preserve order
+        if not packages:
+            return
+
+        self.log.info("mcp.install_packages", packages=packages)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "npm",
+                "install",
+                "-g",
+                *packages,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.MCP_PACKAGE_INSTALL_TIMEOUT_SECONDS
+            )
+            if proc.returncode == 0:
+                self.log.info("mcp.packages_installed", packages=packages)
+            else:
+                self.log.warn(
+                    "mcp.packages_install_failed",
+                    packages=packages,
+                    stderr=(stderr or b"").decode()[:500],
+                )
+        except TimeoutError:
+            self.log.warn(
+                "mcp.packages_install_timeout",
+                packages=packages,
+                timeout_seconds=self.MCP_PACKAGE_INSTALL_TIMEOUT_SECONDS,
+            )
+            proc.kill()
+            await proc.wait()
+        except Exception as e:
+            self.log.warn("mcp.packages_install_error", packages=packages, exc=str(e))
+
+    def _build_mcp_config(self, servers: list[dict]) -> dict[str, dict]:
+        """Convert MCP server list to OpenCode mcp config format."""
+        config: dict[str, dict] = {}
+        for server in servers:
+            name = server.get("name", "")
+            if not name:
+                continue
+            if server.get("type") == "remote":
+                entry: dict = {"type": "remote", "url": server.get("url", "")}
+                auth_headers = server.get("headers") or server.get("env") or {}
+                if auth_headers:
+                    entry["headers"] = auth_headers
+                config[name] = entry
+            else:
+                entry = {
+                    "type": "local",
+                    "command": server.get("command", []),
+                }
+                if server.get("env"):
+                    entry["environment"] = server["env"]
+                config[name] = entry
+        return config
+
     async def start_ttyd(self) -> None:
         """Start ttyd web terminal if TERMINAL_ENABLED is set."""
         if not os.environ.get("TERMINAL_ENABLED"):
@@ -560,16 +724,11 @@ class SandboxSupervisor:
         self.log.info("opencode.start")
 
         # Build OpenCode config from session settings
-        # Model format is "provider/model", e.g. "anthropic/claude-sonnet-4-6"
         provider = self.session_config.get("provider", "anthropic")
         model = self.session_config.get("model", "claude-sonnet-4-6")
-        opencode_config = {
+        opencode_config: dict = {
             "model": f"{provider}/{model}",
-            "permission": {
-                "*": {
-                    "*": "allow",
-                },
-            },
+            "permission": {"*": {"*": "allow"}},
         }
 
         # Apply user-supplied OpenCode config (deep-merged on top of system config)
@@ -583,12 +742,23 @@ class SandboxSupervisor:
                               reason="Failed to parse OPENCODE_CONFIG_CONTENT, ignoring")
         self._configure_langfuse(opencode_config)
 
+        # Inject MCP servers
+        mcp_servers = self._resolve_mcp_servers()
+        if mcp_servers:
+            await self._install_mcp_packages(mcp_servers)
+            mcp_config = self._build_mcp_config(mcp_servers)
+            if mcp_config:
+                opencode_config["mcp"] = mcp_config
+                self.log.info("mcp.configured", count=len(mcp_config))
+
         # Determine working directory - use repo path if cloned, otherwise /workspace
         workdir = self.workspace_path
         if self.repo_path.exists() and (self.repo_path / ".git").exists():
             workdir = self.repo_path
 
         self._install_tools(workdir)
+        self._install_skills(workdir)
+        self._install_bin_scripts()
 
         opencode_dir = workdir / ".opencode"
         self._deploy_opencode_plugins(opencode_dir)
@@ -1121,6 +1291,10 @@ class SandboxSupervisor:
                 git_sync_success = await self._update_existing_repo()
             else:
                 git_sync_success = await self.perform_git_sync()
+            if image_build_mode and git_sync_success:
+                head_sha = await self._get_head_sha()
+                if head_sha:
+                    self.log.info("git.sync_complete", head_sha=head_sha)
             self.git_sync_complete.set()
 
             # Phase 2: Run setup script only for fresh or build boots.
@@ -1139,9 +1313,9 @@ class SandboxSupervisor:
             else:
                 start_success = None
 
-            # Image build mode: signal completion, then keep sandbox alive for
-            # snapshot_filesystem(). The builder streams stdout, detects this
-            # event, snapshots the running sandbox, then terminates us.
+            # Image build mode: signal completion then keep sandbox alive for
+            # snapshot_filesystem(). MCP packages are not pre-installed during
+            # builds — they are installed at first use via npx at session start.
             if image_build_mode:
                 duration_ms = int((time.time() - startup_start) * 1000)
                 self.log.info("image_build.complete", duration_ms=duration_ms)

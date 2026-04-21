@@ -39,7 +39,6 @@ RWX_VERSION = "3.13.1"
 RTK_VERSION = "0.35.0"
 
 # Cache buster - change this to force Modal image rebuild
-# v54
 CACHE_BUSTER = "v60-node-22.19.0"
 
 # Base image with all development tools
@@ -184,6 +183,18 @@ base_image = (
         "oxlint --version",
         # Langfuse OpenCode plugin (loaded when LANGFUSE_* env vars are provided)
         "npm install -g opencode-plugin-langfuse@latest",
+    )
+    # Pre-build OpenCode plugin deps into a staging directory.
+    # At boot, _install_tools() copies these into .opencode/ so that
+    # OpenCode's Npm.install() finds package-lock.json in sync and skips
+    # the slow arborist reify() call (2-22s) that would otherwise block
+    # the first prompt and exceed the bridge's HTTP timeout.
+    .run_commands(
+        "mkdir -p /app/opencode-deps",
+        'echo \'{"name":"opencode-tools","type":"module",'
+        '"dependencies":{"@opencode-ai/plugin":"*"}}\''
+        " > /app/opencode-deps/package.json",
+        "cd /app/opencode-deps && npm install --ignore-scripts --no-audit --no-fund",
     )
     # Install code-server for browser-based VS Code editing (direct .deb from GitHub releases)
     .run_commands(
