@@ -193,58 +193,21 @@ app.post("/webhook", async (c) => {
     log.info("webhook.parsed", { trace_id: traceId, ...payloadSummary });
 
     if (eventType === "AgentSessionEvent") {
-      // Deduplicate: use agentSession.id + action as key
-      const agentSession = isObjectRecord(payload.agentSession) ? payload.agentSession : undefined;
-      if (!agentSession) {
-        log.warn("webhook.invalid_payload", {
-          trace_id: traceId,
-          reason: "missing_agent_session_object",
-        });
-        return c.json({ error: "Invalid payload" }, 400);
-      }
-
-      const agentSessionId = readStringField(agentSession, "id");
-      if (!agentSessionId) {
-        log.warn("webhook.invalid_payload", {
-          trace_id: traceId,
-          reason: "missing_agent_session_id",
-        });
-        return c.json({ error: "Invalid payload" }, 400);
-      }
-
-      // Deduplicate by Linear webhook delivery ID.
-      const webhookId = readStringField(payload, "webhookId");
-      if (!webhookId) {
-        log.warn("webhook.invalid_payload", {
-          trace_id: traceId,
-          reason: "missing_webhook_id",
-        });
-        return c.json({ error: "Invalid payload" }, 400);
-      }
-
-      let isDuplicate: boolean;
-      try {
-        isDuplicate = await isDuplicateEvent(c.env, webhookId);
-      } catch (error) {
-        log.error("webhook.deduplication_failed", {
-          trace_id: traceId,
-          event_key: webhookId,
-          error: error instanceof Error ? error : new Error(String(error)),
-        });
-        return c.json({ error: "Deduplication failed" }, 500);
-      }
-
-      if (isDuplicate) {
-        log.info("webhook.deduplicated", { trace_id: traceId, event_key: webhookId });
-        return c.json({ ok: true, skipped: true, reason: "duplicate" });
-      }
-
       if (!isAgentSessionWebhookPayload(payload)) {
         log.warn("webhook.invalid_payload", {
           trace_id: traceId,
           reason: "invalid_agent_session_event_shape",
         });
         return c.json({ error: "Invalid payload" }, 400);
+      }
+
+      // Deduplicate by agentSession.id + action. Linear's webhookId is a
+      // subscription ID (same value for every delivery), not a delivery ID.
+      const dedupKey = `${payload.agentSession.id}:${payload.action}`;
+      const isDuplicate = await isDuplicateEvent(c.env, dedupKey);
+      if (isDuplicate) {
+        log.info("webhook.deduplicated", { trace_id: traceId, event_key: dedupKey });
+        return c.json({ ok: true, skipped: true, reason: "duplicate" });
       }
 
       c.executionCtx.waitUntil(
@@ -254,14 +217,14 @@ app.post("/webhook", async (c) => {
             await handleAgentSessionEvent(payload, c.env, traceId);
             log.info("webhook.async_completed", {
               trace_id: traceId,
-              agent_session_id: agentSessionId,
+              agent_session_id: payloadSummary.agent_session_id,
               action,
               duration_ms: Date.now() - processStart,
             });
           } catch (error) {
             log.error("webhook.async_failed", {
               trace_id: traceId,
-              agent_session_id: agentSessionId,
+              agent_session_id: payloadSummary.agent_session_id,
               action,
               duration_ms: Date.now() - processStart,
               error: error instanceof Error ? error : new Error(String(error)),

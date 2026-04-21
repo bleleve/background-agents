@@ -213,7 +213,7 @@ async function handleFollowUp(
     issue_id: issue.id,
     issue_identifier: issue.identifier,
     agent_session_id: agentSessionId,
-    has_agent_activity: Boolean(agentActivity?.body),
+    has_agent_activity: Boolean(agentActivity?.content?.body),
     has_comment: Boolean(comment),
   });
 

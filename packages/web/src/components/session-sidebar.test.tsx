@@ -176,7 +176,7 @@ describe("SessionSidebar", () => {
       </SWRConfig>
     );
 
-    fireEvent.click(screen.getByRole("link", { name: /^inspect$/i }));
+    fireEvent.click(screen.getByRole("link", { name: /^reef$/i }));
     fireEvent.click(screen.getByTitle("Settings"));
     fireEvent.click(screen.getByRole("link", { name: /automations/i }));
     fireEvent.click(screen.getByRole("link", { name: /analytics/i }));

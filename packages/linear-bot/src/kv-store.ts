@@ -105,18 +105,8 @@ export async function storeIssueSession(
  * Check if an event has already been processed (deduplication).
  */
 export async function isDuplicateEvent(env: Env, eventKey: string): Promise<boolean> {
-  const kvKey = `event:${eventKey}`;
-  try {
-    const existing = await env.LINEAR_KV.get(kvKey);
-    if (existing) return true;
-    await env.LINEAR_KV.put(kvKey, "1", { expirationTtl: 3600 });
-    return false;
-  } catch (e) {
-    log.error("kv.duplicate_event_check_failed", {
-      event_key: eventKey,
-      kv_key: kvKey,
-      error: e instanceof Error ? e.message : String(e),
-    });
-    throw e;
-  }
+  const existing = await env.LINEAR_KV.get(`event:${eventKey}`);
+  if (existing) return true;
+  await env.LINEAR_KV.put(`event:${eventKey}`, "1", { expirationTtl: 3600 });
+  return false;
 }
