@@ -39,7 +39,7 @@ RWX_VERSION = "3.13.1"
 RTK_VERSION = "0.35.0"
 
 # Cache buster - change this to force Modal image rebuild
-CACHE_BUSTER = "v60-node-22.19.0"
+CACHE_BUSTER = "v61-signoz-mcp-bump"
 
 # Base image with all development tools
 base_image = (
