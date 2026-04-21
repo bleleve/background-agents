@@ -33,14 +33,14 @@ TTYD_VERSION = "1.7.7"
 TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 
 # rwx CLI — pinned Linux x86_64 binary; see https://github.com/rwx-cloud/rwx/releases
-RWX_VERSION = "3.13.0"
+RWX_VERSION = "3.13.1"
 
 # RTK CLI — pinned Linux x86_64 musl binary; see https://github.com/rtk-ai/rtk/releases
 RTK_VERSION = "0.35.0"
 
 # Cache buster - change this to force Modal image rebuild
-# v57: install Node.js 22.19.0 via nvm and make it the default
-CACHE_BUSTER = "v57-locales-all-rtk-0.35.0-nvm-node-22.19.0"
+# v54
+CACHE_BUSTER = "v60-node-22.19.0"
 
 # Base image with all development tools
 base_image = (
@@ -120,21 +120,9 @@ base_image = (
     .run_commands(
         'export BASH_ENV="/root/.bash_env" && touch "${BASH_ENV}"',
         'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | PROFILE="${BASH_ENV}" bash',
-        (
-            'export BASH_ENV="/root/.bash_env" && '
-            'bash -lc "source \\"${BASH_ENV}\\" && '
-            "nvm install 22.19.0 && "
-            "nvm alias default 22.19.0 && "
-            'nvm use default"'
-        ),
-        (
-            'export BASH_ENV="/root/.bash_env" && '
-            'bash -lc "source \\"${BASH_ENV}\\" && '
-            'NODE_BIN_DIR=\\"$(dirname \\"$(nvm which default)\\")\\" && '
-            'ln -sf \\"${NODE_BIN_DIR}/node\\" /usr/local/bin/node && '
-            'ln -sf \\"${NODE_BIN_DIR}/npm\\" /usr/local/bin/npm && '
-            'ln -sf \\"${NODE_BIN_DIR}/npx\\" /usr/local/bin/npx"'
-        ),
+        # Add NodeSource repository for Node.js 22
+        "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
+        "apt-get install -y nodejs=22.19.0-1nodesource1",
         # Verify installation
         "node --version",
         "npm --version",
