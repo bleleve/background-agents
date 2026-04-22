@@ -64,7 +64,7 @@ export function normalizeLinearEvent(
     actor,
     labels: labels?.length ? labels : undefined,
     linearStatus: data.state?.name,
-    triggerKey: `linear:${payload.organizationId}:${data.id}:${payload.action}:${payload.createdAt}`,
+    triggerKey: `linear:${payload.organizationId}:${data.id}:${payload.action}:${payload.action === "update" ? (data.updatedAt ?? payload.createdAt) : (data.createdAt ?? payload.createdAt)}`,
     concurrencyKey: `linear:${repoOwner}/${repoName}:${data.id}`,
     meta: {
       issueId: data.id,

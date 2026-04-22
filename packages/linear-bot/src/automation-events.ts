@@ -31,12 +31,11 @@ async function resolveRepo(
     }
   }
 
-  // 2. Check team→repo mapping (use first entry for the team key)
-  if (data.team?.key) {
+  // 2. Check team→repo mapping (keyed by team ID)
+  if (data.team?.id) {
     const teamMapping = await getTeamRepoMapping(env);
-    // Team mapping is keyed by team ID; also try team key as fallback
-    const teamId = data.team.id ?? "";
-    const entries = teamId ? teamMapping[teamId] : null;
+    const teamId = data.team.id;
+    const entries = teamMapping[teamId];
     if (entries && entries.length > 0) {
       return { repoOwner: entries[0].owner, repoName: entries[0].name };
     }

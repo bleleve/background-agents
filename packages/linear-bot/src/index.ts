@@ -60,6 +60,22 @@ function isAgentSessionWebhookPayload(payload: unknown): payload is AgentSession
   return typeof agentSession.id === "string";
 }
 
+function isLinearIssuePayload(payload: unknown): payload is LinearWebhookPayload {
+  if (!isObjectRecord(payload)) return false;
+
+  const type = readStringField(payload, "type");
+  const action = readStringField(payload, "action");
+  const organizationId = readStringField(payload, "organizationId");
+  const webhookId = readStringField(payload, "webhookId");
+  const data = payload.data;
+
+  if (type !== "Issue" || !action || !organizationId || !webhookId || !isObjectRecord(data)) {
+    return false;
+  }
+
+  return typeof data.id === "string" && typeof data.identifier === "string";
+}
+
 function summarizeWebhookPayload(payload: Record<string, unknown>): Record<string, unknown> {
   const agentSession = isObjectRecord(payload.agentSession) ? payload.agentSession : null;
   const issue = agentSession && isObjectRecord(agentSession.issue) ? agentSession.issue : null;
@@ -247,8 +263,16 @@ app.post("/webhook", async (c) => {
     }
 
     if (eventType === "Issue") {
+      if (!isLinearIssuePayload(payload)) {
+        log.warn("webhook.invalid_payload", {
+          trace_id: traceId,
+          reason: "invalid_issue_event_shape",
+        });
+        return c.json({ error: "Invalid payload" }, 400);
+      }
+
       c.executionCtx.waitUntil(
-        handleLinearIssueEvent(payload as unknown as LinearWebhookPayload, c.env).catch((err) => {
+        handleLinearIssueEvent(payload, c.env).catch((err) => {
           log.error("webhook.issue_event_failed", {
             trace_id: traceId,
             action,
