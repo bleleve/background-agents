@@ -62,12 +62,12 @@ class SandboxSupervisor:
     SETUP_SCRIPT_PATH = "scripts/.openinspect/setup.sh"
     START_SCRIPT_PATH = "scripts/.openinspect/start.sh"
     DEFAULT_SETUP_TIMEOUT_SECONDS = 1800
-    DEFAULT_START_TIMEOUT_SECONDS = 240
+    DEFAULT_START_TIMEOUT_SECONDS = 120
     CLONE_DEPTH_COMMITS = 100
     SIDECAR_TIMEOUT_SECONDS = 5
     LANGFUSE_PLUGIN_NAME = "opencode-plugin-langfuse"
     RTK_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/rtk.ts"
-    CODEX_AUTH_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/codex-auth-plugin.ts"
+    CODEX_AUTH_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/codex-auth-plugin.js"
     MCP_PACKAGE_INSTALL_TIMEOUT_SECONDS = 180
 
     def __init__(self):
@@ -349,6 +349,9 @@ class SandboxSupervisor:
         if cached_modules.is_dir() and not local_modules.exists():
             shutil.copytree(cached_modules, local_modules, symlinks=True)
 
+        # Ensure .opencode is excluded from git tracking in the cloned repo.
+        self._exclude_opencode_from_git(workdir)
+
     def _install_bin_scripts(self) -> None:
         """Install standalone CLI scripts into /usr/local/bin.
 
@@ -468,7 +471,7 @@ class SandboxSupervisor:
         codex_source = Path(self.CODEX_AUTH_PLUGIN_SOURCE_PATH)
         if codex_source.exists() and os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN"):
             plugins_to_copy.append(
-                (codex_source, "codex-auth-plugin.ts", "openai_oauth.plugin_deployed")
+                (codex_source, codex_source.name, "openai_oauth.plugin_deployed")
             )
 
         if not plugins_to_copy:

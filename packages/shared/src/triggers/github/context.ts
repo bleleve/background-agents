@@ -3,6 +3,7 @@
  */
 
 const BODY_PREVIEW_MAX = 500;
+const GITHUB_EVENT_PREAMBLE = "This automation was triggered by a GitHub event.";
 
 export function buildGitHubContextBlock(
   eventType: string,
@@ -33,7 +34,7 @@ export function buildGitHubContextBlock(
     return buildIssueContext(eventType, payload, repoFullName);
   }
 
-  return `This automation was triggered by a GitHub event.\n\nEvent: ${eventType}\nRepository: ${repoFullName}`;
+  return `${GITHUB_EVENT_PREAMBLE}\n\nEvent: ${eventType}\nRepository: ${repoFullName}`;
 }
 
 function buildPullRequestContext(
@@ -43,7 +44,7 @@ function buildPullRequestContext(
 ): string {
   const pr = payload.pull_request as Record<string, unknown> | undefined;
   if (!pr) {
-    return `This automation was triggered by a GitHub event.\n\nEvent: ${eventType}\nRepository: ${repoFullName}`;
+    return `${GITHUB_EVENT_PREAMBLE}\n\nEvent: ${eventType}\nRepository: ${repoFullName}`;
   }
 
   const prNumber = pr.number;
@@ -60,7 +61,7 @@ function buildPullRequestContext(
   const action = eventType.split(".")[1];
 
   const lines: string[] = [
-    "This automation was triggered by a GitHub event.",
+    GITHUB_EVENT_PREAMBLE,
     "",
     `Event: ${eventType}`,
     `Repository: ${repoFullName}`,
@@ -102,7 +103,7 @@ function buildIssueCommentContext(payload: Record<string, unknown>, repoFullName
   const issueTitle = issue?.title as string | undefined;
 
   const lines: string[] = [
-    "This automation was triggered by a GitHub event.",
+    GITHUB_EVENT_PREAMBLE,
     "",
     "Event: issue_comment.created",
     `Repository: ${repoFullName}`,
@@ -135,7 +136,7 @@ function buildReviewCommentContext(payload: Record<string, unknown>, repoFullNam
   const path = comment?.path as string | undefined;
 
   const lines: string[] = [
-    "This automation was triggered by a GitHub event.",
+    GITHUB_EVENT_PREAMBLE,
     "",
     "Event: pull_request_review_comment.created",
     `Repository: ${repoFullName}`,
@@ -175,7 +176,7 @@ function buildCheckSuiteContext(payload: Record<string, unknown>, repoFullName: 
   const prNumbers = pullRequests?.map((pr) => `#${pr.number}`).join(", ");
 
   const lines: string[] = [
-    "This automation was triggered by a GitHub event.",
+    GITHUB_EVENT_PREAMBLE,
     "",
     "Event: check_suite.completed",
     `Repository: ${repoFullName}`,
@@ -204,7 +205,7 @@ function buildIssueContext(
 ): string {
   const issue = payload.issue as Record<string, unknown> | undefined;
   if (!issue) {
-    return `This automation was triggered by a GitHub event.\n\nEvent: ${eventType}\nRepository: ${repoFullName}`;
+    return `${GITHUB_EVENT_PREAMBLE}\n\nEvent: ${eventType}\nRepository: ${repoFullName}`;
   }
 
   const issueNumber = issue.number;
@@ -216,7 +217,7 @@ function buildIssueContext(
   const bodyPreview = body ? body.slice(0, BODY_PREVIEW_MAX) : undefined;
 
   const lines: string[] = [
-    "This automation was triggered by a GitHub event.",
+    GITHUB_EVENT_PREAMBLE,
     "",
     `Event: ${eventType}`,
     `Repository: ${repoFullName}`,

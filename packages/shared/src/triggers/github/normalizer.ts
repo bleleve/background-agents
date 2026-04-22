@@ -282,7 +282,7 @@ function normalizeIssue(
 
 function getChangedFiles(pr: Record<string, unknown>): string[] | undefined {
   const changedFilesCount = pr.changed_files as number | undefined;
-  if (!changedFilesCount || changedFilesCount === 0) return undefined;
+  if (!changedFilesCount) return undefined;
 
   // `files` is not included in webhook payloads — requires a REST API call.
   // When present (e.g., in tests or enriched payloads), use it.
