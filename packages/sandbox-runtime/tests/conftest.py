@@ -12,6 +12,7 @@ class MockResponse:
         self.status_code = status_code
         self._json_data = json_data
         self.text = text
+        self.content = text.encode() if text else b""
 
     def json(self) -> Any:
         return self._json_data
