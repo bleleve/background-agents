@@ -362,7 +362,6 @@ async function handleNewSession(
   const startTime = Date.now();
   const agentSessionId = webhook.agentSession.id;
   const comment = webhook.agentSession.comment;
-  const normalizedCommentBody = comment ? normalizeLinearCommentBody(comment) : "";
   const orgId = webhook.organizationId;
 
   const client = await getLinearClient(env, orgId);

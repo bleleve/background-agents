@@ -39,7 +39,7 @@ RWX_VERSION = "3.13.1"
 RTK_VERSION = "0.35.0"
 
 # Cache buster - change this to force Modal image rebuild
-CACHE_BUSTER = "v61-signoz-mcp-bump"
+CACHE_BUSTER = "v62-signoz-mcp-bump"
 
 # Base image with all development tools
 base_image = (
@@ -156,8 +156,11 @@ base_image = (
     # )
     # Install Signoz MCP server
     .run_commands(
-        "curl https://s3.us-west-1.amazonaws.com/static.fountain.com/fountain_mcp_binaries/signoz-mcp-server -o /usr/local/bin/signoz-mcp-server",
+        "curl -L https://github.com/SigNoz/signoz-mcp-server/releases/download/v0.2.1/signoz-mcp-server_linux_amd64.tar.gz -o /tmp/signoz-mcp-server.tar.gz",
+        "tar -xzf /tmp/signoz-mcp-server.tar.gz -C /usr/local/bin --strip-components=2 signoz-mcp-server_linux_amd64/bin/signoz-mcp-server",
+        "rm /tmp/signoz-mcp-server.tar.gz",
         "chmod +x /usr/local/bin/signoz-mcp-server",
+        "md5sum /usr/local/bin/signoz-mcp-server",
     )
     # # Install Spacelift CLI
     # .run_commands(
