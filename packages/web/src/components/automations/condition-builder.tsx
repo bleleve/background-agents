@@ -301,6 +301,7 @@ function TagInput({
                 addValue();
               }
             }}
+            onBlur={addValue}
             placeholder={placeholder}
             className="text-xs"
           />
