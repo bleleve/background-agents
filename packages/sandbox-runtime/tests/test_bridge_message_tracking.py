@@ -181,9 +181,7 @@ class TestBuildPromptRequestBody:
 
         body = bridge._build_prompt_request_body("Hello", None)
 
-        assert body["parts"] == [
-            {"type": "text", "text": "Hello\n\nAlways include this text."}
-        ]
+        assert body["parts"] == [{"type": "text", "text": "Hello\n\nAlways include this text."}]
 
     def test_skips_env_prompt_suffix_when_disabled(self, monkeypatch: pytest.MonkeyPatch):
         """Should not append PROMPT_SUFFIX when include_prompt_suffix=False."""

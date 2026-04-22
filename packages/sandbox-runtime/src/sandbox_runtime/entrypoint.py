@@ -35,10 +35,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
     """
     result = dict(base)
     for key, value in override.items():
-        if (
-            isinstance(value, dict)
-            and isinstance(result.get(key), dict)
-        ):
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
             result[key] = _deep_merge(result[key], value)
         else:
             result[key] = value
@@ -738,8 +735,10 @@ class SandboxSupervisor:
                 user_config = json.loads(user_config_str)
                 opencode_config = _deep_merge(opencode_config, user_config)
             except json.JSONDecodeError:
-                self.log.warn("opencode.user_config_parse_error",
-                              reason="Failed to parse OPENCODE_CONFIG_CONTENT, ignoring")
+                self.log.warn(
+                    "opencode.user_config_parse_error",
+                    reason="Failed to parse OPENCODE_CONFIG_CONTENT, ignoring",
+                )
         self._configure_langfuse(opencode_config)
 
         # Inject MCP servers

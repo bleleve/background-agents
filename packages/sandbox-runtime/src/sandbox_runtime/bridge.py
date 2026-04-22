@@ -211,7 +211,6 @@ class AgentBridge:
         # OpenCode session. None means unknown (for loaded sessions).
         self._has_sent_prompt_in_session: bool | None = None
 
-
     @property
     def ws_url(self) -> str:
         """WebSocket URL for control plane connection."""
@@ -1093,7 +1092,9 @@ class AgentBridge:
                         since_last_chunk_ms = int((now_loop - last_event_at) * 1000)
                         last_event_at = now_loop
                         last_event_type = event_type_name
-                        event_type_counts[event_type_name] = event_type_counts.get(event_type_name, 0) + 1
+                        event_type_counts[event_type_name] = (
+                            event_type_counts.get(event_type_name, 0) + 1
+                        )
                         event_count += 1
                         if event_type_name == "server.heartbeat":
                             heartbeat_count += 1
