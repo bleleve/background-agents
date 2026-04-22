@@ -120,7 +120,6 @@ function normalizePullRequest(
   const headSha = (pr.head as Record<string, unknown> | undefined)?.sha as string | undefined;
   const branch = (pr.head as Record<string, unknown> | undefined)?.ref as string | undefined;
   const labels = getPRLabels(pr);
-  const changedFiles = getChangedFiles(pr);
 
   const triggerKey = `pr:${prNumber}:${action}:${headSha ?? "unknown"}`;
   const concurrencyKey = `pr:${prNumber}`;
@@ -135,7 +134,6 @@ function normalizePullRequest(
     branch,
     labels,
     actor,
-    changedFiles,
     contextBlock: buildGitHubContextBlock(eventType, payload),
     meta: {
       prNumber,
@@ -276,20 +274,4 @@ function normalizeIssue(
       action,
     },
   };
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getChangedFiles(pr: Record<string, unknown>): string[] | undefined {
-  const changedFilesCount = pr.changed_files as number | undefined;
-  if (!changedFilesCount) return undefined;
-
-  // `files` is not included in webhook payloads — requires a REST API call.
-  // When present (e.g., in tests or enriched payloads), use it.
-  const files = pr.files as Array<Record<string, unknown>> | undefined;
-  if (files?.length) {
-    return files.map((f) => f.filename as string).filter(Boolean);
-  }
-
-  return undefined;
 }
