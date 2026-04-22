@@ -16,7 +16,8 @@ resource "null_resource" "web_app_cloudflare_build" {
 
     environment = {
       # NEXT_PUBLIC_* vars must be set at build time (inlined into client bundle)
-      NEXT_PUBLIC_WS_URL = local.ws_url
+      NEXT_PUBLIC_WS_URL           = local.ws_url
+      NEXT_PUBLIC_SANDBOX_PROVIDER = var.sandbox_provider
     }
   }
 }
@@ -64,7 +65,7 @@ resource "local_file" "web_app_wrangler_production" {
     workers_dev = false
 
     [[routes]]
-    pattern = "reef-staging.internal.fountain.com"
+    pattern = "coding-agent-staging.internal.fountain.com"
     custom_domain = true
 
     [observability]
@@ -78,8 +79,10 @@ resource "local_file" "web_app_wrangler_production" {
     NEXTAUTH_URL = "${local.web_app_url}"
     CONTROL_PLANE_URL = "${local.control_plane_url}"
     NEXT_PUBLIC_WS_URL = "${local.ws_url}"
+    NEXT_PUBLIC_SANDBOX_PROVIDER = "${var.sandbox_provider}"
     ALLOWED_USERS = "${var.allowed_users}"
     ALLOWED_EMAIL_DOMAINS = "${var.allowed_email_domains}"
+    UNSAFE_ALLOW_ALL_USERS = "${tostring(var.unsafe_allow_all_users)}"
 
     [assets]
     directory = ".open-next/assets"

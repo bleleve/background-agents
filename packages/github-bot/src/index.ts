@@ -25,7 +25,7 @@ import {
   handleCheckSuiteCompleted,
   type HandlerResult,
 } from "./handlers";
-import { normalizeGitHubEvent } from "@open-inspect/shared";
+import { normalizeGitHubEvent, buildInternalAuthHeaders } from "@open-inspect/shared";
 
 const app = new Hono<{ Bindings: Env }>();
 const DELIVERY_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -194,10 +194,10 @@ async function handleWebhook(
     if (normalizedEvent !== null) {
       try {
         const body = JSON.stringify(normalizedEvent);
-        const headers = await buildInternalAuthHeaders(body, env.INTERNAL_CALLBACK_SECRET);
+        const authHeaders = await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET, traceId);
         const response = await env.CONTROL_PLANE.fetch("https://internal/internal/github-event", {
           method: "POST",
-          headers,
+          headers: { "Content-Type": "application/json", ...authHeaders },
           body,
         });
         if (!response.ok) {
@@ -218,24 +218,6 @@ async function handleWebhook(
       }
     }
   }
-}
-
-async function buildInternalAuthHeaders(body: string, secret: string): Promise<HeadersInit> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
-  const hexSig = Array.from(new Uint8Array(signature))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  return {
-    "Content-Type": "application/json",
-    "X-Internal-Signature": `sha256=${hexSig}`,
-  };
 }
 
 function dispatchHandler(
