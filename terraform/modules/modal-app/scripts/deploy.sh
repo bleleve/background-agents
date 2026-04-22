@@ -30,51 +30,35 @@ cd "${DEPLOY_PATH}" || {
     exit 1
 }
 
-# Set up the deploy virtual environment.
-# sandbox_runtime is a local sibling package (../sandbox-runtime) that must be
-# importable at deploy time so Modal can parse the app's module graph.
-VENV_DIR=".venv"
-SANDBOX_RUNTIME_DIR="../sandbox-runtime"
-
-if [ ! -f "${VENV_DIR}/bin/python" ]; then
-    echo "Creating deploy virtual environment..."
-    # sandbox_runtime requires Python >= 3.12; prefer python3.12 explicitly
-    if command -v python3.12 &>/dev/null; then
-        PYTHON=python3.12
-    elif python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,12) else 1)' 2>/dev/null; then
-        PYTHON=python3
-    else
-        echo "Error: Python >= 3.12 is required but not found (tried python3.12 and python3)"
-        exit 1
-    fi
-    echo "Using $(${PYTHON} --version)"
-    "${PYTHON}" -m venv "${VENV_DIR}"
+if ! command -v uv >/dev/null 2>&1; then
+    echo "Error: uv is required to deploy ${APP_NAME}. Install uv, then run 'cd ${DEPLOY_PATH} && uv sync --frozen'."
+    exit 1
 fi
 
-echo "Installing deploy dependencies..."
-# Install sandbox_runtime first (local package, not on PyPI)
-"${VENV_DIR}/bin/pip" install --quiet -e "${SANDBOX_RUNTIME_DIR}"
-# Install modal-infra and all its declared dependencies (fastapi, httpx, etc.)
-"${VENV_DIR}/bin/pip" install --quiet -e "."
+if [[ ! -f "pyproject.toml" ]]; then
+    echo "Error: Expected pyproject.toml in ${DEPLOY_PATH}."
+    exit 1
+fi
 
-MODAL="${VENV_DIR}/bin/modal"
+# Ensure Python dependencies are installed (includes sandbox-runtime)
+uv sync --frozen
 
-# Deploy using Modal CLI
+# Deploy using Modal CLI (via uv to use the project's virtual environment)
 if [ "${DEPLOY_MODULE}" = "deploy" ]; then
     # Method 1: Use deploy.py wrapper (recommended)
-    "${MODAL}" deploy deploy.py || {
+    uv run modal deploy deploy.py || {
         echo "Error: Modal deployment failed for ${APP_NAME}"
         exit 1
     }
 elif [ "${DEPLOY_MODULE}" = "src" ]; then
     # Method 2: Deploy the src package directly
-    "${MODAL}" deploy -m src || {
+    uv run modal deploy -m src || {
         echo "Error: Modal deployment failed for ${APP_NAME}"
         exit 1
     }
 else
     # Generic deployment
-    "${MODAL}" deploy "${DEPLOY_MODULE}" || {
+    uv run modal deploy "${DEPLOY_MODULE}" || {
         echo "Error: Modal deployment failed for ${APP_NAME}"
         exit 1
     }
