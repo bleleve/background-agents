@@ -25,6 +25,7 @@ import {
   handleCheckSuiteCompleted,
   type HandlerResult,
 } from "./handlers";
+import { normalizeGitHubEvent } from "@open-inspect/shared";
 
 const app = new Hono<{ Bindings: Env }>();
 const DELIVERY_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -185,6 +186,56 @@ async function handleWebhook(
     wideEvent.handler_action = result.handler_action;
   }
   log.info("webhook.handled", wideEvent);
+
+  // Forward normalized event to control-plane for automation triggering.
+  // This is additive — failures here must not affect existing bot behavior.
+  if (event) {
+    const normalizedEvent = normalizeGitHubEvent(event, p);
+    if (normalizedEvent !== null) {
+      try {
+        const body = JSON.stringify(normalizedEvent);
+        const headers = await buildInternalAuthHeaders(body, env.INTERNAL_CALLBACK_SECRET);
+        const response = await env.CONTROL_PLANE.fetch("https://internal/internal/github-event", {
+          method: "POST",
+          headers,
+          body,
+        });
+        if (!response.ok) {
+          log.warn("webhook.github_event_forward_failed", {
+            trace_id: traceId,
+            delivery_id: deliveryId,
+            event_type: event,
+            status: response.status,
+          });
+        }
+      } catch (err) {
+        log.warn("webhook.github_event_forward_error", {
+          trace_id: traceId,
+          delivery_id: deliveryId,
+          event_type: event,
+          error: err instanceof Error ? err : new Error(String(err)),
+        });
+      }
+    }
+  }
+}
+
+async function buildInternalAuthHeaders(body: string, secret: string): Promise<HeadersInit> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
+  const hexSig = Array.from(new Uint8Array(signature))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return {
+    "Content-Type": "application/json",
+    "X-Internal-Signature": `sha256=${hexSig}`,
+  };
 }
 
 function dispatchHandler(
