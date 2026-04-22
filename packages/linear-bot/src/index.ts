@@ -15,7 +15,9 @@ import {
 import { callbacksRouter } from "./callbacks";
 import { createLogger } from "./logger";
 import { verifyInternalToken } from "@open-inspect/shared";
+import type { LinearWebhookPayload } from "@open-inspect/shared";
 import { handleAgentSessionEvent, escapeHtml } from "./webhook-handler";
+import { handleLinearIssueEvent } from "./automation-events";
 import {
   getTeamRepoMapping,
   getProjectRepoMapping,
@@ -231,6 +233,28 @@ app.post("/webhook", async (c) => {
             });
           }
         })()
+      );
+
+      log.info("http.request", {
+        trace_id: traceId,
+        http_path: "/webhook",
+        http_status: 200,
+        type: eventType,
+        action,
+        duration_ms: Date.now() - startTime,
+      });
+      return c.json({ ok: true });
+    }
+
+    if (eventType === "Issue") {
+      c.executionCtx.waitUntil(
+        handleLinearIssueEvent(payload as unknown as LinearWebhookPayload, c.env).catch((err) => {
+          log.error("webhook.issue_event_failed", {
+            trace_id: traceId,
+            action,
+            error: err instanceof Error ? err : new Error(String(err)),
+          });
+        })
       );
 
       log.info("http.request", {

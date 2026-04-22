@@ -53,3 +53,7 @@ export {
   evaluateJsonPathFilter,
   buildWebhookContextBlock,
 } from "./webhook";
+
+// Linear source module
+export { linearSource, normalizeLinearEvent, buildLinearContextBlock } from "./linear";
+export type { LinearWebhookPayload } from "./linear";
