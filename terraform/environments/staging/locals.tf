@@ -1,5 +1,7 @@
 locals {
-  name_suffix = var.deployment_name
+  name_suffix         = var.deployment_name
+  use_modal_backend   = var.sandbox_provider == "modal"
+  use_daytona_backend = var.sandbox_provider == "daytona"
 
   # URLs for cross-service configuration
   control_plane_host = "open-inspect-control-plane-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev"
@@ -8,7 +10,7 @@ locals {
 
   # Web app URL depends on deployment platform
   web_app_url = var.web_platform == "cloudflare" ? (
-    "https://reef-staging.internal.fountain.com"
+    "https://coding-agent-staging.internal.fountain.com"
     ) : (
     "https://open-inspect-${local.name_suffix}.vercel.app"
   )

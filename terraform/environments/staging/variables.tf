@@ -25,14 +25,14 @@ variable "cloudflare_worker_subdomain" {
 }
 
 variable "vercel_api_token" {
-  description = "Vercel API token (required only when web_platform = 'vercel')"
+  description = "Vercel API token (required only when web_platform = 'vercel'). Do NOT set to empty string — the Vercel provider validates this on init even when no Vercel resources are created. Leave unset to use the built-in dummy token for Cloudflare-only deployments."
   type        = string
   sensitive   = true
-  default     = "unused"
+  default     = "000000000000000000000000"
 }
 
 variable "vercel_team_id" {
-  description = "Vercel team ID (required only when web_platform = 'vercel')"
+  description = "Vercel team ID (required only when web_platform = 'vercel'). Leave unset when using Cloudflare."
   type        = string
   default     = "unused"
 }
@@ -41,17 +41,35 @@ variable "modal_token_id" {
   description = "Modal API token ID"
   type        = string
   sensitive   = true
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "modal" || length(var.modal_token_id) > 0
+    error_message = "modal_token_id must be set when sandbox_provider = 'modal'."
+  }
 }
 
 variable "modal_token_secret" {
   description = "Modal API token secret"
   type        = string
   sensitive   = true
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "modal" || length(var.modal_token_secret) > 0
+    error_message = "modal_token_secret must be set when sandbox_provider = 'modal'."
+  }
 }
 
 variable "modal_workspace" {
   description = "Modal workspace name (used in endpoint URLs)"
   type        = string
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "modal" || length(var.modal_workspace) > 0
+    error_message = "modal_workspace must be set when sandbox_provider = 'modal'."
+  }
 }
 
 # =============================================================================
@@ -234,6 +252,52 @@ variable "modal_api_secret" {
   description = "Shared secret for authenticating control plane to Modal API calls (generate with: openssl rand -hex 32)"
   type        = string
   sensitive   = true
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "modal" || length(var.modal_api_secret) > 0
+    error_message = "modal_api_secret must be set when sandbox_provider = 'modal'."
+  }
+}
+
+variable "daytona_api_url" {
+  description = "Base URL for the Daytona REST API (e.g. https://app.daytona.io/api)"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "daytona" || length(var.daytona_api_url) > 0
+    error_message = "daytona_api_url must be set when sandbox_provider = 'daytona'."
+  }
+}
+
+variable "daytona_api_key" {
+  description = "API key for Daytona REST API (Bearer auth)"
+  type        = string
+  sensitive   = true
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "daytona" || length(var.daytona_api_key) > 0
+    error_message = "daytona_api_key must be set when sandbox_provider = 'daytona'."
+  }
+}
+
+variable "daytona_base_snapshot" {
+  description = "Named Daytona snapshot used for fresh sandbox creation"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "daytona" || length(var.daytona_base_snapshot) > 0
+    error_message = "daytona_base_snapshot must be set when sandbox_provider = 'daytona'."
+  }
+}
+
+variable "daytona_target" {
+  description = "Optional Daytona target name"
+  type        = string
+  default     = ""
 }
 
 variable "nextauth_secret" {
@@ -245,6 +309,17 @@ variable "nextauth_secret" {
 # =============================================================================
 # Configuration
 # =============================================================================
+
+variable "sandbox_provider" {
+  description = "Sandbox backend for session execution: 'modal' or 'daytona'"
+  type        = string
+  default     = "modal"
+
+  validation {
+    condition     = contains(["modal", "daytona"], var.sandbox_provider)
+    error_message = "sandbox_provider must be 'modal' or 'daytona'."
+  }
+}
 
 variable "web_platform" {
   description = "Platform for the web app deployment: 'vercel' or 'cloudflare' (OpenNext)"
@@ -268,6 +343,24 @@ variable "enable_durable_object_bindings" {
   default     = true
 }
 
+variable "control_plane_migration_tag" {
+  description = "Current migration tag for control plane DO migrations"
+  type        = string
+  default     = "v1"
+}
+
+variable "control_plane_migration_old_tag" {
+  description = "Previous migration tag for control plane DO migrations (null for fresh deployments)"
+  type        = string
+  default     = null
+}
+
+variable "control_plane_new_sqlite_classes" {
+  description = "DO classes new in this control plane migration step (empty means treat all configured classes as new)"
+  type        = list(string)
+  default     = []
+}
+
 variable "enable_service_bindings" {
   description = "Enable service bindings. Set false for initial deployment if target workers don't exist yet."
   type        = bool
@@ -281,17 +374,53 @@ variable "project_root" {
 }
 
 # =============================================================================
+# R2 Storage
+# =============================================================================
+
+variable "r2_media_location" {
+  description = "Cloudflare R2 location hint for the media bucket (e.g. ENAM, WNAM, APAC, WEUR, EEUR)"
+  type        = string
+  default     = "ENAM"
+}
+
+# =============================================================================
 # Access Control
 # =============================================================================
 
 variable "allowed_users" {
-  description = "Comma-separated list of GitHub usernames allowed to sign in (empty = allow all)"
+  description = "Comma-separated list of GitHub usernames allowed to sign in. Leave empty only when allowed_email_domains is set or unsafe_allow_all_users is true."
   type        = string
   default     = ""
 }
 
 variable "allowed_email_domains" {
-  description = "Comma-separated list of email domains allowed to sign in (e.g., 'example.com,corp.io'). Empty = allow all domains."
+  description = "Comma-separated list of email domains allowed to sign in (e.g., 'example.com,corp.io'). Leave empty only when allowed_users is set or unsafe_allow_all_users is true."
   type        = string
   default     = ""
+}
+
+variable "langfuse_public_key" {
+  description = "Langfuse public key for OpenCode tracing in sandboxes (optional)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "langfuse_secret_key" {
+  description = "Langfuse secret key for OpenCode tracing in sandboxes (optional)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "langfuse_baseurl" {
+  description = "Langfuse base URL for self-hosted deployments (optional)"
+  type        = string
+  default     = ""
+}
+
+variable "unsafe_allow_all_users" {
+  description = "Bypass Terraform's access-control safety check and allow any authenticated GitHub user to sign in when both allowlists are empty. Set to true only for intentionally open deployments."
+  type        = bool
+  default     = false
 }
