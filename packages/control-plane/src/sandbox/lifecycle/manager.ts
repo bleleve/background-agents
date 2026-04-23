@@ -1216,5 +1216,6 @@ export class SandboxLifecycleManager {
    */
   onSandboxConnected(): void {
     this.isSpawningSandbox = false;
+    this.storage.setLastSpawnError(null, null);
   }
 }
