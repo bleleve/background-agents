@@ -7,9 +7,11 @@ import type { LinearWebhookPayload } from "./normalizer";
 const basePayload: LinearWebhookPayload = {
   type: "Issue",
   action: "create",
+  actor: { id: "user-1", type: "user", name: "John Smith", email: "john@example.com" },
   organizationId: "org-123",
   webhookId: "webhook-456",
   createdAt: "2026-01-15T10:30:00.000Z",
+  webhookTimestamp: 1737037800000,
   data: {
     id: "issue-abc",
     identifier: "ENG-123",
@@ -62,7 +64,7 @@ describe("normalizeLinearEvent", () => {
       expect(event!.linearStatus).toBe("In Progress");
     });
 
-    it("extracts actor from data.creator.name", () => {
+    it("extracts actor from top-level actor.name", () => {
       const event = normalizeLinearEvent(basePayload, repoOwner, repoName);
 
       expect(event).not.toBeNull();
@@ -189,9 +191,22 @@ describe("normalizeLinearEvent", () => {
       expect(event!.linearStatus).toBeUndefined();
     });
 
-    it("handles event with no creator — falls back to assignee name for actor", () => {
+    it("falls back to data.creator.name when top-level actor is absent", () => {
       const payload: LinearWebhookPayload = {
         ...basePayload,
+        actor: undefined,
+        data: { ...basePayload.data, creator: { id: "user-1", name: "John Smith" } },
+      };
+      const event = normalizeLinearEvent(payload, repoOwner, repoName);
+
+      expect(event).not.toBeNull();
+      expect(event!.actor).toBe("John Smith");
+    });
+
+    it("falls back to data.assignee.name when actor and creator are absent", () => {
+      const payload: LinearWebhookPayload = {
+        ...basePayload,
+        actor: undefined,
         data: { ...basePayload.data, creator: undefined },
       };
       const event = normalizeLinearEvent(payload, repoOwner, repoName);
@@ -200,9 +215,10 @@ describe("normalizeLinearEvent", () => {
       expect(event!.actor).toBe("Jane Doe");
     });
 
-    it("handles event with no creator and no assignee (actor undefined)", () => {
+    it("actor is undefined when actor, creator, and assignee are all absent", () => {
       const payload: LinearWebhookPayload = {
         ...basePayload,
+        actor: undefined,
         data: { ...basePayload.data, creator: undefined, assignee: undefined },
       };
       const event = normalizeLinearEvent(payload, repoOwner, repoName);

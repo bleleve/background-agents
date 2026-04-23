@@ -57,9 +57,11 @@ function makeEnv(kv: KVNamespace, fetcher: Fetcher, secret?: string): Env {
 const baseCreatePayload: LinearWebhookPayload = {
   type: "Issue",
   action: "create",
+  actor: { id: "user-1", type: "user", name: "John Smith", email: "john@example.com" },
   organizationId: "org-123",
   webhookId: "webhook-456",
   createdAt: "2026-01-15T10:30:00.000Z",
+  webhookTimestamp: 1737037800000,
   data: {
     id: "issue-abc",
     identifier: "ENG-123",

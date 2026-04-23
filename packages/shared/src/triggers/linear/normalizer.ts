@@ -10,9 +10,13 @@ import { buildLinearContextBlock } from "./context";
 export interface LinearWebhookPayload {
   type: string;
   action: string;
+  /** The actor who triggered the action (user, OAuth client, or integration). */
+  actor?: { id: string; type: string; name: string; email?: string; url?: string };
   organizationId: string;
   webhookId: string;
   createdAt: string;
+  /** UNIX timestamp in milliseconds indicating when the webhook was sent. */
+  webhookTimestamp?: number;
   data: {
     id: string;
     identifier: string;
@@ -30,6 +34,8 @@ export interface LinearWebhookPayload {
     creator?: { id: string; name: string };
   };
   url?: string;
+  /** For update actions, contains the previous values of all updated properties. */
+  updatedFrom?: Record<string, unknown>;
 }
 
 // ─── Supported actions ────────────────────────────────────────────────────────
@@ -54,7 +60,9 @@ export function normalizeLinearEvent(
   const { data } = payload;
 
   const labels = data.labels?.map((l) => l.name).filter(Boolean);
-  const actor = data.creator?.name ?? data.assignee?.name;
+  // Prefer the top-level actor field (present in all real Linear webhook payloads)
+  // and fall back to data.creator or data.assignee for backwards compatibility.
+  const actor = payload.actor?.name ?? data.creator?.name ?? data.assignee?.name;
 
   const partialEvent: Omit<LinearAutomationEvent, "contextBlock"> = {
     source: "linear",
