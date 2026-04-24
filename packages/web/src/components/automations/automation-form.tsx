@@ -353,25 +353,28 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
         </>
       )}
 
-      {/* Event type selector (for Sentry and GitHub) */}
-      {(triggerType === "sentry" || triggerType === "github_event") && eventTypes.length > 0 && (
-        <div>
-          <label className="block text-sm font-medium text-foreground mb-1.5">Event Type</label>
-          <Select value={eventType} onValueChange={setEventType}>
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select event type..." />
-            </SelectTrigger>
-            <SelectContent>
-              {eventTypes.map((et) => (
-                <SelectItem key={et.eventType} value={et.eventType}>
-                  {et.displayName}
-                  <span className="text-muted-foreground ml-2 text-xs">{et.description}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
+      {/* Event type selector (for Sentry, GitHub, and Linear) */}
+      {(triggerType === "sentry" ||
+        triggerType === "github_event" ||
+        triggerType === "linear_event") &&
+        eventTypes.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Event Type</label>
+            <Select value={eventType} onValueChange={setEventType}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select event type..." />
+              </SelectTrigger>
+              <SelectContent>
+                {eventTypes.map((et) => (
+                  <SelectItem key={et.eventType} value={et.eventType}>
+                    {et.displayName}
+                    <span className="text-muted-foreground ml-2 text-xs">{et.description}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
       {/* Sentry Client Secret (create mode only) */}
       {triggerType === "sentry" && mode === "create" && (
@@ -421,7 +424,9 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
                 ? "Investigate this Sentry error. Find the root cause in the codebase, then open a PR with a fix."
                 : triggerType === "github_event"
                   ? "Review this pull request and provide feedback. Check for code quality issues, potential bugs, and suggest improvements."
-                  : "Process this webhook payload and take the appropriate action."
+                  : triggerType === "linear_event"
+                    ? "Investigate this Linear issue. Identify the relevant code, implement a fix, and open a PR."
+                    : "Process this webhook payload and take the appropriate action."
           }
           maxLength={10000}
           required

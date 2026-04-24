@@ -15,7 +15,9 @@ import {
 import { callbacksRouter } from "./callbacks";
 import { createLogger } from "./logger";
 import { verifyInternalToken } from "@open-inspect/shared";
+import type { LinearWebhookPayload } from "@open-inspect/shared";
 import { handleAgentSessionEvent, escapeHtml } from "./webhook-handler";
+import { handleLinearIssueEvent } from "./automation-events";
 import {
   getTeamRepoMapping,
   getProjectRepoMapping,
@@ -56,6 +58,22 @@ function isAgentSessionWebhookPayload(payload: unknown): payload is AgentSession
   }
 
   return typeof agentSession.id === "string";
+}
+
+function isLinearIssuePayload(payload: unknown): payload is LinearWebhookPayload {
+  if (!isObjectRecord(payload)) return false;
+
+  const type = readStringField(payload, "type");
+  const action = readStringField(payload, "action");
+  const organizationId = readStringField(payload, "organizationId");
+  const webhookId = readStringField(payload, "webhookId");
+  const data = payload.data;
+
+  if (type !== "Issue" || !action || !organizationId || !webhookId || !isObjectRecord(data)) {
+    return false;
+  }
+
+  return typeof data.id === "string" && typeof data.identifier === "string";
 }
 
 function summarizeWebhookPayload(payload: Record<string, unknown>): Record<string, unknown> {
@@ -231,6 +249,36 @@ app.post("/webhook", async (c) => {
             });
           }
         })()
+      );
+
+      log.info("http.request", {
+        trace_id: traceId,
+        http_path: "/webhook",
+        http_status: 200,
+        type: eventType,
+        action,
+        duration_ms: Date.now() - startTime,
+      });
+      return c.json({ ok: true });
+    }
+
+    if (eventType === "Issue") {
+      if (!isLinearIssuePayload(payload)) {
+        log.warn("webhook.invalid_payload", {
+          trace_id: traceId,
+          reason: "invalid_issue_event_shape",
+        });
+        return c.json({ error: "Invalid payload" }, 400);
+      }
+
+      c.executionCtx.waitUntil(
+        handleLinearIssueEvent(payload, c.env).catch((err) => {
+          log.error("webhook.issue_event_failed", {
+            trace_id: traceId,
+            action,
+            error: err instanceof Error ? err : new Error(String(err)),
+          });
+        })
       );
 
       log.info("http.request", {

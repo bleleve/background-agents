@@ -33,7 +33,7 @@ function describeTrigger(automation: Automation): string {
 
   if (automation.eventType) {
     const EVENT_LABELS: Record<string, string> = {
-      "issue.created": "new error",
+      "issue.created": "issue created",
       "issue.regression": "error regression",
       "metric_alert.critical": "metric alert",
       "pull_request.opened": "PR opened",
@@ -42,6 +42,7 @@ function describeTrigger(automation: Automation): string {
       "issue_comment.created": "comment created",
       "check_suite.completed": "CI completed",
       "webhook.received": "webhook received",
+      "issue.updated": "issue updated",
     };
     const eventLabel = EVENT_LABELS[automation.eventType] || automation.eventType;
     return `${label}: ${eventLabel}`;
