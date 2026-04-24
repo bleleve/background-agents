@@ -7,6 +7,7 @@ import type { TriggerSourceDefinition } from "./types";
 import { sentrySource, sentryConditions } from "./sentry";
 import { webhookSource, webhookConditions } from "./webhook";
 import { githubSource } from "./github";
+import { linearSource } from "./linear";
 
 import { matchGlob } from "./glob";
 import type { AutomationEvent } from "./types";
@@ -106,4 +107,5 @@ export const triggerSources: TriggerSourceDefinition[] = [
   sentrySource,
   webhookSource,
   githubSource,
+  linearSource,
 ];

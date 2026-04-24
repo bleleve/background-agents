@@ -34,7 +34,6 @@ const TRIGGER_OPTIONS: TriggerOption[] = [
     type: "linear_event",
     label: "Linear Event",
     description: "Trigger on Linear issue events",
-    comingSoon: true,
   },
 ];
 
