@@ -398,6 +398,16 @@ class SandboxSupervisor:
         # or pushed by the agent.
         self._exclude_opencode_from_git(workdir)
 
+    def _install_agents(self) -> None:
+        """Copy bundled agent definitions into ~/.config/opencode/agents."""
+        agents_dir = Path("/app/sandbox_runtime/agents")
+        if not agents_dir.is_dir():
+            return
+
+        agents_dest = Path.home() / ".config" / "opencode" / "agents"
+        shutil.copytree(agents_dir, agents_dest, dirs_exist_ok=True)
+        self.log.info("opencode.agents_installed", agents_path=str(agents_dest))
+
     def _exclude_opencode_from_git(self, workdir: Path) -> None:
         """Add .opencode to .git/info/exclude so it is never committed.
 
@@ -760,6 +770,7 @@ class SandboxSupervisor:
 
         self._install_tools(workdir)
         self._install_skills(workdir)
+        self._install_agents()
         self._install_bin_scripts()
 
         opencode_dir = workdir / ".opencode"

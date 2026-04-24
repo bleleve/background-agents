@@ -28,17 +28,21 @@ def _patch_paths(
     legacy: Path | str,
     tools: Path | str,
     skills: Path | str = "/nonexistent",
+    agents: Path | str = "/nonexistent",
     bin_src: Path | str = "/nonexistent",
     bin_dest: Path | str = "/nonexistent",
     deps_cache: Path | str = "/nonexistent",
+    home_dir: Path | str = "/tmp",
 ):
-    """Patch entrypoint Path() calls to redirect legacy, tools, skills, and bin paths."""
+    """Patch entrypoint Path() calls to redirect runtime source and destination paths."""
     with patch("sandbox_runtime.entrypoint.Path") as MockPath:
+        MockPath.home.return_value = Path(home_dir)
         MockPath.side_effect = lambda p: Path(
             str(p)
             .replace("/app/sandbox_runtime/plugins/inspect-plugin.js", str(legacy))
             .replace("/app/sandbox_runtime/tools", str(tools))
             .replace("/app/sandbox_runtime/skills", str(skills))
+            .replace("/app/sandbox_runtime/agents", str(agents))
             .replace("/app/sandbox_runtime/bin", str(bin_src))
             .replace("/app/opencode-deps", str(deps_cache))
             .replace("/usr/local/bin", str(bin_dest))
@@ -470,3 +474,47 @@ class TestInstallSkills:
             sup._install_skills(workdir)
 
         assert not (workdir / ".opencode" / "skills").exists()
+
+
+class TestInstallAgents:
+    """Cases for _install_agents() bundled agent installation."""
+
+    def test_agents_dir_files_copied(self, tmp_path):
+        """Bundled agents should be copied into ~/.config/opencode/agents."""
+        sup = _make_supervisor()
+
+        agents_dir = tmp_path / "app" / "sandbox" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "qa-agent.md").write_text("# qa-agent")
+
+        home_dir = tmp_path / "home"
+        with _patch_paths(
+            legacy=tmp_path / "no-legacy",
+            tools=tmp_path / "no-tools",
+            agents=agents_dir,
+            home_dir=home_dir,
+        ):
+            sup._install_agents()
+
+        agent_dest = home_dir / ".config" / "opencode" / "agents" / "qa-agent.md"
+        assert agent_dest.exists()
+        assert agent_dest.read_text() == "# qa-agent"
+
+    def test_agents_dir_non_directory_is_ignored(self, tmp_path):
+        """A non-directory agents path should not raise or copy files."""
+        sup = _make_supervisor()
+
+        agents_file = tmp_path / "app" / "sandbox" / "agents"
+        agents_file.parent.mkdir(parents=True)
+        agents_file.write_text("not a directory")
+
+        home_dir = tmp_path / "home"
+        with _patch_paths(
+            legacy=tmp_path / "no-legacy",
+            tools=tmp_path / "no-tools",
+            agents=agents_file,
+            home_dir=home_dir,
+        ):
+            sup._install_agents()
+
+        assert not (home_dir / ".config" / "opencode" / "agents").exists()
