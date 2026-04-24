@@ -1210,7 +1210,7 @@ export class SandboxLifecycleManager {
 
   /**
    * Notify the manager that a sandbox has connected.
-   * Resets the in-memory spawning flag to allow future spawns.
+   * Resets the in-memory spawning flag and clears any stale spawn error.
    *
    * Called by SessionDO when sandbox WebSocket connects successfully.
    */
