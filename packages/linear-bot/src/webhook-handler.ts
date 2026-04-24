@@ -479,7 +479,17 @@ async function handleNewSession(
         repositoryFullName: `${r.owner}/${r.name}`,
       }));
 
-      const suggestions = await getRepoSuggestions(client, issue.id, agentSessionId, candidates);
+      let suggestions: Array<{ repositoryFullName: string; confidence: number }> = [];
+      try {
+        suggestions = await getRepoSuggestions(client, issue.id, agentSessionId, candidates);
+      } catch (error) {
+        log.warn("agent_session.repo_suggestions_failed", {
+          trace_id: traceId,
+          issue_identifier: issue.identifier,
+          agent_session_id: agentSessionId,
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
       const topSuggestion = suggestions.find((s) => s.confidence >= 0.7);
       if (topSuggestion) {
         const [owner, name] = topSuggestion.repositoryFullName.split("/");

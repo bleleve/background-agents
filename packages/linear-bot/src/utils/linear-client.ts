@@ -219,7 +219,15 @@ async function linearGraphQL(
   });
 
   if (!res.ok) {
-    throw new Error(`Linear API error: ${res.status}`);
+    let responseBody = "";
+    try {
+      responseBody = await res.text();
+    } catch {
+      // Ignore body parsing failures for non-OK responses.
+    }
+    throw new Error(
+      `Linear API error: ${res.status}${responseBody ? ` - ${responseBody.slice(0, 300)}` : ""}`
+    );
   }
 
   const json = (await res.json()) as Record<string, unknown>;
@@ -374,6 +382,15 @@ export async function getRepoSuggestions(
   agentSessionId: string,
   candidateRepos: Array<{ hostname: string; repositoryFullName: string }>
 ): Promise<Array<{ repositoryFullName: string; confidence: number }>> {
+  const normalizedCandidates = candidateRepos
+    .filter((repo) => repo.hostname === "github.com")
+    .filter((repo) => repo.repositoryFullName.includes("/"))
+    .slice(0, 100);
+
+  if (normalizedCandidates.length === 0) {
+    return [];
+  }
+
   try {
     const data = await linearGraphQL(
       client,
@@ -391,7 +408,7 @@ export async function getRepoSuggestions(
         }
       }
     `,
-      { issueId, agentSessionId, candidateRepositories: candidateRepos }
+      { issueId, agentSessionId, candidateRepositories: normalizedCandidates }
     );
 
     const result = data as {
