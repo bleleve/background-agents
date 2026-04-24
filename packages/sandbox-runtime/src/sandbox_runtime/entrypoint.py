@@ -76,7 +76,6 @@ class SandboxSupervisor:
         self.code_server_process: asyncio.subprocess.Process | None = None
         self.ttyd_process: asyncio.subprocess.Process | None = None
         self.ttyd_proxy_process: asyncio.subprocess.Process | None = None
-        self.dockerd_process: asyncio.subprocess.Process | None = None
         self.shutdown_event = asyncio.Event()
         self.git_sync_complete = asyncio.Event()
         self.opencode_ready = asyncio.Event()
@@ -1324,8 +1323,6 @@ class SandboxSupervisor:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self._handle_signal(s)))
 
-        await self._start_dockerd_if_present()
-
         git_sync_success = False
         opencode_ready = False
         try:
@@ -1476,14 +1473,6 @@ class SandboxSupervisor:
                 await asyncio.wait_for(self.opencode_process.wait(), timeout=10.0)
             except TimeoutError:
                 self.opencode_process.kill()
-
-        if self.dockerd_process and self.dockerd_process.returncode is None:
-            self.log.info("dockerd.terminating")
-            self.dockerd_process.terminate()
-            try:
-                await asyncio.wait_for(self.dockerd_process.wait(), timeout=10.0)
-            except TimeoutError:
-                self.dockerd_process.kill()
 
         self.log.info("supervisor.shutdown_complete")
 

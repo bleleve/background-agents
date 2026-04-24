@@ -31,7 +31,7 @@ log = get_logger("manager")
 
 DEFAULT_SANDBOX_TIMEOUT_SECONDS = 7200  # 2 hours
 MAX_TUNNEL_PORTS = 10
-DOCKER_EXPERIMENTAL_OPTIONS = {"enable_docker": True}
+DOCKER_EXPERIMENTAL_OPTIONS = {"enable_docker": False}
 
 
 @dataclass
