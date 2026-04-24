@@ -7,9 +7,14 @@ Modal-based sandbox infrastructure for the Open-Inspect coding agent system.
 This package provides the data plane for Open-Inspect:
 
 - **Sandboxes**: Isolated development environments running OpenCode
+- **Docker-in-Sandbox**: `docker` is enabled for Modal sandboxes via
+  `experimental_options={"enable_docker": True}`
 - **Images**: Pre-built container images with all development tools
 - **Snapshots**: Filesystem snapshots for fast startup and session persistence
 - **Scheduler**: Image rebuilding infrastructure (currently disabled)
+
+> Note: Modal marks Docker-in-Sandboxes as alpha, and Docker daemon state is not captured in
+> filesystem snapshots.
 
 ## Architecture
 

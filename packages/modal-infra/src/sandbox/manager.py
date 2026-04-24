@@ -31,6 +31,7 @@ log = get_logger("manager")
 
 DEFAULT_SANDBOX_TIMEOUT_SECONDS = 7200  # 2 hours
 MAX_TUNNEL_PORTS = 10
+DOCKER_EXPERIMENTAL_OPTIONS = {"enable_docker": True}
 
 
 @dataclass
@@ -300,6 +301,8 @@ class SandboxManager:
             "timeout": config.timeout_seconds,
             "workdir": "/workspace",
             "env": env_vars,
+            # Enable Docker-in-Sandboxes support per Modal docs.
+            "experimental_options": DOCKER_EXPERIMENTAL_OPTIONS,
         }
         exposed_ports, tunnel_ports = self._collect_exposed_ports(
             config.code_server_enabled, terminal_enabled, config.settings
@@ -397,6 +400,8 @@ class SandboxManager:
             timeout=BUILD_TIMEOUT_SECONDS,
             workdir="/workspace",
             env=env_vars,
+            # Enable Docker-in-Sandboxes support per Modal docs.
+            experimental_options=DOCKER_EXPERIMENTAL_OPTIONS,
         )
 
         modal_object_id = sandbox.object_id
@@ -616,6 +621,8 @@ class SandboxManager:
             "timeout": timeout_seconds,
             "workdir": "/workspace",
             "env": env_vars,
+            # Enable Docker-in-Sandboxes support per Modal docs.
+            "experimental_options": DOCKER_EXPERIMENTAL_OPTIONS,
         }
         exposed_ports, tunnel_ports = self._collect_exposed_ports(
             code_server_enabled, terminal_enabled, settings

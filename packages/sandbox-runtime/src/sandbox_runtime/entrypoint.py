@@ -76,6 +76,7 @@ class SandboxSupervisor:
         self.code_server_process: asyncio.subprocess.Process | None = None
         self.ttyd_process: asyncio.subprocess.Process | None = None
         self.ttyd_proxy_process: asyncio.subprocess.Process | None = None
+        self.dockerd_process: asyncio.subprocess.Process | None = None
         self.shutdown_event = asyncio.Event()
         self.git_sync_complete = asyncio.Event()
         self.opencode_ready = asyncio.Event()
@@ -1253,6 +1254,36 @@ class SandboxSupervisor:
             default_timeout_seconds=self.DEFAULT_START_TIMEOUT_SECONDS,
         )
 
+    async def _start_dockerd_if_present(self) -> None:
+        """
+        Run Modal Docker-in-Sandboxes dockerd (see enable_docker + /start-dockerd.sh in the image).
+        No-op if the script is missing (e.g. local test environments).
+        """
+        if not (
+            os.path.isfile("/start-dockerd.sh")
+            and os.access("/start-dockerd.sh", os.X_OK, follow_symlinks=True)
+        ):
+            return
+        self.log.info("dockerd.starting")
+        self.dockerd_process = await asyncio.create_subprocess_exec(
+            "/start-dockerd.sh",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        for _ in range(60):
+            await asyncio.sleep(0.5)
+            info = await asyncio.create_subprocess_exec(
+                "docker",
+                "info",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await info.wait()
+            if info.returncode == 0:
+                self.log.info("dockerd.ready")
+                return
+        self.log.warn("dockerd.unavailable", detail="docker info did not succeed within 30s")
+
     async def run(self) -> None:
         """Main supervisor loop."""
         startup_start = time.time()
@@ -1292,6 +1323,8 @@ class SandboxSupervisor:
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self._handle_signal(s)))
+
+        await self._start_dockerd_if_present()
 
         git_sync_success = False
         opencode_ready = False
@@ -1443,6 +1476,14 @@ class SandboxSupervisor:
                 await asyncio.wait_for(self.opencode_process.wait(), timeout=10.0)
             except TimeoutError:
                 self.opencode_process.kill()
+
+        if self.dockerd_process and self.dockerd_process.returncode is None:
+            self.log.info("dockerd.terminating")
+            self.dockerd_process.terminate()
+            try:
+                await asyncio.wait_for(self.dockerd_process.wait(), timeout=10.0)
+            except TimeoutError:
+                self.dockerd_process.kill()
 
         self.log.info("supervisor.shutdown_complete")
 

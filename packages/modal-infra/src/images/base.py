@@ -2,7 +2,7 @@
 Base image definition for Open-Inspect sandboxes.
 
 This image provides a complete development environment with:
-- Debian slim base with git, curl, build-essential
+- Debian slim base with git, curl, build-essential, Docker (dockerd + start script for gVisor)
 - Node.js 22 LTS, pnpm, Bun runtime
 - Python 3.12 with uv
 - OpenCode CLI pre-installed
@@ -18,6 +18,8 @@ import sandbox_runtime
 
 # Get the path to the sandbox runtime code (provider-agnostic)
 SANDBOX_RUNTIME_DIR = Path(sandbox_runtime.__file__).parent
+# start-dockerd.sh (Modal Docker-in-Sandboxes); lives next to this file for add_local_file
+START_DOCKERD_SH = Path(__file__).parent / "start-dockerd.sh"
 
 # OpenCode version to install
 OPENCODE_VERSION = "latest"
@@ -36,16 +38,17 @@ TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 RWX_VERSION = "3.13.1"
 
 # RTK CLI — pinned Linux x86_64 musl binary; see https://github.com/rtk-ai/rtk/releases
-RTK_VERSION = "0.35.0"
+RTK_VERSION = "0.37.2"
 
 # Cache buster - change this to force Modal image rebuild
-CACHE_BUSTER = "v62-signoz-mcp-bump"
+CACHE_BUSTER = "v66-docker-bump"
 
 # Base image with all development tools
 base_image = (
     modal.Image.debian_slim(python_version="3.12")
     # System packages
     .apt_install(
+        "awscli",
         "git",
         "curl",
         "build-essential",
@@ -57,6 +60,9 @@ base_image = (
         "locales",
         "locales-all",
         "unzip",  # Required for Bun installation
+        "iproute2",  # `ip` for /start-dockerd.sh (default route, addresses)
+        "wget",  # Runc install and general tooling
+        "iptables",  # iptables-legacy for dockerd in gVisor (used by add_local start script)
         # Shared libraries required by headless Chromium
         "libnss3",
         "libnspr4",
@@ -162,6 +168,28 @@ base_image = (
         "chmod +x /usr/local/bin/signoz-mcp-server",
         "md5sum /usr/local/bin/signoz-mcp-server",
     )
+    .run_commands(
+        "install -m 0755 -d /etc/apt/keyrings",
+        "curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc",
+        "chmod a+r /etc/apt/keyrings/docker.asc",
+        "echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable' > /etc/apt/sources.list.d/docker.list",
+        "apt-get -qq update >/dev/null",
+        "DEBIAN_FRONTEND=noninteractive apt-get -y -qq install apt-utils docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin >/dev/null",
+    )
+    .run_commands(
+        "rm $(which runc)",
+        "wget https://github.com/opencontainers/runc/releases/download/v1.3.0/runc.amd64",
+        "chmod +x runc.amd64",
+        "mv runc.amd64 /usr/local/bin/runc",
+    )
+    # gVisor doesn't support nftables yet (https://github.com/google/gvisor/issues/10510).
+    # Use iptables-legacy for reliable Docker-in-Sandboxes networking.
+    .run_commands(
+        "update-alternatives --set iptables /usr/sbin/iptables-legacy",
+        "update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy",
+    )
+    .add_local_file(str(START_DOCKERD_SH), "/start-dockerd.sh", copy=True)
+    .run_commands("chmod +x /start-dockerd.sh")
     # # Install Spacelift CLI
     # .run_commands(
     #     "asdf plugin add spacectl",

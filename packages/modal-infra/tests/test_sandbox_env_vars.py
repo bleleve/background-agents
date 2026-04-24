@@ -313,10 +313,11 @@ async def test_restore_with_session_config_object(monkeypatch):
 
 
 def _fake_sandbox_create(captured):
-    """Return a fake Sandbox.create that supports .aio and captures env vars."""
+    """Return a fake Sandbox.create that supports .aio and captures kwargs."""
 
     async def fake_create_aio(*args, **kwargs):
         captured["env"] = kwargs.get("env")
+        captured["experimental_options"] = kwargs.get("experimental_options")
 
         class FakeSandbox:
             object_id = "obj-vcs"
@@ -474,3 +475,46 @@ async def test_restore_vcs_env_vars(monkeypatch):
     # GitHub-specific vars not set for Bitbucket
     assert "GITHUB_APP_TOKEN" not in env
     assert "GITHUB_TOKEN" not in env
+
+
+@pytest.mark.asyncio
+async def test_create_sandbox_enables_docker_experimental_option(monkeypatch):
+    """create_sandbox should enable Docker-in-Sandboxes."""
+    captured = {}
+    monkeypatch.setattr("src.sandbox.manager.modal.Sandbox.create", _fake_sandbox_create(captured))
+
+    manager = SandboxManager()
+    await manager.create_sandbox(
+        SandboxConfig(
+            repo_owner="acme",
+            repo_name="repo",
+        )
+    )
+
+    assert captured["experimental_options"] == {"enable_docker": True}
+
+
+@pytest.mark.asyncio
+async def test_restore_sandbox_enables_docker_experimental_option(monkeypatch):
+    """restore_from_snapshot should enable Docker-in-Sandboxes."""
+    captured = {}
+
+    class FakeImage:
+        object_id = "img-123"
+
+    monkeypatch.setattr("src.sandbox.manager.modal.Image.from_id", lambda *a, **kw: FakeImage())
+    monkeypatch.setattr("src.sandbox.manager.modal.Sandbox.create", _fake_sandbox_create(captured))
+
+    manager = SandboxManager()
+    await manager.restore_from_snapshot(
+        snapshot_image_id="img-abc",
+        session_config={
+            "repo_owner": "acme",
+            "repo_name": "repo",
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "session_id": "sess-1",
+        },
+    )
+
+    assert captured["experimental_options"] == {"enable_docker": True}

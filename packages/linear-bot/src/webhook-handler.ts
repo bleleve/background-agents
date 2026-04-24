@@ -91,7 +91,6 @@ export function buildPromptContextPrompt(promptContext: string): string {
       content: promptContext,
     }),
     "",
-    "Please implement the changes described in this issue. Create a pull request when done.",
   ].join("\n");
 }
 
@@ -915,11 +914,6 @@ export function buildPrompt(
       })
     );
   }
-
-  parts.push(
-    "",
-    "Please implement the changes described in this issue. Create a pull request when done."
-  );
 
   return parts.join("\n");
 }

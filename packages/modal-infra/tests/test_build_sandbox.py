@@ -17,6 +17,7 @@ def _fake_sandbox_create(captured):
         captured["timeout"] = kwargs.get("timeout")
         captured["secrets"] = kwargs.get("secrets")
         captured["image"] = kwargs.get("image")
+        captured["experimental_options"] = kwargs.get("experimental_options")
 
         class FakeSandbox:
             object_id = "obj-build-123"
@@ -255,3 +256,18 @@ async def test_system_vars_override_user_env_vars(monkeypatch):
     env = captured["env"]
     assert env["IMAGE_BUILD_MODE"] == "true"
     assert env["SANDBOX_ID"].startswith("build-acme-my-repo-")
+
+
+@pytest.mark.asyncio
+async def test_enables_docker_experimental_option(monkeypatch):
+    """Build sandbox should enable Docker-in-Sandboxes."""
+    captured = {}
+    monkeypatch.setattr("src.sandbox.manager.modal.Sandbox.create", _fake_sandbox_create(captured))
+
+    manager = SandboxManager()
+    await manager.create_build_sandbox(
+        repo_owner="acme",
+        repo_name="my-repo",
+    )
+
+    assert captured["experimental_options"] == {"enable_docker": True}
