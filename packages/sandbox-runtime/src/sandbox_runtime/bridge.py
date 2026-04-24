@@ -135,7 +135,8 @@ class AgentBridge:
     HTTP_CONNECT_TIMEOUT = 30.0
     HTTP_DEFAULT_TIMEOUT = 30.0
     OPENCODE_REQUEST_TIMEOUT = 30.0
-    OPENCODE_SESSION_CREATE_TIMEOUT_SECONDS = 60.0
+    OPENCODE_SESSION_CREATE_TIMEOUT_SECONDS = 120.0
+    OPENCODE_SESSION_CREATE_MAX_ATTEMPTS = 2
     OPENCODE_STOP_RETRIES = 3
     FINAL_STATE_FETCH_RETRIES = 3
     HTTP_RETRY_BACKOFF_SECONDS = 0.5
@@ -678,23 +679,39 @@ class AgentBridge:
 
         # First session creation may trigger OpenCode plugin dependency reification
         # (for example opencode-plugin-langfuse), which can exceed normal request timeouts.
-        resp = await self.http_client.post(
-            f"{self.opencode_base_url}/session",
-            json={},
-            timeout=self.OPENCODE_SESSION_CREATE_TIMEOUT_SECONDS,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        for attempt in range(1, self.OPENCODE_SESSION_CREATE_MAX_ATTEMPTS + 1):
+            try:
+                resp = await self.http_client.post(
+                    f"{self.opencode_base_url}/session",
+                    json={},
+                    timeout=self.OPENCODE_SESSION_CREATE_TIMEOUT_SECONDS,
+                )
+                resp.raise_for_status()
+                data = resp.json()
 
-        self.opencode_session_id = data.get("id")
-        self.log.info(
-            "opencode.session.ensure",
-            opencode_session_id=self.opencode_session_id,
-            action="created",
-        )
-        self._has_sent_prompt_in_session = False
+                self.opencode_session_id = data.get("id")
+                self.log.info(
+                    "opencode.session.ensure",
+                    opencode_session_id=self.opencode_session_id,
+                    action="created",
+                )
+                self._has_sent_prompt_in_session = False
 
-        await self._save_session_id()
+                await self._save_session_id()
+                return
+            except httpx.TimeoutException as e:
+                if attempt == self.OPENCODE_SESSION_CREATE_MAX_ATTEMPTS:
+                    raise
+
+                retry_delay_seconds = self.HTTP_RETRY_BACKOFF_SECONDS * attempt
+                self.log.warn(
+                    "opencode.session.create_retry",
+                    attempt=attempt,
+                    max_attempts=self.OPENCODE_SESSION_CREATE_MAX_ATTEMPTS,
+                    delay_s=retry_delay_seconds,
+                    error_type=type(e).__name__,
+                )
+                await asyncio.sleep(retry_delay_seconds)
 
     @staticmethod
     def _extract_error_message(error: object) -> str | None:

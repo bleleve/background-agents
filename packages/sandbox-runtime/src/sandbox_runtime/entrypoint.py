@@ -1270,7 +1270,7 @@ class SandboxSupervisor:
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        for _ in range(60):
+        for _ in range(30):
             await asyncio.sleep(0.5)
             info = await asyncio.create_subprocess_exec(
                 "docker",
