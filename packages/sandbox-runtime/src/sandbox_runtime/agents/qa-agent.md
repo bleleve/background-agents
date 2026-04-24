@@ -1,7 +1,7 @@
 ---
 description: QA analysis assessment agent
 mode: subagent
-model: claude-sonnet-4-6
+model: anthropic/claude-sonnet-4-6
 temperature: 0.1
 tools:
   write: false
