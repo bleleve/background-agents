@@ -121,20 +121,15 @@ base_image = (
         " > /etc/apt/sources.list.d/github-cli.list",
         "apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*",
     )
-    # Install Node.js 22.19.0 via nvm
+    # Node.js via nvm: each run_commands string is a fresh shell, so nvm (a function) is not
+    # available across lines — install, set default, and publish binaries to PATH in one bash.
     .run_commands(
         'export BASH_ENV="/root/.bash_env" && touch "${BASH_ENV}"',
         'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | PROFILE="${BASH_ENV}" bash',
-        # Add NodeSource repository for Node.js 22
-        "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
-        "apt-get install -y nodejs=22.19.0-1nodesource1",
-        # Verify installation
-        "node --version",
-        "npm --version",
+        r"""bash -ec 'export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm install 24.15.0 && nvm alias default 24.15.0 && for x in node npm npx; do ln -sf "$(command -v "$x")" "/usr/local/bin/$x"; done && npm config set prefix /usr/local && node --version && npm --version'""",
     )
     # Install pnpm and Bun
     .run_commands(
-        # Install pnpm globally
         "npm install -g pnpm@latest",
         "pnpm --version",
         # Install Bun
