@@ -61,8 +61,8 @@ export function formatAgentResponse(agentResponse: AgentResponse): string {
   // Summary text (truncated)
   if (agentResponse.textContent) {
     const summary =
-      agentResponse.textContent.length > 500
-        ? agentResponse.textContent.slice(0, 500) + "..."
+      agentResponse.textContent.length > 5000
+        ? agentResponse.textContent.slice(0, 5000) + "..."
         : agentResponse.textContent;
     parts.push(`\n${summary}`);
   }

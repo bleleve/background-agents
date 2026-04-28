@@ -311,7 +311,7 @@ async function handleFollowUp(
       if (recentTokens.length > 0) {
         const lastContent = String(recentTokens[0].data.content ?? "");
         if (lastContent) {
-          sessionContextSummary = lastContent.slice(0, 500);
+          sessionContextSummary = lastContent.slice(0, 5000);
         }
       }
     } else {
