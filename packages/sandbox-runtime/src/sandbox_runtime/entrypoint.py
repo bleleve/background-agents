@@ -467,6 +467,41 @@ class SandboxSupervisor:
         except Exception as e:
             self.log.warn("aws.credentials_write_error", exc=e)
 
+    # Path where the static kubeconfig is baked into the sandbox image by base.py.
+    KUBECONFIG_IMAGE_PATH = "/etc/kubeconfig"
+
+    def _setup_eks_kubeconfig(self) -> None:
+        """
+        Copy /etc/kubeconfig (baked into the image) to ~/.kube/config.
+
+        Does nothing if ~/.aws/credentials does not exist (no AWS credentials
+        were injected for this sandbox, so kubectl would not be able to auth)
+        or if the source file is absent from the image.
+        """
+        source = Path(self.KUBECONFIG_IMAGE_PATH)
+        if not source.exists():
+            return
+
+        credentials_path = Path.home() / ".aws" / "credentials"
+        if not credentials_path.exists():
+            return
+
+        try:
+            kube_dir = Path.home() / ".kube"
+            kube_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+            config_path = kube_dir / "config"
+            tmp_path = kube_dir / ".config.tmp"
+
+            # Copy via a temp file so the target is never partially written.
+            shutil.copy2(str(source), str(tmp_path))
+            os.chmod(str(tmp_path), 0o600)
+            tmp_path.replace(config_path)
+
+            self.log.info("eks.kubeconfig_written", path=str(config_path))
+        except Exception as e:
+            self.log.warn("eks.kubeconfig_write_error", exc=e)
+
     def _setup_openai_oauth(self) -> None:
         """Write OpenCode auth.json for ChatGPT OAuth if refresh token is configured."""
         refresh_token = os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN")
@@ -1346,6 +1381,8 @@ class SandboxSupervisor:
 
         # Write AWS credentials before any user code runs (hooks, setup, OpenCode).
         self._setup_aws_credentials()
+        # Configure kubectl kubeconfig from EKS cluster env vars (no-op if not set).
+        self._setup_eks_kubeconfig()
 
         if image_build_mode:
             self.log.info("supervisor.image_build_mode")
