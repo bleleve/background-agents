@@ -20,6 +20,7 @@ See: https://modal.com/docs/guide/oidc-integration
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -78,7 +79,7 @@ def assume_role(
     """
     sts = boto3.client("sts", region_name="us-east-1")
 
-    session_name = f"open-inspect-{role_config.profile_name}"[:64]
+    session_name = re.sub(r"[^\w+=,.@-]", "-", f"open-inspect-{role_config.profile_name}")[:64]
 
     try:
         response: dict[str, Any] = sts.assume_role_with_web_identity(

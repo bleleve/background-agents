@@ -347,6 +347,13 @@ export class IntegrationSettingsStore {
           );
         }
       }
+      normalized = {
+        ...normalized,
+        awsRoles: settings.awsRoles.map((r) => ({
+          profileName: r.profileName.trim(),
+          roleArn: r.roleArn,
+        })),
+      };
     }
 
     return normalized;
