@@ -709,6 +709,66 @@ describe("IntegrationSettingsStore", () => {
         })
       ).rejects.toThrow(IntegrationSettingsValidationError);
     });
+
+    it("round-trips awsRoles in global sandbox settings", async () => {
+      await store.setGlobal("sandbox", {
+        defaults: {
+          awsRoles: [
+            { profileName: "default", roleArn: "arn:aws:iam::123456789012:role/my-role" },
+            { profileName: "prod", roleArn: "arn:aws:iam::999999999999:role/prod-role" },
+          ],
+        },
+      });
+      const result = await store.getGlobal("sandbox");
+      expect(result?.defaults?.awsRoles).toEqual([
+        { profileName: "default", roleArn: "arn:aws:iam::123456789012:role/my-role" },
+        { profileName: "prod", roleArn: "arn:aws:iam::999999999999:role/prod-role" },
+      ]);
+    });
+
+    it("round-trips awsRoles in per-repo sandbox settings", async () => {
+      await store.setRepoSettings("sandbox", "acme/app", {
+        awsRoles: [{ profileName: "staging", roleArn: "arn:aws:iam::111111111111:role/staging" }],
+      });
+      const result = await store.getRepoSettings("sandbox", "acme/app");
+      expect(result?.awsRoles).toEqual([
+        { profileName: "staging", roleArn: "arn:aws:iam::111111111111:role/staging" },
+      ]);
+    });
+
+    it("rejects awsRoles that is not an array", async () => {
+      await expect(
+        store.setGlobal("sandbox", {
+          defaults: { awsRoles: "not-an-array" as unknown as [] },
+        })
+      ).rejects.toThrow(IntegrationSettingsValidationError);
+    });
+
+    it("rejects awsRoles entry with missing profileName", async () => {
+      await expect(
+        store.setRepoSettings("sandbox", "acme/app", {
+          awsRoles: [{ profileName: "", roleArn: "arn:aws:iam::123456789012:role/r" }],
+        })
+      ).rejects.toThrow(IntegrationSettingsValidationError);
+    });
+
+    it("rejects awsRoles entry with invalid roleArn prefix", async () => {
+      await expect(
+        store.setRepoSettings("sandbox", "acme/app", {
+          awsRoles: [{ profileName: "dev", roleArn: "arn:gcp:iam::123456789012:role/r" }],
+        })
+      ).rejects.toThrow(IntegrationSettingsValidationError);
+    });
+
+    it("rejects too many awsRoles (>10)", async () => {
+      const tooMany = Array.from({ length: 11 }, (_, i) => ({
+        profileName: `p${i}`,
+        roleArn: `arn:aws:iam::123456789012:role/r${i}`,
+      }));
+      await expect(store.setGlobal("sandbox", { defaults: { awsRoles: tooMany } })).rejects.toThrow(
+        IntegrationSettingsValidationError
+      );
+    });
   });
 
   describe("linear settings", () => {

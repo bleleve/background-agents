@@ -25,6 +25,7 @@ from .app import (
     validate_control_plane_url,
 )
 from .auth import AuthConfigurationError, verify_internal_token
+from .aws_credentials import AwsRoleConfig
 from .log_config import configure_logging, get_logger
 
 configure_logging()
@@ -88,6 +89,41 @@ def _resolve_clone_token() -> str | None:
         log.warn("github.token_error", exc=e)
 
     return None
+
+
+def _parse_aws_role_configs(sandbox_settings: dict | None) -> list[AwsRoleConfig] | None:
+    """
+    Extract and validate AWS role configs from sandbox_settings dict.
+
+    Expects sandbox_settings to contain an ``awsRoles`` list of objects with
+    ``profileName`` (str) and ``roleArn`` (str) keys. Invalid entries are
+    silently skipped with a warning.
+
+    Returns a list of AwsRoleConfig objects, or None if there are none.
+    """
+    if not sandbox_settings:
+        return None
+
+    raw_roles = sandbox_settings.get("awsRoles")
+    if not raw_roles or not isinstance(raw_roles, list):
+        return None
+
+    configs: list[AwsRoleConfig] = []
+    for entry in raw_roles:
+        if not isinstance(entry, dict):
+            log.warn("aws.invalid_role_entry", entry=entry)
+            continue
+        profile_name = entry.get("profileName")
+        role_arn = entry.get("roleArn")
+        if not isinstance(profile_name, str) or not profile_name.strip():
+            log.warn("aws.invalid_profile_name", entry=entry)
+            continue
+        if not isinstance(role_arn, str) or not role_arn.startswith("arn:aws:iam::"):
+            log.warn("aws.invalid_role_arn", entry=entry)
+            continue
+        configs.append(AwsRoleConfig(profile_name=profile_name.strip(), role_arn=role_arn))
+
+    return configs or None
 
 
 def require_valid_control_plane_url(url: str | None) -> None:
@@ -167,6 +203,7 @@ async def api_create_sandbox(
             mcp_servers=request.get("mcp_servers"),
         )
 
+        sandbox_settings = request.get("sandbox_settings") or None
         config = SandboxConfig(
             repo_owner=request.get("repo_owner"),
             repo_name=request.get("repo_name"),
@@ -180,8 +217,9 @@ async def api_create_sandbox(
             repo_image_id=request.get("repo_image_id") or None,
             repo_image_sha=request.get("repo_image_sha") or None,
             code_server_enabled=bool(request.get("code_server_enabled", False)),
-            settings=request.get("sandbox_settings") or None,
+            settings=sandbox_settings,
             opencode_user_config=request.get("opencode_user_config") or None,
+            aws_role_configs=_parse_aws_role_configs(sandbox_settings),
         )
 
         handle = await manager.create_sandbox(config)
@@ -484,6 +522,7 @@ async def api_restore_sandbox(
             code_server_enabled=code_server_enabled,
             settings=sandbox_settings,
             opencode_user_config=opencode_user_config,
+            aws_role_configs=_parse_aws_role_configs(sandbox_settings),
         )
 
         return {

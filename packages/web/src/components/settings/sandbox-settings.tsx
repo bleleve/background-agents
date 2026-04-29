@@ -7,8 +7,8 @@ import { ChevronDownIcon, CheckIcon, PlusIcon } from "@/components/ui/icons";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import useSWR from "swr";
-import type { SandboxSettings } from "@open-inspect/shared";
-import { MAX_TUNNEL_PORTS } from "@open-inspect/shared";
+import type { SandboxSettings, AwsRoleConfig } from "@open-inspect/shared";
+import { MAX_TUNNEL_PORTS, MAX_AWS_ROLES } from "@open-inspect/shared";
 
 const GLOBAL_SCOPE = "__global__";
 
@@ -27,6 +27,20 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 function isValidPort(value: string): boolean {
   return /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535;
+}
+
+/** Validate a single AWS role entry draft. Returns error string or null. */
+function validateAwsRoleDraft(draft: AwsRoleDraft): string | null {
+  if (!draft.profileName.trim()) return "Profile name is required";
+  if (!draft.roleArn.trim()) return "Role ARN is required";
+  if (!draft.roleArn.trim().startsWith("arn:aws:iam::"))
+    return 'Role ARN must start with "arn:aws:iam::"';
+  return null;
+}
+
+interface AwsRoleDraft {
+  profileName: string;
+  roleArn: string;
 }
 
 function SandboxSettingsEditor({
@@ -56,8 +70,13 @@ function SandboxSettingsEditor({
     ? ((data as GlobalSettingsResponse)?.settings?.defaults?.terminalEnabled ?? false)
     : ((data as RepoSettingsResponse)?.settings?.terminalEnabled ?? false);
 
+  const currentAwsRoles: AwsRoleConfig[] = isGlobal
+    ? ((data as GlobalSettingsResponse)?.settings?.defaults?.awsRoles ?? [])
+    : ((data as RepoSettingsResponse)?.settings?.awsRoles ?? []);
+
   const [portRows, setPortRows] = useState<string[] | null>(null);
   const [terminalEnabled, setTerminalEnabled] = useState<boolean | null>(null);
+  const [awsRoleDrafts, setAwsRoleDrafts] = useState<AwsRoleDraft[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -67,6 +86,11 @@ function SandboxSettingsEditor({
 
   // Use server state unless user is editing
   const rows = portRows ?? currentPorts.map(String);
+
+  // Use server state for AWS roles unless user is editing
+  const roleDrafts: AwsRoleDraft[] =
+    awsRoleDrafts ??
+    currentAwsRoles.map((r) => ({ profileName: r.profileName, roleArn: r.roleArn }));
 
   const handleAddRow = () => {
     if (rows.length >= MAX_TUNNEL_PORTS) return;
@@ -82,6 +106,21 @@ function SandboxSettingsEditor({
   const handleRemoveRow = (index: number) => {
     const updated = rows.filter((_, i) => i !== index);
     setPortRows(updated);
+  };
+
+  const handleAddAwsRole = () => {
+    if (roleDrafts.length >= MAX_AWS_ROLES) return;
+    setAwsRoleDrafts([...roleDrafts, { profileName: "", roleArn: "" }]);
+  };
+
+  const handleUpdateAwsRole = (index: number, field: keyof AwsRoleDraft, value: string) => {
+    const updated = [...roleDrafts];
+    updated[index] = { ...updated[index], [field]: value };
+    setAwsRoleDrafts(updated);
+  };
+
+  const handleRemoveAwsRole = (index: number) => {
+    setAwsRoleDrafts(roleDrafts.filter((_, i) => i !== index));
   };
 
   /** Trim, filter empty, validate, parse to number, dedupe. */
@@ -104,12 +143,30 @@ function SandboxSettingsEditor({
       return;
     }
 
+    // Validate AWS roles
+    for (const draft of roleDrafts) {
+      // Skip entirely empty rows
+      if (!draft.profileName.trim() && !draft.roleArn.trim()) continue;
+      const err = validateAwsRoleDraft(draft);
+      if (err) {
+        setError(`AWS role error: ${err}`);
+        return;
+      }
+    }
+    const validRoles: AwsRoleConfig[] = roleDrafts
+      .filter((d) => d.profileName.trim() && d.roleArn.trim())
+      .map((d) => ({ profileName: d.profileName.trim(), roleArn: d.roleArn.trim() }));
+
     setSaving(true);
     try {
       const existingEnabledRepos = isGlobal
         ? (data as GlobalSettingsResponse)?.settings?.enabledRepos
         : undefined;
-      const settingsPayload = { tunnelPorts: ports, terminalEnabled: resolvedTerminalEnabled };
+      const settingsPayload: SandboxSettings = {
+        tunnelPorts: ports,
+        terminalEnabled: resolvedTerminalEnabled,
+        awsRoles: validRoles.length > 0 ? validRoles : undefined,
+      };
       const body = isGlobal
         ? { settings: { defaults: settingsPayload, enabledRepos: existingEnabledRepos } }
         : { settings: settingsPayload };
@@ -128,6 +185,7 @@ function SandboxSettingsEditor({
       await mutate();
       setPortRows(null);
       setTerminalEnabled(null);
+      setAwsRoleDrafts(null);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2000);
     } catch (e) {
@@ -135,13 +193,19 @@ function SandboxSettingsEditor({
     } finally {
       setSaving(false);
     }
-  }, [rows, isGlobal, apiUrl, mutate, data, resolvedTerminalEnabled]);
+  }, [rows, isGlobal, apiUrl, mutate, data, resolvedTerminalEnabled, roleDrafts]);
 
   const hasPortChanges =
     portRows !== null &&
     JSON.stringify(normalizePorts(portRows).ports) !== JSON.stringify(currentPorts);
   const hasTerminalChange = terminalEnabled !== null && terminalEnabled !== currentTerminalEnabled;
-  const hasChanges = hasPortChanges || hasTerminalChange;
+  const hasAwsRolesChange =
+    awsRoleDrafts !== null &&
+    JSON.stringify(awsRoleDrafts) !==
+      JSON.stringify(
+        currentAwsRoles.map((r) => ({ profileName: r.profileName, roleArn: r.roleArn }))
+      );
+  const hasChanges = hasPortChanges || hasTerminalChange || hasAwsRolesChange;
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading...</p>;
@@ -213,6 +277,65 @@ function SandboxSettingsEditor({
                   variant="destructive"
                   size="xs"
                   onClick={() => handleRemoveRow(index)}
+                >
+                  Remove
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* AWS IAM Roles */}
+      <div>
+        <div className="flex items-center justify-between max-w-2xl mb-1.5">
+          <label className="block text-sm font-medium text-foreground">AWS IAM Roles</label>
+          <Button
+            type="button"
+            variant="subtle"
+            size="xs"
+            onClick={handleAddAwsRole}
+            disabled={roleDrafts.length >= MAX_AWS_ROLES}
+            className="text-accent hover:text-accent/80"
+          >
+            <PlusIcon className="w-3 h-3" />
+            Add role
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground mb-2">
+          IAM roles to assume via Modal OIDC on each sandbox launch. Credentials are written to{" "}
+          <code className="font-mono">~/.aws/credentials</code> in the sandbox.
+        </p>
+        <div className="space-y-3 max-w-2xl">
+          {roleDrafts.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-2">No AWS roles configured.</p>
+          ) : (
+            roleDrafts.map((role, index) => (
+              <div key={index} className="flex items-start gap-2">
+                <div className="flex flex-col gap-1 flex-1 min-w-0">
+                  <Input
+                    type="text"
+                    value={role.profileName}
+                    onChange={(e) => handleUpdateAwsRole(index, "profileName", e.target.value)}
+                    placeholder="Profile name (e.g. default, prod)"
+                    className="w-full"
+                    aria-label="AWS profile name"
+                  />
+                  <Input
+                    type="text"
+                    value={role.roleArn}
+                    onChange={(e) => handleUpdateAwsRole(index, "roleArn", e.target.value)}
+                    placeholder="arn:aws:iam::123456789012:role/my-role"
+                    className="w-full font-mono text-xs"
+                    aria-label="IAM role ARN"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="xs"
+                  onClick={() => handleRemoveAwsRole(index)}
+                  className="mt-1 flex-shrink-0"
                 >
                   Remove
                 </Button>

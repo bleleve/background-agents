@@ -39,12 +39,33 @@ export interface CodeServerSettings {
 /** Maximum number of tunnel ports a user can configure per sandbox. */
 export const MAX_TUNNEL_PORTS = 10;
 
+/** Maximum number of AWS roles a user can configure per sandbox scope. */
+export const MAX_AWS_ROLES = 10;
+
+/**
+ * A named AWS IAM role to assume via Modal OIDC federation.
+ * The role ARN is assumed on each sandbox launch and its short-lived credentials
+ * are injected as AWS_<PROFILE>_* environment variables (and as the default
+ * profile when profileName is "default").
+ */
+export interface AwsRoleConfig {
+  /** Human-readable profile name written to ~/.aws/credentials (e.g. "default", "prod", "staging"). */
+  profileName: string;
+  /** Full IAM role ARN to assume (e.g. "arn:aws:iam::123456789012:role/my-role"). */
+  roleArn: string;
+}
+
 /** Sandbox environment settings. Provider-agnostic: describes what the user wants, not how it's done. */
 export interface SandboxSettings {
   /** Extra ports to expose via tunnels (e.g., dev server ports 3000, 5173). */
   tunnelPorts?: number[];
   /** Enable a browser-based terminal (ttyd) in sandbox sessions. */
   terminalEnabled?: boolean;
+  /**
+   * AWS IAM roles to assume via Modal OIDC on each sandbox launch.
+   * Credentials are injected into the sandbox via ~/.aws/credentials.
+   */
+  awsRoles?: AwsRoleConfig[];
 }
 
 /** Maps each integration ID to its global and per-repo settings types. */

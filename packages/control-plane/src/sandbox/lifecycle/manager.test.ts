@@ -1640,6 +1640,79 @@ describe("SandboxLifecycleManager", () => {
       );
     });
 
+    it("doSpawn() passes awsRoles from stored settings to provider config", async () => {
+      const session = createMockSession({
+        sandbox_settings: JSON.stringify({
+          awsRoles: [
+            { profileName: "default", roleArn: "arn:aws:iam::123456789012:role/my-role" },
+            { profileName: "prod", roleArn: "arn:aws:iam::999999999999:role/prod-role" },
+          ],
+        }),
+      });
+      const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
+      const storage = createMockStorage(session, sandbox);
+      const provider = createMockProvider();
+
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.spawnSandbox();
+
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sandboxSettings: expect.objectContaining({
+            awsRoles: [
+              { profileName: "default", roleArn: "arn:aws:iam::123456789012:role/my-role" },
+              { profileName: "prod", roleArn: "arn:aws:iam::999999999999:role/prod-role" },
+            ],
+          }),
+        })
+      );
+    });
+
+    it("doSpawn() strips invalid awsRoles entries from stored settings", async () => {
+      const session = createMockSession({
+        sandbox_settings: JSON.stringify({
+          awsRoles: [
+            { profileName: "valid", roleArn: "arn:aws:iam::123456789012:role/good" },
+            { profileName: "", roleArn: "arn:aws:iam::123456789012:role/bad-no-profile" },
+            { profileName: "bad-arn", roleArn: "arn:gcp:not-aws::123" },
+            "not-an-object",
+          ],
+        }),
+      });
+      const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
+      const storage = createMockStorage(session, sandbox);
+      const provider = createMockProvider();
+
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.spawnSandbox();
+
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sandboxSettings: expect.objectContaining({
+            awsRoles: [{ profileName: "valid", roleArn: "arn:aws:iam::123456789012:role/good" }],
+          }),
+        })
+      );
+    });
+
     it("restoreFromSnapshot() broadcasts tunnel_urls when provider returns them", async () => {
       const session = createMockSession({
         sandbox_settings: '{"tunnelPorts":[3000]}',

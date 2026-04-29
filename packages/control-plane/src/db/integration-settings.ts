@@ -9,6 +9,7 @@ import {
   type CodeServerSettings,
   type SandboxSettings,
   MAX_TUNNEL_PORTS,
+  MAX_AWS_ROLES,
 } from "@open-inspect/shared";
 
 export class IntegrationSettingsValidationError extends Error {
@@ -297,6 +298,9 @@ export class IntegrationSettingsStore {
     if (settings.terminalEnabled !== undefined && typeof settings.terminalEnabled !== "boolean") {
       throw new IntegrationSettingsValidationError("terminalEnabled must be a boolean");
     }
+
+    let normalized: SandboxSettings = { ...settings };
+
     if (settings.tunnelPorts !== undefined) {
       if (!Array.isArray(settings.tunnelPorts)) {
         throw new IntegrationSettingsValidationError("tunnelPorts must be an array of numbers");
@@ -314,9 +318,38 @@ export class IntegrationSettingsStore {
           );
         }
       }
-      return { ...settings, tunnelPorts: dedupedPorts };
+      normalized = { ...normalized, tunnelPorts: dedupedPorts };
     }
-    return settings;
+
+    if (settings.awsRoles !== undefined) {
+      if (!Array.isArray(settings.awsRoles)) {
+        throw new IntegrationSettingsValidationError("awsRoles must be an array");
+      }
+      if (settings.awsRoles.length > MAX_AWS_ROLES) {
+        throw new IntegrationSettingsValidationError(
+          `awsRoles must have ${MAX_AWS_ROLES} or fewer entries`
+        );
+      }
+      for (const role of settings.awsRoles) {
+        if (!role || typeof role !== "object" || Array.isArray(role)) {
+          throw new IntegrationSettingsValidationError(
+            "Each awsRoles entry must be an object with profileName and roleArn"
+          );
+        }
+        if (typeof role.profileName !== "string" || role.profileName.trim() === "") {
+          throw new IntegrationSettingsValidationError(
+            "Each awsRoles entry must have a non-empty profileName string"
+          );
+        }
+        if (typeof role.roleArn !== "string" || !role.roleArn.startsWith("arn:aws:iam::")) {
+          throw new IntegrationSettingsValidationError(
+            `Invalid roleArn "${role.roleArn}". Must be a valid IAM role ARN starting with "arn:aws:iam::"`
+          );
+        }
+      }
+    }
+
+    return normalized;
   }
 }
 

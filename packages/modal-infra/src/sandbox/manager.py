@@ -25,6 +25,7 @@ from sandbox_runtime.log_config import get_logger
 from sandbox_runtime.types import SandboxStatus, SessionConfig
 
 from ..app import app, llm_secrets
+from ..aws_credentials import AwsRoleConfig, assume_roles
 from ..images.base import base_image
 
 log = get_logger("manager")
@@ -55,6 +56,7 @@ class SandboxConfig:
         None  # Sandbox settings (tunnelPorts, etc.) from control plane
     )
     opencode_user_config: str | None = None  # User-supplied OpenCode config JSON string
+    aws_role_configs: list[AwsRoleConfig] | None = None  # AWS IAM roles to assume via OIDC
 
 
 @dataclass
@@ -204,6 +206,41 @@ class SandboxManager:
         return code_server_url, ttyd_url, extra_urls
 
     @staticmethod
+    def _inject_aws_credentials(
+        env_vars: dict[str, str], aws_role_configs: list[AwsRoleConfig] | None
+    ) -> None:
+        """
+        Assume AWS IAM roles via Modal OIDC and inject credentials into env_vars.
+
+        The resulting credentials file content is stored in
+        AWS_CREDENTIALS_FILE_CONTENT so the sandbox runtime can write it to
+        ~/.aws/credentials on startup.  Roles that fail to be assumed are
+        logged as warnings; the sandbox continues without those credentials.
+
+        Args:
+            env_vars: Mutable env var dict to inject into (modified in place).
+            aws_role_configs: List of IAM roles to assume; no-op if None/empty.
+        """
+        if not aws_role_configs:
+            return
+
+        credentials_content, failed = assume_roles(aws_role_configs)
+
+        if failed:
+            log.warn(
+                "aws.roles_failed",
+                failed_profiles=failed,
+                note="Sandbox will start without these AWS profiles",
+            )
+
+        if credentials_content:
+            env_vars["AWS_CREDENTIALS_FILE_CONTENT"] = credentials_content
+            log.info(
+                "aws.credentials_injected",
+                profile_count=len(aws_role_configs) - len(failed),
+            )
+
+    @staticmethod
     def _inject_vcs_env_vars(env_vars: dict[str, str], clone_token: str | None) -> None:
         """Inject VCS-neutral env vars based on SCM_PROVIDER."""
         scm_provider = os.environ.get("SCM_PROVIDER", "github")
@@ -266,6 +303,7 @@ class SandboxManager:
         )
 
         self._inject_vcs_env_vars(env_vars, config.clone_token)
+        self._inject_aws_credentials(env_vars, config.aws_role_configs)
 
         code_server_password: str | None = None
         if config.code_server_enabled:
@@ -543,6 +581,7 @@ class SandboxManager:
         code_server_enabled: bool = False,
         settings: dict[str, Any] | None = None,
         opencode_user_config: str | None = None,
+        aws_role_configs: list[AwsRoleConfig] | None = None,
     ) -> SandboxHandle:
         """
         Create a new sandbox from a filesystem snapshot Image.
@@ -600,6 +639,7 @@ class SandboxManager:
         )
 
         self._inject_vcs_env_vars(env_vars, clone_token)
+        self._inject_aws_credentials(env_vars, aws_role_configs)
 
         if opencode_user_config:
             env_vars["OPENCODE_CONFIG_CONTENT"] = opencode_user_config

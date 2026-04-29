@@ -433,6 +433,40 @@ class SandboxSupervisor:
             exclude_path.parent.mkdir(parents=True, exist_ok=True)
             exclude_path.write_text(entry + "\n")
 
+    def _setup_aws_credentials(self) -> None:
+        """
+        Write ~/.aws/credentials from AWS_CREDENTIALS_FILE_CONTENT if set.
+
+        The Modal function manager assumes IAM roles via OIDC before sandbox
+        creation and stores the resulting INI credentials file as this env var.
+        Writing here (early in startup) ensures AWS CLI and SDKs in the sandbox
+        find credentials before any user code or hooks run.
+
+        The file is created with 0o600 permissions (owner-read/write only).
+        """
+        content = os.environ.get("AWS_CREDENTIALS_FILE_CONTENT")
+        if not content:
+            return
+
+        try:
+            aws_dir = Path.home() / ".aws"
+            aws_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+            credentials_path = aws_dir / "credentials"
+            tmp_path = aws_dir / ".credentials.tmp"
+
+            # Write to a temp file with 0o600 from the start, then atomically rename
+            fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, content.encode())
+            finally:
+                os.close(fd)
+            tmp_path.replace(credentials_path)
+
+            self.log.info("aws.credentials_written", path=str(credentials_path))
+        except Exception as e:
+            self.log.warn("aws.credentials_write_error", exc=e)
+
     def _setup_openai_oauth(self) -> None:
         """Write OpenCode auth.json for ChatGPT OAuth if refresh token is configured."""
         refresh_token = os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN")
@@ -1309,6 +1343,9 @@ class SandboxSupervisor:
 
         # Expose boot mode to repo hooks and child processes.
         os.environ["OPENINSPECT_BOOT_MODE"] = self.boot_mode
+
+        # Write AWS credentials before any user code runs (hooks, setup, OpenCode).
+        self._setup_aws_credentials()
 
         if image_build_mode:
             self.log.info("supervisor.image_build_mode")

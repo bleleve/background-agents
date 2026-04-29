@@ -10,7 +10,12 @@
  * spawn attempts within the same request.
  */
 
-import { MAX_TUNNEL_PORTS, type SandboxSettings } from "@open-inspect/shared";
+import {
+  MAX_TUNNEL_PORTS,
+  MAX_AWS_ROLES,
+  type SandboxSettings,
+  type AwsRoleConfig,
+} from "@open-inspect/shared";
 import type { SandboxStatus } from "../../types";
 import type { SandboxRow, SessionRow } from "../../session/types";
 import type { McpServerConfig } from "@open-inspect/shared";
@@ -1157,6 +1162,30 @@ export class SandboxLifecycleManager {
 
       if (typeof settings.terminalEnabled === "boolean") {
         result.terminalEnabled = settings.terminalEnabled;
+      }
+
+      // Validate awsRoles at the boundary — data may come from untrusted callers
+      if (settings.awsRoles !== undefined) {
+        if (Array.isArray(settings.awsRoles)) {
+          const validRoles: AwsRoleConfig[] = [];
+          for (const role of settings.awsRoles) {
+            if (!role || typeof role !== "object" || Array.isArray(role)) continue;
+            const r = role as Record<string, unknown>;
+            const profileName = r.profileName;
+            const roleArn = r.roleArn;
+            if (
+              typeof profileName === "string" &&
+              profileName.trim() !== "" &&
+              typeof roleArn === "string" &&
+              roleArn.startsWith("arn:aws:iam::")
+            ) {
+              validRoles.push({ profileName, roleArn });
+            }
+          }
+          if (validRoles.length > 0) {
+            result.awsRoles = validRoles.slice(0, MAX_AWS_ROLES);
+          }
+        }
       }
 
       return result;
