@@ -20,6 +20,8 @@ import sandbox_runtime
 SANDBOX_RUNTIME_DIR = Path(sandbox_runtime.__file__).parent
 # start-dockerd.sh (Modal Docker-in-Sandboxes); lives next to this file for add_local_file
 START_DOCKERD_SH = Path(__file__).parent / "start-dockerd.sh"
+# kubeconfig — static ~/.kube/config template copied into the image
+KUBECONFIG = Path(__file__).parent / "kubeconfig"
 
 # OpenCode version to install
 OPENCODE_VERSION = "latest"
@@ -39,6 +41,9 @@ RWX_VERSION = "3.13.1"
 
 # RTK CLI — pinned Linux x86_64 musl binary; see https://github.com/rtk-ai/rtk/releases
 RTK_VERSION = "0.37.2"
+
+# kubectl — pinned Linux x86_64 binary; see https://dl.k8s.io/release/stable.txt
+KUBECTL_VERSION = "v1.35.0"
 
 # Cache buster - change this to force Modal image rebuild
 CACHE_BUSTER = "v66-docker-bump"
@@ -185,6 +190,7 @@ base_image = (
     )
     .add_local_file(str(START_DOCKERD_SH), "/start-dockerd.sh", copy=True)
     .run_commands("chmod +x /start-dockerd.sh")
+    .add_local_file(str(KUBECONFIG), "/etc/kubeconfig", copy=True)
     # # Install Spacelift CLI
     # .run_commands(
     #     "asdf plugin add spacectl",
@@ -193,6 +199,12 @@ base_image = (
     #     "spacectl --version",
     # )
     .run_commands("uvx awslabs.eks-mcp-server@0.1.25 -h")
+    # Install kubectl (pinned binary from dl.k8s.io)
+    .run_commands(
+        f'curl -fsSL "https://dl.k8s.io/release/{KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl',
+        "chmod +x /usr/local/bin/kubectl",
+        "kubectl version --client",
+    )
     # Install skill-validator
     # .run_commands("apt-get install -y golang-go")
     # .run_commands("go install github.com/agent-ecosystem/skill-validator/cmd/skill-validator@1fe10b0b3ebacbb85f64e3664f712c497b71c1a9")
