@@ -1293,7 +1293,7 @@ class SandboxSupervisor:
         No-op if the script is missing (e.g. local test environments).
         """
         if not (
-            os.path.isfile("/start-dockerd.sh")
+            Path("/start-dockerd.sh").is_file()
             and os.access("/start-dockerd.sh", os.X_OK, follow_symlinks=True)
         ):
             return
