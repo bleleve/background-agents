@@ -252,4 +252,33 @@ describe("SessionMessageQueue", () => {
       "Execution interrupted: sandbox stopped due to inactivity"
     );
   });
+
+  it("uses a generic message for unmapped failure reasons", async () => {
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue({ id: "msg-generic" });
+
+    await h.queue.failStuckProcessingMessage("sandbox_crashed");
+
+    expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
+      "msg-generic",
+      false,
+      "Execution interrupted: sandbox_crashed"
+    );
+  });
+
+  it("uses explicit error when provided in failure payload", async () => {
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue({ id: "msg-custom" });
+
+    await h.queue.failStuckProcessingMessage({
+      reason: "sandbox_crashed",
+      error: "Execution interrupted: sandbox crashed unexpectedly",
+    });
+
+    expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
+      "msg-custom",
+      false,
+      "Execution interrupted: sandbox crashed unexpectedly"
+    );
+  });
 });
