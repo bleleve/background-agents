@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import modal; import inspect; src = inspect.getsource\\(modal.Sandbox.snapshot_filesystem\\); print\\(src\\)\")",
+      "Bash(pip show *)"
+    ]
+  }
+}

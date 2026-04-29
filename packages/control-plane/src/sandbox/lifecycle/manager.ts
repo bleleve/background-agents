@@ -219,7 +219,9 @@ export interface RepoImageLookup {
  */
 export interface LifecycleCallbacks {
   /** Called when the sandbox is being terminated (heartbeat stale, inactivity timeout). */
-  onSandboxTerminating?: () => Promise<void>;
+  onSandboxTerminating?: (
+    reason: "connecting_timeout" | "heartbeat_stale" | "inactivity_timeout"
+  ) => Promise<void>;
 }
 
 // ==================== Manager ====================
@@ -923,7 +925,7 @@ export class SandboxLifecycleManager {
         elapsed_ms: connectingResult.elapsedMs,
         timeout_ms: this.config.connectingTimeout.timeoutMs,
       });
-      await this.callbacks.onSandboxTerminating?.();
+      await this.callbacks.onSandboxTerminating?.("connecting_timeout");
       this.storage.updateSandboxStatus("failed");
       this.clearSandboxAccessState();
       if (this.usesProviderManagedStop()) {
@@ -958,7 +960,7 @@ export class SandboxLifecycleManager {
         threshold_ms: this.config.heartbeat.timeoutMs,
       });
       // Fail any stuck processing message before terminating
-      await this.callbacks.onSandboxTerminating?.();
+      await this.callbacks.onSandboxTerminating?.("heartbeat_stale");
       this.storage.updateSandboxStatus("stale");
       this.clearSandboxAccessState();
       this.broadcaster.broadcast({ type: "sandbox_status", status: "stale" });
@@ -1007,7 +1009,7 @@ export class SandboxLifecycleManager {
           timeout_ms: this.config.inactivity.timeoutMs,
         });
         // Fail any stuck processing message before terminating
-        await this.callbacks.onSandboxTerminating?.();
+        await this.callbacks.onSandboxTerminating?.("inactivity_timeout");
         // Set status to stopped FIRST to block reconnection attempts
         this.storage.updateSandboxStatus("stopped");
         this.clearSandboxAccessState();
