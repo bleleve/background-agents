@@ -42,6 +42,9 @@ RWX_VERSION = "3.13.1"
 # RTK CLI — pinned Linux x86_64 musl binary; see https://github.com/rtk-ai/rtk/releases
 RTK_VERSION = "0.37.2"
 
+# kubectl — pinned Linux x86_64 binary; see https://dl.k8s.io/release/stable.txt
+KUBECTL_VERSION = "v1.35.0"
+
 # Cache buster - change this to force Modal image rebuild
 CACHE_BUSTER = "v66-docker-bump"
 
@@ -196,10 +199,9 @@ base_image = (
     #     "spacectl --version",
     # )
     .run_commands("uvx awslabs.eks-mcp-server@0.1.25 -h")
-    # Install kubectl (stable release binary from dl.k8s.io)
+    # Install kubectl (pinned binary from dl.k8s.io)
     .run_commands(
-        'KUBECTL_VERSION="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"',
-        'curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl',
+        f'curl -fsSL "https://dl.k8s.io/release/{KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl',
         "chmod +x /usr/local/bin/kubectl",
         "kubectl version --client",
     )
