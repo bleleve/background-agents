@@ -45,8 +45,11 @@ RTK_VERSION = "0.37.2"
 # kubectl — pinned Linux x86_64 binary; see https://dl.k8s.io/release/stable.txt
 KUBECTL_VERSION = "v1.35.0"
 
+# Docker CE version to install (pinned for reproducible images)
+DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
+
 # Cache buster - change this to force Modal image rebuild
-CACHE_BUSTER = "v66-docker-bump"
+CACHE_BUSTER = "v68-docker-pin"
 
 # Base image with all development tools
 base_image = (
@@ -174,7 +177,7 @@ base_image = (
         "chmod a+r /etc/apt/keyrings/docker.asc",
         "echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable' > /etc/apt/sources.list.d/docker.list",
         "apt-get -qq update >/dev/null",
-        "DEBIAN_FRONTEND=noninteractive apt-get -y -qq install apt-utils docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin >/dev/null",
+        f"DEBIAN_FRONTEND=noninteractive apt-get -y -qq install apt-utils docker-ce={DOCKER_CE_VERSION} docker-ce-cli={DOCKER_CE_VERSION} containerd.io docker-compose-plugin docker-buildx-plugin >/dev/null",
     )
     .run_commands(
         "rm $(which runc)",
