@@ -152,6 +152,7 @@ export class SessionSandboxEventProcessor {
     }
 
     if (event.type === "tool_result") {
+      this.deps.updateLastActivity(now);
       this.deps.repository.createEvent({
         id: generateId(),
         type: event.type,
@@ -228,6 +229,14 @@ export class SessionSandboxEventProcessor {
       messageId,
       createdAt: now,
     });
+
+    if (
+      event.type === "git_sync" ||
+      event.type === "push_complete" ||
+      event.type === "push_error"
+    ) {
+      this.deps.updateLastActivity(now);
+    }
 
     if (event.type === "git_sync") {
       this.deps.repository.updateSandboxGitSyncStatus(event.status);

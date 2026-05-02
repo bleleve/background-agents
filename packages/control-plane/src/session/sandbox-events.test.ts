@@ -336,6 +336,56 @@ describe("SessionSandboxEventProcessor", () => {
       expect(h.updateLastActivity).toHaveBeenCalledWith(expect.any(Number));
     });
 
+    it("resets activity timer on tool_result", async () => {
+      const h = createProcessor();
+      await h.processor.processSandboxEvent({
+        type: "tool_result",
+        callId: "call-1",
+        result: "ok",
+        messageId: "msg-1",
+        sandboxId: "sb-1",
+        timestamp: 1000,
+      });
+
+      expect(h.updateLastActivity).toHaveBeenCalledWith(expect.any(Number));
+    });
+
+    it("resets activity timer on git_sync", async () => {
+      const h = createProcessor();
+      await h.processor.processSandboxEvent({
+        type: "git_sync",
+        status: "completed",
+        sha: "abc123",
+        sandboxId: "sb-1",
+        timestamp: 1000,
+      });
+
+      expect(h.updateLastActivity).toHaveBeenCalledWith(expect.any(Number));
+    });
+
+    it("resets activity timer on push_complete", async () => {
+      const h = createProcessor();
+      await h.processor.processSandboxEvent({
+        type: "push_complete",
+        branchName: "feature/test",
+        timestamp: 1000,
+      });
+
+      expect(h.updateLastActivity).toHaveBeenCalledWith(expect.any(Number));
+    });
+
+    it("resets activity timer on push_error", async () => {
+      const h = createProcessor();
+      await h.processor.processSandboxEvent({
+        type: "push_error",
+        branchName: "feature/test",
+        error: "push failed",
+        timestamp: 1000,
+      });
+
+      expect(h.updateLastActivity).toHaveBeenCalledWith(expect.any(Number));
+    });
+
     it("does not reset activity timer on heartbeat", async () => {
       const h = createProcessor();
       await h.processor.processSandboxEvent({

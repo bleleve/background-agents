@@ -201,7 +201,7 @@ base_image = (
     #     "asdf global spacectl latest",
     #     "spacectl --version",
     # )
-    .run_commands("uvx awslabs.eks-mcp-server@0.1.25 -h")
+    # .run_commands("uvx awslabs.eks-mcp-server@0.1.25 -h")
     # Install kubectl (pinned binary from dl.k8s.io)
     .run_commands(
         f'curl -fsSL "https://dl.k8s.io/release/{KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl',

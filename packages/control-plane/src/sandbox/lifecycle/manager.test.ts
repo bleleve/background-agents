@@ -877,7 +877,7 @@ describe("SandboxLifecycleManager", () => {
       const sandbox = createMockSandbox({
         status: "ready",
         last_heartbeat: now - 10000, // Recent heartbeat
-        last_activity: now - 11 * 60 * 1000, // 11 minutes ago, past 10 min timeout
+        last_activity: now - 16 * 60 * 1000, // 16 minutes ago, past 15 min timeout
       });
       const storage = createMockStorage(createMockSession(), sandbox);
       const broadcaster = createMockBroadcaster();
@@ -905,7 +905,7 @@ describe("SandboxLifecycleManager", () => {
       const sandbox = createMockSandbox({
         status: "ready",
         last_heartbeat: now - 10000,
-        last_activity: now - 11 * 60 * 1000, // Past timeout
+        last_activity: now - 16 * 60 * 1000, // Past timeout
       });
       const storage = createMockStorage(createMockSession(), sandbox);
       const broadcaster = createMockBroadcaster();
@@ -967,7 +967,7 @@ describe("SandboxLifecycleManager", () => {
       const sandbox = createMockSandbox({
         status: "ready",
         last_heartbeat: now - 10000,
-        last_activity: now - 11 * 60 * 1000, // Past timeout
+        last_activity: now - 16 * 60 * 1000, // Past timeout
       });
       const storage = createMockStorage(createMockSession(), sandbox);
       const broadcaster = createMockBroadcaster();
@@ -1019,7 +1019,7 @@ describe("SandboxLifecycleManager", () => {
       const sandbox = createMockSandbox({
         status: "ready",
         last_heartbeat: now - 10000, // Recent heartbeat
-        last_activity: now - 11 * 60 * 1000, // Past 10 min timeout
+        last_activity: now - 16 * 60 * 1000, // Past 15 min timeout
       });
       const storage = createMockStorage(createMockSession(), sandbox);
       const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
