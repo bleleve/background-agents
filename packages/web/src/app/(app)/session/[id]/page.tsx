@@ -28,8 +28,13 @@ import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "reac
 import { TerminalPanel } from "@/components/terminal-panel";
 import { ActionBar } from "@/components/action-bar";
 import { copyToClipboard, formatModelNameLower } from "@/lib/format";
+import { archiveSession } from "@/lib/archive-session";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
-import { SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
+import {
+  removeSessionFromList,
+  SIDEBAR_SESSIONS_KEY,
+  type SessionListResponse,
+} from "@/lib/session-list";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { DEFAULT_MODEL, getDefaultReasoningEffort, type ModelCategory } from "@open-inspect/shared";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
@@ -210,21 +215,6 @@ function SessionPageContent() {
     [searchParams]
   );
 
-  const { trigger: triggerArchive } = useSWRMutation(
-    `/api/sessions/${sessionId}/archive`,
-    (url: string) =>
-      fetch(url, { method: "POST" }).then((r) => {
-        if (r.ok) {
-          mutate(SIDEBAR_SESSIONS_KEY);
-          return true;
-        }
-
-        console.error("Failed to archive session");
-        return false;
-      }),
-    { throwOnError: false }
-  );
-
   const { trigger: triggerRename } = useSWRMutation(
     `/api/sessions/${sessionId}/title`,
     (url: string, { arg }: { arg: { title: string } }) =>
@@ -241,11 +231,19 @@ function SessionPageContent() {
   );
 
   const handleArchive = useCallback(async () => {
-    const didArchive = await triggerArchive();
+    const didArchive = await archiveSession(sessionId);
     if (didArchive) {
+      await mutate<SessionListResponse>(
+        SIDEBAR_SESSIONS_KEY,
+        (current) =>
+          current
+            ? { ...current, sessions: removeSessionFromList(current.sessions, sessionId) }
+            : current,
+        { revalidate: false, populateCache: true }
+      );
       router.push("/");
     }
-  }, [router, triggerArchive]);
+  }, [router, sessionId]);
 
   const renameSession = useCallback(
     async (title: string) => {

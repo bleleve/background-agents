@@ -4,64 +4,76 @@
 
 import type { GitHubAutomationEvent } from "../types";
 import { buildGitHubContextBlock } from "./context";
+import {
+  GITHUB_WEBHOOK_EVENT_CATALOG,
+  type CheckSuitePayload,
+  type IssueCommentPayload,
+  type IssuesPayload,
+  type PullRequestPayload,
+  type PullRequestReviewCommentPayload,
+  type SupportedGitHubPayload,
+} from "./webhook-types";
 
 // ─── Supported event type map ─────────────────────────────────────────────────
 
-const SUPPORTED_EVENTS: Record<string, Set<string>> = {
-  pull_request: new Set(["opened", "synchronize", "closed"]),
-  issue_comment: new Set(["created"]),
-  pull_request_review_comment: new Set(["created"]),
-  check_suite: new Set(["completed"]),
-  issues: new Set(["opened", "labeled"]),
-};
+const SUPPORTED_EVENTS: Record<string, Set<string>> = GITHUB_WEBHOOK_EVENT_CATALOG.reduce(
+  (supportedEvents, { event, action }) => {
+    if (!supportedEvents[event]) {
+      supportedEvents[event] = new Set<string>();
+    }
+    supportedEvents[event].add(action);
+    return supportedEvents;
+  },
+  {} as Record<string, Set<string>>
+);
 
 // ─── Payload accessors ────────────────────────────────────────────────────────
 
-function getRepo(payload: Record<string, unknown>): Record<string, unknown> | undefined {
-  return payload.repository as Record<string, unknown> | undefined;
-}
-
-function getRepoOwner(payload: Record<string, unknown>): string {
+function getRepoOwner(payload: SupportedGitHubPayload): string {
   const repo = getRepo(payload);
-  const owner = repo?.owner as Record<string, unknown> | undefined;
-  return (owner?.login as string | undefined) ?? "";
+  return repo?.owner?.login ?? "";
 }
 
-function getRepoName(payload: Record<string, unknown>): string {
+function getRepoName(payload: SupportedGitHubPayload): string {
   const repo = getRepo(payload);
-  return (repo?.name as string | undefined) ?? "";
+  return repo?.name ?? "";
 }
 
-function getActor(payload: Record<string, unknown>): string | undefined {
-  const sender = payload.sender as Record<string, unknown> | undefined;
-  return sender?.login as string | undefined;
+function getActor(payload: SupportedGitHubPayload): string | undefined {
+  return payload.sender?.login;
 }
 
-function getPR(payload: Record<string, unknown>): Record<string, unknown> | undefined {
-  return payload.pull_request as Record<string, unknown> | undefined;
+function getRepo(payload: SupportedGitHubPayload) {
+  return payload.repository;
 }
 
-function getIssue(payload: Record<string, unknown>): Record<string, unknown> | undefined {
-  return payload.issue as Record<string, unknown> | undefined;
+function getPR(payload: PullRequestPayload): PullRequestPayload["pull_request"];
+function getPR(
+  payload: PullRequestReviewCommentPayload
+): PullRequestReviewCommentPayload["pull_request"];
+function getPR(payload: PullRequestPayload | PullRequestReviewCommentPayload) {
+  return payload.pull_request;
 }
 
-function getComment(payload: Record<string, unknown>): Record<string, unknown> | undefined {
-  return payload.comment as Record<string, unknown> | undefined;
+function getIssue(payload: IssueCommentPayload | IssuesPayload) {
+  return payload.issue;
 }
 
-function getCheckSuite(payload: Record<string, unknown>): Record<string, unknown> | undefined {
-  return payload.check_suite as Record<string, unknown> | undefined;
+function getComment(payload: IssueCommentPayload | PullRequestReviewCommentPayload) {
+  return payload.comment;
 }
 
-function getPRLabels(pr: Record<string, unknown>): string[] | undefined {
-  const labels = pr.labels as Array<Record<string, unknown>> | undefined;
-  const names = labels?.map((l) => l.name as string).filter(Boolean);
+function getCheckSuite(payload: CheckSuitePayload) {
+  return payload.check_suite;
+}
+
+function getPRLabels(pr: PullRequestPayload["pull_request"]): string[] | undefined {
+  const names = pr.labels?.map((l) => l.name).filter(Boolean);
   return names?.length ? names : undefined;
 }
 
-function getIssueLabels(issue: Record<string, unknown>): string[] | undefined {
-  const labels = issue.labels as Array<Record<string, unknown>> | undefined;
-  const names = labels?.map((l) => l.name as string).filter(Boolean);
+function getIssueLabels(issue: IssuesPayload["issue"]): string[] | undefined {
+  const names = issue.labels?.map((l) => l.name).filter(Boolean);
   return names?.length ? names : undefined;
 }
 
@@ -71,32 +83,66 @@ export function normalizeGitHubEvent(
   githubEventHeader: string,
   payload: Record<string, unknown>
 ): GitHubAutomationEvent | null {
-  const action = payload.action as string | undefined;
+  const action = payload.action;
 
   const supportedActions = SUPPORTED_EVENTS[githubEventHeader];
   if (!supportedActions) return null;
-  if (!action || !supportedActions.has(action)) return null;
+  if (typeof action !== "string" || !supportedActions.has(action)) return null;
+
+  const typedPayload = payload as unknown as SupportedGitHubPayload;
 
   const eventType = `${githubEventHeader}.${action}`;
-  const repoOwner = getRepoOwner(payload);
-  const repoName = getRepoName(payload);
-  const actor = getActor(payload);
+  const repoOwner = getRepoOwner(typedPayload);
+  const repoName = getRepoName(typedPayload);
+  const actor = getActor(typedPayload);
 
   switch (githubEventHeader) {
     case "pull_request":
-      return normalizePullRequest(eventType, action, payload, repoOwner, repoName, actor);
+      return normalizePullRequest(
+        eventType,
+        action,
+        typedPayload as PullRequestPayload,
+        repoOwner,
+        repoName,
+        actor
+      );
 
     case "issue_comment":
-      return normalizeIssueComment(eventType, payload, repoOwner, repoName, actor);
+      return normalizeIssueComment(
+        eventType,
+        typedPayload as IssueCommentPayload,
+        repoOwner,
+        repoName,
+        actor
+      );
 
     case "pull_request_review_comment":
-      return normalizeReviewComment(eventType, payload, repoOwner, repoName, actor);
+      return normalizeReviewComment(
+        eventType,
+        typedPayload as PullRequestReviewCommentPayload,
+        repoOwner,
+        repoName,
+        actor
+      );
 
     case "check_suite":
-      return normalizeCheckSuite(eventType, payload, repoOwner, repoName, actor);
+      return normalizeCheckSuite(
+        eventType,
+        typedPayload as CheckSuitePayload,
+        repoOwner,
+        repoName,
+        actor
+      );
 
     case "issues":
-      return normalizeIssue(eventType, action, payload, repoOwner, repoName, actor);
+      return normalizeIssue(
+        eventType,
+        action,
+        typedPayload as IssuesPayload,
+        repoOwner,
+        repoName,
+        actor
+      );
 
     default:
       return null;
@@ -108,7 +154,7 @@ export function normalizeGitHubEvent(
 function normalizePullRequest(
   eventType: string,
   action: string,
-  payload: Record<string, unknown>,
+  payload: PullRequestPayload,
   repoOwner: string,
   repoName: string,
   actor: string | undefined
@@ -116,9 +162,11 @@ function normalizePullRequest(
   const pr = getPR(payload);
   if (!pr) return null;
 
-  const prNumber = pr.number as number;
-  const headSha = (pr.head as Record<string, unknown> | undefined)?.sha as string | undefined;
-  const branch = (pr.head as Record<string, unknown> | undefined)?.ref as string | undefined;
+  const prNumber = pr.number;
+  if (typeof prNumber !== "number" || !Number.isFinite(prNumber)) return null;
+
+  const headSha = pr.head?.sha;
+  const branch = pr.head?.ref;
   const labels = getPRLabels(pr);
 
   const triggerKey = `pr:${prNumber}:${action}:${headSha ?? "unknown"}`;
@@ -145,7 +193,7 @@ function normalizePullRequest(
 
 function normalizeIssueComment(
   eventType: string,
-  payload: Record<string, unknown>,
+  payload: IssueCommentPayload,
   repoOwner: string,
   repoName: string,
   actor: string | undefined
@@ -154,10 +202,14 @@ function normalizeIssueComment(
   const issue = getIssue(payload);
   if (!comment) return null;
 
-  const commentId = comment.id as number;
-  const issueNumber = issue?.number as number | undefined;
+  const commentId = comment.id;
+  if (typeof commentId !== "number" || !Number.isFinite(commentId)) return null;
+
+  const issueNumber = issue?.number;
+  if (typeof issueNumber !== "number" || !Number.isFinite(issueNumber)) return null;
+
   const triggerKey = `issue_comment:${commentId}`;
-  const concurrencyKey = `issue:${issueNumber ?? "unknown"}`;
+  const concurrencyKey = `issue_comment:${commentId}`;
 
   return {
     source: "github",
@@ -177,20 +229,24 @@ function normalizeIssueComment(
 
 function normalizeReviewComment(
   eventType: string,
-  payload: Record<string, unknown>,
+  payload: PullRequestReviewCommentPayload,
   repoOwner: string,
   repoName: string,
   actor: string | undefined
 ): GitHubAutomationEvent | null {
   const comment = getComment(payload);
   const pr = getPR(payload);
-  if (!comment) return null;
+  if (!comment || !pr) return null;
 
-  const commentId = comment.id as number;
-  const prNumber = pr?.number as number | undefined;
-  const branch = (pr?.head as Record<string, unknown> | undefined)?.ref as string | undefined;
+  const commentId = comment.id;
+  if (typeof commentId !== "number" || !Number.isFinite(commentId)) return null;
+
+  const prNumber = pr.number;
+  if (typeof prNumber !== "number" || !Number.isFinite(prNumber)) return null;
+
+  const branch = pr.head?.ref;
   const triggerKey = `pr_review_comment:${commentId}`;
-  const concurrencyKey = `pr:${prNumber ?? "unknown"}`;
+  const concurrencyKey = `pr:${prNumber}`;
 
   return {
     source: "github",
@@ -211,7 +267,7 @@ function normalizeReviewComment(
 
 function normalizeCheckSuite(
   eventType: string,
-  payload: Record<string, unknown>,
+  payload: CheckSuitePayload,
   repoOwner: string,
   repoName: string,
   actor: string | undefined
@@ -219,9 +275,11 @@ function normalizeCheckSuite(
   const checkSuite = getCheckSuite(payload);
   if (!checkSuite) return null;
 
-  const checkSuiteId = checkSuite.id as number;
-  const conclusion = checkSuite.conclusion as string | undefined;
-  const headBranch = checkSuite.head_branch as string | undefined;
+  const checkSuiteId = checkSuite.id;
+  if (typeof checkSuiteId !== "number" || !Number.isFinite(checkSuiteId)) return null;
+
+  const conclusion = checkSuite.conclusion ?? undefined;
+  const headBranch = checkSuite.head_branch ?? undefined;
   const triggerKey = `check_suite:${checkSuiteId}`;
   const concurrencyKey = `check_suite:${checkSuiteId}`;
 
@@ -246,7 +304,7 @@ function normalizeCheckSuite(
 function normalizeIssue(
   eventType: string,
   action: string,
-  payload: Record<string, unknown>,
+  payload: IssuesPayload,
   repoOwner: string,
   repoName: string,
   actor: string | undefined
@@ -254,7 +312,9 @@ function normalizeIssue(
   const issue = getIssue(payload);
   if (!issue) return null;
 
-  const issueNumber = issue.number as number;
+  const issueNumber = issue.number;
+  if (typeof issueNumber !== "number" || !Number.isFinite(issueNumber)) return null;
+
   const labels = getIssueLabels(issue);
   const triggerKey = `issue:${issueNumber}:${action}`;
   const concurrencyKey = `issue:${issueNumber}`;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import {
   DEFAULT_MODEL,
   getReasoningConfig,
@@ -108,6 +108,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
     initialValues?.triggerType ?? "schedule"
   );
   const [eventType, setEventType] = useState(initialValues?.eventType ?? "");
+  const [eventTypeError, setEventTypeError] = useState("");
   const [conditions, setConditions] = useState<TriggerCondition[]>(
     initialValues?.triggerConfig?.conditions ?? []
   );
@@ -116,11 +117,28 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
   const isSchedule = triggerType === "schedule";
   const isScheduleValid = !isSchedule || isValidCron(scheduleCron);
 
-  // Get event types for the selected trigger type
-  const triggerSourceDef = triggerSources.find(
-    (s) => TRIGGER_TYPE_TO_SOURCE[triggerType] === s.source
+  const triggerMetadata = useMemo(
+    () => triggerSources.find((sourceDef) => sourceDef.triggerType === triggerType),
+    [triggerType]
   );
-  const eventTypes = triggerSourceDef?.eventTypes ?? [];
+  const eventTypes = useMemo(() => triggerMetadata?.eventTypes ?? [], [triggerMetadata]);
+  const showEventTypeSelector = Boolean(
+    triggerMetadata?.supportsEventTypes && eventTypes.length > 0
+  );
+  const eventTypePlaceholder = triggerMetadata?.eventTypePlaceholder || "Select event type...";
+
+  // Reset eventType when it becomes invalid for the current trigger type
+  useEffect(() => {
+    if (!eventType) return;
+    const stillValid = eventTypes.some((et) => et.eventType === eventType);
+    if (!stillValid) setEventType("");
+  }, [eventType, eventTypes]);
+
+  useEffect(() => {
+    if (!showEventTypeSelector || eventType) {
+      setEventTypeError("");
+    }
+  }, [showEventTypeSelector, eventType]);
 
   const handleRepoChange = useCallback(
     (repoFullName: string) => {
@@ -135,6 +153,10 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
     e.preventDefault();
     if (!name.trim() || !selectedRepo || !instructions.trim() || !isScheduleValid) return;
     if (triggerType === "sentry" && mode === "create" && !sentryClientSecret.trim()) return;
+    if (showEventTypeSelector && !eventType) {
+      setEventTypeError("Event type is required.");
+      return;
+    }
 
     const values: AutomationFormValues = {
       name: name.trim(),
@@ -353,28 +375,32 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
         </>
       )}
 
-      {/* Event type selector (for Sentry, GitHub, and Linear) */}
-      {(triggerType === "sentry" ||
-        triggerType === "github_event" ||
-        triggerType === "linear_event") &&
-        eventTypes.length > 0 && (
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">Event Type</label>
-            <Select value={eventType} onValueChange={setEventType}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select event type..." />
-              </SelectTrigger>
-              <SelectContent>
-                {eventTypes.map((et) => (
-                  <SelectItem key={et.eventType} value={et.eventType}>
-                    {et.displayName}
-                    <span className="text-muted-foreground ml-2 text-xs">{et.description}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+      {/* Event type selector (for trigger sources with event type support) */}
+      {showEventTypeSelector && (
+        <div>
+          <label className="block text-sm font-medium text-foreground mb-1.5">Event Type</label>
+          <Select
+            value={eventType}
+            onValueChange={(value) => {
+              setEventType(value);
+              if (eventTypeError) setEventTypeError("");
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder={eventTypePlaceholder} />
+            </SelectTrigger>
+            <SelectContent>
+              {eventTypes.map((et) => (
+                <SelectItem key={et.eventType} value={et.eventType}>
+                  {et.displayName}
+                  <span className="text-muted-foreground ml-2 text-xs">{et.description}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {eventTypeError && <p className="mt-1 text-xs text-destructive">{eventTypeError}</p>}
+        </div>
+      )}
 
       {/* Sentry Client Secret (create mode only) */}
       {triggerType === "sentry" && mode === "create" && (
@@ -445,6 +471,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
             !selectedRepo ||
             !instructions.trim() ||
             !isScheduleValid ||
+            (showEventTypeSelector && !eventType) ||
             (triggerType === "sentry" && mode === "create" && !sentryClientSecret.trim())
           }
         >

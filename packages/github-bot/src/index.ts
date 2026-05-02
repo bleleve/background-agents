@@ -17,6 +17,7 @@ import type {
 import type { Logger } from "./logger";
 import { createLogger, parseLogLevel } from "./logger";
 import { verifyWebhookSignature } from "./verify";
+import { normalizeGitHubEvent, buildInternalAuthHeaders } from "@open-inspect/shared";
 import {
   handlePullRequestOpened,
   handleReviewRequested,

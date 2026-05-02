@@ -333,7 +333,7 @@ export async function handleReviewRequested(
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
     content: prompt,
-    authorId: `github:${payload.sender.login}`,
+    authorId: `github:${payload.sender.id}`,
   });
   log.info("prompt.sent", {
     ...meta,
@@ -432,7 +432,7 @@ export async function handlePullRequestOpened(
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
     content: prompt,
-    authorId: `github:${sender.login}`,
+    authorId: `github:${sender.id}`,
   });
   log.info("prompt.sent", {
     ...meta,
@@ -682,7 +682,7 @@ export async function handleIssueComment(
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
     content: prompt,
-    authorId: `github:${sender.login}`,
+    authorId: `github:${sender.id}`,
   });
   log.info("prompt.sent", {
     ...meta,
@@ -785,7 +785,7 @@ export async function handleReviewComment(
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
     content: prompt,
-    authorId: `github:${sender.login}`,
+    authorId: `github:${sender.id}`,
   });
   log.info("prompt.sent", {
     ...meta,

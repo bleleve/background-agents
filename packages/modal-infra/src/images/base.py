@@ -49,7 +49,8 @@ KUBECTL_VERSION = "v1.35.0"
 DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
-CACHE_BUSTER = "v68-docker-pin"
+# v69: include Docker pin and Claude Opus 4.7 support image refresh
+CACHE_BUSTER = "v69-docker-pin-opus-4-7"
 
 # Base image with all development tools
 base_image = (
