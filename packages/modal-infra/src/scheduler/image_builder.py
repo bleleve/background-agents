@@ -236,7 +236,7 @@ async def build_repo_image(
             raise BuildError(f"Build sandbox exited without completing (exit_code={exit_code})")
 
         # 4. Snapshot the running sandbox's filesystem
-        image = await handle.modal_sandbox.snapshot_filesystem.aio(timeout=600)
+        image = await handle.modal_sandbox.snapshot_filesystem.aio(timeout=900)
         provider_image_id = image.object_id
 
         # 5. Terminate the sandbox (no longer needed after snapshot)
