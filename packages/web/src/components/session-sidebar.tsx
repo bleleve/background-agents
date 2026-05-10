@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useMemo, useCallback, useEffect, useRef, type TouchEvent } from "react";
+import {
+  Fragment,
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+  type TouchEvent,
+} from "react";
 import { useSession, signOut } from "next-auth/react";
 import useSWR, { mutate } from "swr";
 import { ArchiveSessionDialog } from "@/components/archive-session-dialog";
@@ -21,7 +29,6 @@ import { useIsMobile } from "@/hooks/use-media-query";
 import {
   MoreIcon,
   SidebarIcon,
-  InspectIcon,
   ArchiveIcon,
   PlusIcon,
   SettingsIcon,
@@ -29,6 +36,8 @@ import {
   BranchIcon,
   DataControlsIcon,
 } from "@/components/ui/icons";
+import { AppIcon } from "@/components/ui/app-icon";
+import { APP_SHORT_NAME } from "@/lib/site-config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -272,8 +281,8 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
             <SidebarIcon className="w-4 h-4" />
           </Button>
           <Link href="/" onClick={handleNavigationSelect} className="flex items-center gap-2">
-            <InspectIcon className="w-5 h-5" />
-            <span className="font-semibold text-foreground">Reef</span>
+            <AppIcon className="w-5 h-5" />
+            <span className="font-semibold text-foreground">{APP_SHORT_NAME}</span>
           </Link>
         </div>
         <div className="flex items-center gap-2">
@@ -359,7 +368,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
               <SessionWithChildren
                 key={session.id}
                 session={session}
-                childSessions={childrenMap.get(session.id)}
+                childrenMap={childrenMap}
                 currentSessionId={currentSessionId}
                 isMobile={isMobile}
                 onArchive={handleSessionArchived}
@@ -380,7 +389,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
                   <SessionWithChildren
                     key={session.id}
                     session={session}
-                    childSessions={childrenMap.get(session.id)}
+                    childrenMap={childrenMap}
                     currentSessionId={currentSessionId}
                     isMobile={isMobile}
                     onArchive={handleSessionArchived}
@@ -453,7 +462,7 @@ function UserMenu({ user }: { user?: { name?: string | null; image?: string | nu
 
 function SessionWithChildren({
   session,
-  childSessions,
+  childrenMap,
   currentSessionId,
   isMobile,
   onArchive,
@@ -461,7 +470,7 @@ function SessionWithChildren({
   onSessionRenamed,
 }: {
   session: SessionItem;
-  childSessions?: SessionItem[];
+  childrenMap: Map<string, SessionItem[]>;
   currentSessionId: string | null;
   isMobile: boolean;
   onArchive: (sessionId: string) => Promise<void>;
@@ -478,18 +487,65 @@ function SessionWithChildren({
         onSessionSelect={onSessionSelect}
         onSessionRenamed={onSessionRenamed}
       />
-      {childSessions &&
-        childSessions.map((child) => (
-          <ChildSessionListItem
-            key={child.id}
-            session={child}
-            isActive={child.id === currentSessionId}
-            isMobile={isMobile}
-            onSessionSelect={onSessionSelect}
-          />
-        ))}
+      <ChildSessionTree
+        parentId={session.id}
+        childrenMap={childrenMap}
+        currentSessionId={currentSessionId}
+        isMobile={isMobile}
+        onSessionSelect={onSessionSelect}
+        visitedIds={new Set([session.id])}
+      />
     </>
   );
+}
+
+function ChildSessionTree({
+  parentId,
+  childrenMap,
+  currentSessionId,
+  isMobile,
+  onSessionSelect,
+  visitedIds,
+  depth = 1,
+}: {
+  parentId: string;
+  childrenMap: Map<string, SessionItem[]>;
+  currentSessionId: string | null;
+  isMobile: boolean;
+  onSessionSelect?: () => void;
+  visitedIds: Set<string>;
+  depth?: number;
+}) {
+  const childSessions = childrenMap.get(parentId);
+  if (!childSessions?.length) return null;
+
+  return childSessions.map((child) => {
+    if (visitedIds.has(child.id)) return null;
+
+    const nextVisitedIds = new Set(visitedIds);
+    nextVisitedIds.add(child.id);
+
+    return (
+      <Fragment key={child.id}>
+        <ChildSessionListItem
+          session={child}
+          isActive={child.id === currentSessionId}
+          isMobile={isMobile}
+          onSessionSelect={onSessionSelect}
+          depth={depth}
+        />
+        <ChildSessionTree
+          parentId={child.id}
+          childrenMap={childrenMap}
+          currentSessionId={currentSessionId}
+          isMobile={isMobile}
+          onSessionSelect={onSessionSelect}
+          visitedIds={nextVisitedIds}
+          depth={depth + 1}
+        />
+      </Fragment>
+    );
+  });
 }
 
 function SessionListItem({
@@ -780,15 +836,18 @@ function ChildSessionListItem({
   isActive,
   isMobile,
   onSessionSelect,
+  depth,
 }: {
   session: SessionItem;
   isActive: boolean;
   isMobile: boolean;
   onSessionSelect?: () => void;
+  depth: number;
 }) {
   const timestamp = session.updatedAt || session.createdAt;
   const relativeTime = formatRelativeTime(timestamp);
   const displayTitle = session.title || "Sub-task";
+  const paddingLeftRem = 1.75 + Math.max(depth - 1, 0) * 1;
   return (
     <Link
       href={buildSessionHref(session)}
@@ -797,9 +856,10 @@ function ChildSessionListItem({
           onSessionSelect?.();
         }
       }}
-      className={`block pl-7 pr-4 py-1.5 border-l-2 transition ${
+      className={`block pr-4 py-1.5 border-l-2 transition ${
         isActive ? "border-l-accent bg-accent-muted" : "border-l-transparent hover:bg-muted"
       }`}
+      style={{ paddingLeft: `${paddingLeftRem}rem` }}
     >
       <div className="flex items-center gap-1.5 text-xs">
         <span className="shrink-0 text-muted-foreground">{relativeTime}</span>

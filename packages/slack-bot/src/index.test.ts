@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { Env } from "./types";
-import type * as SlackClientModule from "./utils/slack-client";
+import type * as SharedModule from "@open-inspect/shared";
 
 const { mockVerifySlackSignature, mockPublishView, mockOpenView, mockGetUserInfo } = vi.hoisted(
   () => ({
@@ -11,8 +11,8 @@ const { mockVerifySlackSignature, mockPublishView, mockOpenView, mockGetUserInfo
   })
 );
 
-vi.mock("./utils/slack-client", async () => {
-  const actual = await vi.importActual<typeof SlackClientModule>("./utils/slack-client");
+vi.mock("@open-inspect/shared", async () => {
+  const actual = await vi.importActual<typeof SharedModule>("@open-inspect/shared");
   return {
     ...actual,
     verifySlackSignature: mockVerifySlackSignature,
@@ -22,8 +22,20 @@ vi.mock("./utils/slack-client", async () => {
   };
 });
 
-import app from "./index";
+import app, { buildAppHomeIntroText } from "./index";
 import { clearLocalCache } from "./classifier/repos";
+
+describe("buildAppHomeIntroText", () => {
+  it("uses the configured app name", () => {
+    expect(buildAppHomeIntroText("Acme Bot")).toBe("Configure your Acme Bot preferences below.");
+  });
+
+  it("works with the default Open-Inspect name", () => {
+    expect(buildAppHomeIntroText("Open-Inspect")).toBe(
+      "Configure your Open-Inspect preferences below."
+    );
+  });
+});
 
 function createMockKV() {
   const store = new Map<string, string>();

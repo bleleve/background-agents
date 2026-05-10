@@ -129,6 +129,7 @@ function createTestHarness() {
     pushBranchToRemote: vi.fn(async () => ({ success: true as const })),
     broadcastSessionBranch: vi.fn(),
     broadcastArtifactCreated: vi.fn(),
+    appName: "Open-Inspect",
   };
 
   const service = new SessionPullRequestService(deps);
@@ -273,7 +274,7 @@ describe("SessionPullRequestService", () => {
       .calls[0];
     expect(createPrCall[0]).toEqual({ authType: "oauth", token: "user-token" });
     expect(createPrCall[1].body).toContain(
-      "*Created with [Reef](https://app.example.com/session/session-name-1)*"
+      "*Created with [Open-Inspect](https://app.example.com/session/session-name-1)*"
     );
     expect(harness.deps.broadcastArtifactCreated).toHaveBeenCalledWith({
       id: "id-1",
@@ -310,6 +311,22 @@ describe("SessionPullRequestService", () => {
         sourceBranch: "feature/mixed-case",
       })
     );
+  });
+
+  it("uses the configured appName in the PR body footer", async () => {
+    const customDeps = { ...harness.deps, appName: "Acme Bot" };
+    const customService = new SessionPullRequestService(customDeps);
+
+    await customService.createPullRequest(
+      createInput({ promptingAuth: { authType: "oauth", token: "user-token" } })
+    );
+
+    const createPrCall = (harness.provider.createPullRequest as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    expect(createPrCall[1].body).toContain(
+      "*Created with [Acme Bot](https://app.example.com/session/session-name-1)*"
+    );
+    expect(createPrCall[1].body).not.toContain("Open-Inspect");
   });
 
   it("syncs the branch after push and before PR creation", async () => {
