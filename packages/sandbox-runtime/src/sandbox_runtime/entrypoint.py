@@ -420,14 +420,17 @@ class SandboxSupervisor:
         self.log.info("opencode.agents_installed", agents_path=str(agents_dest))
 
     def _exclude_opencode_from_git(self, workdir: Path) -> None:
-        """Add .opencode to .git/info/exclude so it is never committed.
+        """Add sandbox-local paths to .git/info/exclude so they are never committed.
 
         .git/info/exclude is equivalent to .gitignore but lives inside .git/,
         which git never tracks. Writing here has no effect on the working tree
         and cannot appear in any commit or pull request.
         """
         exclude_path = workdir / ".git" / "info" / "exclude"
-        entry = ".opencode"
+        entries = [
+            ".opencode",
+            "docker-compose.openinspect-override.yml",
+        ]
 
         if not exclude_path.parent.exists():
             # No .git directory — workdir is not a git repo, nothing to do.
@@ -435,14 +438,15 @@ class SandboxSupervisor:
 
         if exclude_path.exists():
             existing = exclude_path.read_text()
-            # Match the entry as a whole line to avoid false positives.
-            if any(line.strip() == entry for line in existing.splitlines()):
+            existing_lines = {line.strip() for line in existing.splitlines()}
+            missing = [e for e in entries if e not in existing_lines]
+            if not missing:
                 return
             suffix = "" if existing.endswith("\n") else "\n"
-            exclude_path.write_text(existing + suffix + entry + "\n")
+            exclude_path.write_text(existing + suffix + "\n".join(missing) + "\n")
         else:
             exclude_path.parent.mkdir(parents=True, exist_ok=True)
-            exclude_path.write_text(entry + "\n")
+            exclude_path.write_text("\n".join(entries) + "\n")
 
     def _setup_aws_credentials(self) -> None:
         """
