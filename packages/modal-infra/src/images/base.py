@@ -48,8 +48,8 @@ KUBECTL_VERSION = "v1.35.0"
 DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
-# v69: include Docker pin and Claude Opus 4.7 support image refresh
-CACHE_BUSTER = "v69-docker-pin-opus-4-7"
+# v70: pin opencode-ai to 1.14.41 to restore SSE event publishing (1.14.42+ broke it)
+CACHE_BUSTER = "v70-pin-opencode-1-14-41"
 
 # Base image with all development tools
 base_image = (
@@ -215,11 +215,11 @@ base_image = (
     # CACHE_BUSTER is embedded in a no-op echo so Modal invalidates this layer on bump.
     .run_commands(
         f"echo 'cache: {CACHE_BUSTER}' > /dev/null",
-        "npm install -g opencode-ai@latest",
+        f"npm install -g opencode-ai@{OPENCODE_VERSION}",
         "opencode --version || echo 'OpenCode installed'",
         # Install @opencode-ai/plugin globally for custom tools
         # This ensures tools can import the plugin without needing to run bun add
-        "npm install -g @opencode-ai/plugin@latest zod",
+        f"npm install -g @opencode-ai/plugin@{OPENCODE_VERSION} zod",
         "npm install -g oxlint@latest",
         "oxlint --version",
         # Langfuse OpenCode plugin (loaded when LANGFUSE_* env vars are provided)
