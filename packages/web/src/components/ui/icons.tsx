@@ -283,7 +283,7 @@ export function GitPrIcon({ className }: IconProps) {
 
 // --- Content & Files ---
 
-export function InspectIcon({ className }: IconProps) {
+export function ReefIcon({ className }: IconProps) {
   return (
     <svg
       className={className}

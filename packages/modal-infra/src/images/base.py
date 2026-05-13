@@ -24,8 +24,7 @@ START_DOCKERD_SH = Path(__file__).parent / "start-dockerd.sh"
 KUBECONFIG = Path(__file__).parent / "kubeconfig"
 
 # OpenCode version to install
-OPENCODE_VERSION = "latest"
-
+OPENCODE_VERSION = "1.14.41"
 # code-server version to install (pinned for reproducible images)
 CODE_SERVER_VERSION = "4.109.5"
 
@@ -166,7 +165,7 @@ base_image = (
     # )
     # Install Signoz MCP server
     .run_commands(
-        "curl -L https://github.com/SigNoz/signoz-mcp-server/releases/download/v0.2.1/signoz-mcp-server_linux_amd64.tar.gz -o /tmp/signoz-mcp-server.tar.gz",
+        "curl -L https://github.com/SigNoz/signoz-mcp-server/releases/download/v0.4.0/signoz-mcp-server_linux_amd64.tar.gz -o /tmp/signoz-mcp-server.tar.gz",
         "tar -xzf /tmp/signoz-mcp-server.tar.gz -C /usr/local/bin --strip-components=2 signoz-mcp-server_linux_amd64/bin/signoz-mcp-server",
         "rm /tmp/signoz-mcp-server.tar.gz",
         "chmod +x /usr/local/bin/signoz-mcp-server",

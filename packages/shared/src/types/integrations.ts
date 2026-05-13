@@ -83,18 +83,6 @@ export interface SlackGlobalSettings extends SlackRepoSettings {
   mentionsPolicy?: SlackMentionsPolicy;
 }
 
-export type SlackMentionsPolicy = "allow" | "escape" | "strip";
-
-/** Per-repo Slack overrides. Mentions policy is workspace-wide and cannot be overridden per repo. */
-export interface SlackRepoSettings {
-  agentNotificationsEnabled?: boolean;
-}
-
-/** Global Slack defaults: per-repo fields plus workspace-wide policy controls. */
-export interface SlackGlobalSettings extends SlackRepoSettings {
-  mentionsPolicy?: SlackMentionsPolicy;
-}
-
 /** Maps each integration ID to its global and per-repo settings types. */
 export interface IntegrationSettingsMap {
   github: IntegrationEntry<GitHubBotSettings>;

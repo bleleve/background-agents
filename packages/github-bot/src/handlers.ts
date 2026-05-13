@@ -10,7 +10,11 @@ import type {
 import type { Logger } from "./logger";
 import { extractSessionIdFromBranch } from "@open-inspect/shared";
 import { generateInstallationToken, postReaction, checkSenderPermission } from "./github-auth";
-import { buildCodeReviewPrompt, buildCommentActionPrompt } from "./prompts";
+import {
+  buildCodeReviewPrompt,
+  buildCommentActionPrompt,
+  buildFailedChecksPrompt,
+} from "./prompts";
 import { getGitHubConfig, type ResolvedGitHubConfig } from "./utils/integration-config";
 
 export type HandlerResult =
