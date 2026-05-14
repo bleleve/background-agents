@@ -93,6 +93,8 @@ export interface SandboxStorage {
   updateSandboxSnapshotImageId(sandboxId: string, imageId: string): void;
   /** Update last activity timestamp */
   updateSandboxLastActivity(timestamp: number): void;
+  /** Whether there is an active execution (processing message) in progress */
+  getIsProcessing(): boolean;
   /** Increment circuit breaker failure count */
   incrementCircuitBreakerFailure(timestamp: number): void;
   /** Reset circuit breaker failure count */
@@ -1025,6 +1027,7 @@ export class SandboxLifecycleManager {
       lastActivity: sandbox.last_activity,
       status: sandbox.status as SandboxStatus,
       connectedClientCount: connectedClients,
+      isProcessing: this.storage.getIsProcessing(),
     };
 
     const inactivityDecision = evaluateInactivityTimeout(
