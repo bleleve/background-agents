@@ -960,7 +960,9 @@ async function startSessionAndSendPrompt(
   // Build prompt content with channel and thread context if available
   const channelContext = channelName ? formatChannelContext(channelName, channelDescription) : "";
   const threadContext = previousMessages ? formatThreadContext(previousMessages) : "";
-  const promptContent = channelContext + threadContext + messageText;
+  const slackInstruction =
+    "\n\nNote: Do not use the `slack-notify` tool in this session. Slack sessions automatically post a follow-up notification when triggered from Slack.";
+  const promptContent = channelContext + threadContext + messageText + slackInstruction;
 
   // Send the prompt to the session
   const promptResult = await sendPrompt(
