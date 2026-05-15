@@ -59,6 +59,14 @@ module "modal_app" {
         ALLOWED_CONTROL_PLANE_HOSTS = local.control_plane_host
         CONTROL_PLANE_URL           = local.control_plane_url
       }
+    },
+    {
+      name = "cloudflare-access"
+      values = {
+        CF_ACCESS_CLIENT_ID     = var.cf_access_client_id
+        CF_ACCESS_CLIENT_SECRET = var.cf_access_client_secret
+        CF_ACCESS_TOKEN_URL     = var.cf_access_token_url
+      }
     }
   ]
 }

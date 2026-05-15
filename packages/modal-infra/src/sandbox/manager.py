@@ -17,6 +17,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import modal
 
@@ -26,6 +27,7 @@ from sandbox_runtime.types import SandboxStatus, SessionConfig
 
 from ..app import app, llm_secrets
 from ..aws_credentials import AwsRoleConfig, assume_roles
+from ..cloudflare_credentials import get_cf_authorization_jwt
 from ..images.base import base_image
 
 log = get_logger("manager")
@@ -244,6 +246,62 @@ class SandboxManager:
             )
 
     @staticmethod
+    def _inject_cloudflare_credentials(env_vars: dict[str, str]) -> None:
+        """
+        Exchange a Cloudflare Access Service Token for a short-lived JWT and inject
+        it into the headers of MCP servers that have cloudflare_access=True.
+
+        Reads the existing SESSION_CONFIG from env_vars, patches headers on any
+        MCP server marked with cloudflare_access=True, and re-serializes. No-op if
+        CF credentials are not configured (env vars absent) or no servers are marked.
+
+        Args:
+            env_vars: Mutable env var dict (modified in place).
+        """
+        session_config_json = env_vars.get("SESSION_CONFIG")
+        if not session_config_json:
+            return
+
+        try:
+            session_config = json.loads(session_config_json)
+        except json.JSONDecodeError:
+            log.warn("cloudflare.session_config_parse_error")
+            return
+
+        token_url = os.environ.get("CF_ACCESS_TOKEN_URL", "")
+        cf_host = urlparse(token_url).netloc if token_url else ""
+        cf_servers = (
+            [
+                s
+                for s in (session_config.get("mcp_servers") or [])
+                if s.get("type") == "remote" and urlparse(s.get("url", "")).netloc == cf_host
+            ]
+            if cf_host
+            else []
+        )
+        if not cf_servers:
+            return
+
+        try:
+            jwt = get_cf_authorization_jwt()
+        except RuntimeError as e:
+            log.warn(
+                "cloudflare.jwt_failed",
+                error=str(e),
+                note="Sandbox will start without Cloudflare Access credentials",
+            )
+            return
+
+        if jwt is None:
+            return
+
+        for server in cf_servers:
+            server.setdefault("headers", {})["CF-Access-Jwt-Assertion"] = jwt
+
+        env_vars["SESSION_CONFIG"] = json.dumps(session_config)
+        log.info("cloudflare.credentials_injected", server_count=len(cf_servers))
+
+    @staticmethod
     def _inject_vcs_env_vars(env_vars: dict[str, str], clone_token: str | None) -> None:
         """Inject VCS-neutral env vars based on SCM_PROVIDER."""
         scm_provider = os.environ.get("SCM_PROVIDER", "github")
@@ -322,6 +380,8 @@ class SandboxManager:
 
         if config.session_config:
             env_vars["SESSION_CONFIG"] = config.session_config.model_dump_json()
+
+        self._inject_cloudflare_credentials(env_vars)
 
         if config.opencode_user_config:
             env_vars["OPENCODE_CONFIG_CONTENT"] = config.opencode_user_config
@@ -647,6 +707,7 @@ class SandboxManager:
 
         self._inject_vcs_env_vars(env_vars, clone_token)
         self._inject_aws_credentials(env_vars, aws_role_configs)
+        self._inject_cloudflare_credentials(env_vars)
 
         if opencode_user_config:
             env_vars["OPENCODE_CONFIG_CONTENT"] = opencode_user_config

@@ -68,6 +68,13 @@ internal_api_secret = modal.Secret.from_name(
 )
 
 
+# Optional: enables Cloudflare Access JWT injection for MCP portal authentication.
+# Create a Modal Secret named "cloudflare-access" with keys:
+#   CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, CF_ACCESS_TOKEN_URL
+# See packages/modal-infra/src/cloudflare_credentials.py for setup instructions.
+cloudflare_access_secrets = modal.Secret.from_name("cloudflare-access")
+
+
 def _get_allowed_hosts() -> set[str]:
     """
     Get the set of allowed control plane hosts from environment.

@@ -19,6 +19,7 @@ from modal import fastapi_endpoint
 
 from .app import (
     app,
+    cloudflare_access_secrets,
     function_image,
     github_app_secrets,
     internal_api_secret,
@@ -145,7 +146,7 @@ def require_valid_control_plane_url(url: str | None) -> None:
 
 @app.function(
     image=function_image,
-    secrets=[github_app_secrets, internal_api_secret],
+    secrets=[github_app_secrets, internal_api_secret, cloudflare_access_secrets],
 )
 @fastapi_endpoint(method="POST")
 async def api_create_sandbox(
@@ -438,7 +439,10 @@ async def api_snapshot_sandbox(
         )
 
 
-@app.function(image=function_image, secrets=[github_app_secrets, internal_api_secret])
+@app.function(
+    image=function_image,
+    secrets=[github_app_secrets, internal_api_secret, cloudflare_access_secrets],
+)
 @fastapi_endpoint(method="POST")
 async def api_restore_sandbox(
     request: dict,

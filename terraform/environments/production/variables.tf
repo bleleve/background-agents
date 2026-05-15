@@ -443,6 +443,30 @@ variable "langfuse_baseurl" {
   default     = ""
 }
 
+# =============================================================================
+# Cloudflare Access MCP Portal
+# =============================================================================
+
+variable "cf_access_client_id" {
+  description = "Cloudflare Access Service Token Client ID for MCP portal authentication"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "cf_access_client_secret" {
+  description = "Cloudflare Access Service Token Client Secret for MCP portal authentication"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "cf_access_token_url" {
+  description = "URL of the Cloudflare Access-protected MCP portal (used to exchange the service token for a JWT)"
+  type        = string
+  default     = ""
+}
+
 variable "unsafe_allow_all_users" {
   description = "Bypass Terraform's access-control safety check and allow any authenticated GitHub user to sign in when both allowlists are empty. Set to true only for intentionally open deployments."
   type        = bool
