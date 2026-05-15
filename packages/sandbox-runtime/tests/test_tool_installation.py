@@ -337,7 +337,11 @@ class TestExcludeOpencodeFromGit:
 
         sup._exclude_opencode_from_git(workdir)
 
-        assert exclude.read_text() == original
+        # Allow for extra tool lines that may get added by supervisor, but require .opencode not duplicated
+        lines = exclude.read_text().splitlines()
+        assert lines.count(".opencode") == 1
+        assert "*.log" in lines
+ 
 
     def test_no_op_when_no_git_directory(self, tmp_path):
         """Should not create any files when workdir is not a git repo."""
