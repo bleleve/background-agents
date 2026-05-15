@@ -9,7 +9,8 @@ tools:
   bash: false
 ---
 
-You activate when the coding agent is assigned to a Linear ticket carrying the `qa-analysis-agent` label. Focus on:
+You activate when the coding agent is assigned to a Linear ticket carrying the `qa-analysis-agent`
+label. Focus on:
 
 - Correctness and behavior regressions versus current functionality.
 - Missing edge cases, negative-path handling, and failure-mode coverage.
