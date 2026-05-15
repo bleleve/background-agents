@@ -342,7 +342,6 @@ class TestExcludeOpencodeFromGit:
         assert lines.count(".opencode") == 1
         assert "*.log" in lines
  
-
     def test_no_op_when_no_git_directory(self, tmp_path):
         """Should not create any files when workdir is not a git repo."""
         sup = _make_supervisor()
