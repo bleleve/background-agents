@@ -510,7 +510,7 @@ class SandboxSupervisor:
 
             # Copy via a temp file so the target is never partially written.
             shutil.copy2(str(source), str(tmp_path))
-            os.chmod(str(tmp_path), 0o600)
+            Path.chmod(str(tmp_path), 0o600)
             tmp_path.replace(config_path)
 
             self.log.info("eks.kubeconfig_written", path=str(config_path))

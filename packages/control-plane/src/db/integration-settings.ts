@@ -409,40 +409,6 @@ export class IntegrationSettingsStore {
 
     return settings;
   }
-
-  private validateSlackSettings(
-    settings: SlackGlobalSettings,
-    level: SettingsLevel
-  ): SlackGlobalSettings {
-    const allowedKeys =
-      level === "global"
-        ? new Set(["agentNotificationsEnabled", "mentionsPolicy"])
-        : new Set(["agentNotificationsEnabled"]);
-
-    for (const key of Object.keys(settings)) {
-      if (!allowedKeys.has(key)) {
-        throw new IntegrationSettingsValidationError(`Unknown slack setting: ${key}`);
-      }
-    }
-
-    if (
-      settings.agentNotificationsEnabled !== undefined &&
-      typeof settings.agentNotificationsEnabled !== "boolean"
-    ) {
-      throw new IntegrationSettingsValidationError("agentNotificationsEnabled must be a boolean");
-    }
-
-    if (
-      settings.mentionsPolicy !== undefined &&
-      !SLACK_MENTIONS_POLICIES.includes(settings.mentionsPolicy)
-    ) {
-      throw new IntegrationSettingsValidationError(
-        `mentionsPolicy must be one of: ${SLACK_MENTIONS_POLICIES.join(", ")}`
-      );
-    }
-
-    return settings;
-  }
 }
 
 export interface ResolvedIntegrationConfig<TRepo extends object = Record<string, unknown>> {

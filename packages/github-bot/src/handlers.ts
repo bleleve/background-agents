@@ -561,6 +561,7 @@ export async function handleCheckSuiteCompleted(
       log,
       ghToken,
       `https://api.github.com/repos/${owner}/${repoName}/issues/${pullNumber}/reactions`,
+      resolveAppName(env),
       meta
     );
 
