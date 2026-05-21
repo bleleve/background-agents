@@ -54,6 +54,55 @@ const CLASSIFY_REPO_TOOL: Anthropic.Messages.Tool = {
   },
 };
 
+const CLASSIFY_PLAN_TOOL_NAME = "classify_plan_intent";
+const CLASSIFY_PLAN_TOOL: Anthropic.Messages.Tool = {
+  name: CLASSIFY_PLAN_TOOL_NAME,
+  description:
+    "Decide whether a Slack coding request warrants a human-approved plan before code changes.",
+  input_schema: {
+    type: "object",
+    properties: {
+      shouldPlan: {
+        type: "boolean",
+        description:
+          "True if the task is non-trivial (multi-step refactor, design question, architectural decision). False for trivial fixes, well-scoped small changes, questions, or quick tweaks. Default to false when uncertain to reduce friction.",
+      },
+      planReasoning: {
+        type: "string",
+        description: "Brief explanation of the decision.",
+      },
+    },
+    required: ["shouldPlan", "planReasoning"],
+    additionalProperties: false,
+  },
+};
+
+function buildPlanIntentPrompt(message: string, threadContext: string): string {
+  return `You are deciding whether a coding agent should propose a plan before making code changes, or build directly.
+
+## User's message
+${message}${threadContext}
+
+## Decision rules
+
+Set \`shouldPlan: true\` when the task is non-trivial:
+- Multi-step refactor, redesign, or migration
+- New feature spanning multiple files
+- Architectural decision or "how should we" questions
+- Anything where reviewing the approach before code changes adds clear value
+
+Set \`shouldPlan: false\` when the task is well-scoped and quick:
+- Bug fix with a clear scope
+- Typo, rename, or small enhancement
+- Questions that don't require code changes
+- Explicit "just do X", "quick fix", "small change", or similar
+- Pure investigation / read-only requests
+
+When uncertain, prefer \`false\` (build mode) to reduce friction.
+
+Call the ${CLASSIFY_PLAN_TOOL_NAME} tool with your decision.`;
+}
+
 /**
  * Build the classification prompt for the LLM.
  */
@@ -411,55 +460,6 @@ export class RepoClassifier {
       return { shouldPlan: false };
     }
   }
-}
-
-const CLASSIFY_PLAN_TOOL_NAME = "classify_plan_intent";
-const CLASSIFY_PLAN_TOOL: Anthropic.Messages.Tool = {
-  name: CLASSIFY_PLAN_TOOL_NAME,
-  description:
-    "Decide whether a Slack coding request warrants a human-approved plan before code changes.",
-  input_schema: {
-    type: "object",
-    properties: {
-      shouldPlan: {
-        type: "boolean",
-        description:
-          "True if the task is non-trivial (multi-step refactor, design question, architectural decision). False for trivial fixes, well-scoped small changes, questions, or quick tweaks. Default to false when uncertain to reduce friction.",
-      },
-      planReasoning: {
-        type: "string",
-        description: "Brief explanation of the decision.",
-      },
-    },
-    required: ["shouldPlan", "planReasoning"],
-    additionalProperties: false,
-  },
-};
-
-function buildPlanIntentPrompt(message: string, threadContext: string): string {
-  return `You are deciding whether a coding agent should propose a plan before making code changes, or build directly.
-
-## User's message
-${message}${threadContext}
-
-## Decision rules
-
-Set \`shouldPlan: true\` when the task is non-trivial:
-- Multi-step refactor, redesign, or migration
-- New feature spanning multiple files
-- Architectural decision or "how should we" questions
-- Anything where reviewing the approach before code changes adds clear value
-
-Set \`shouldPlan: false\` when the task is well-scoped and quick:
-- Bug fix with a clear scope
-- Typo, rename, or small enhancement
-- Questions that don't require code changes
-- Explicit "just do X", "quick fix", "small change", or similar
-- Pure investigation / read-only requests
-
-When uncertain, prefer \`false\` (build mode) to reduce friction.
-
-Call the ${CLASSIFY_PLAN_TOOL_NAME} tool with your decision.`;
 }
 
 /**
