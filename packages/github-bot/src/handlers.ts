@@ -195,7 +195,8 @@ function getTriggerMentions(env: Env): string[] {
   const withoutBotSuffix = full.replace(/\[bot\]$/i, "");
   const mentions = [full];
   if (withoutBotSuffix !== full) mentions.push(withoutBotSuffix);
-  mentions.push("reef");
+  // @reef is a stable alias that only the production environment should respond to.
+  if (env.REEF_ALIAS_ENABLED === "true") mentions.push("reef");
   return mentions;
 }
 

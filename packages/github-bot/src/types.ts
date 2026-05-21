@@ -43,6 +43,12 @@ export interface Env {
 
   /** Optional log level override. */
   LOG_LEVEL?: string;
+
+  /**
+   * When set to "true", the bot also responds to the @reef mention alias.
+   * Only enable this in the production environment.
+   */
+  REEF_ALIAS_ENABLED?: string;
 }
 
 /**

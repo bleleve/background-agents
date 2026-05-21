@@ -696,6 +696,43 @@ describe("handleIssueComment", () => {
     expect(promptBody.content).not.toContain("@test-bot");
   });
 
+  it("responds to @reef mention when REEF_ALIAS_ENABLED is true", async () => {
+    const env = { ...createMockEnv(), REEF_ALIAS_ENABLED: "true" };
+    const log = createMockLogger();
+    const payload: IssueCommentPayload = {
+      ...issueCommentPayload,
+      comment: {
+        ...issueCommentPayload.comment,
+        body: "@reef please fix the error handling",
+      },
+    };
+
+    const result = await handleIssueComment(env, log, payload, "trace-2");
+
+    expect(result.outcome).toBe("processed");
+    const cpFetch = getControlPlaneFetch(env as unknown as Env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain("please fix the error handling");
+    expect(promptBody.content).not.toContain("@reef");
+  });
+
+  it("ignores @reef mention when REEF_ALIAS_ENABLED is not set", async () => {
+    const env = createMockEnv(); // REEF_ALIAS_ENABLED is absent
+    const log = createMockLogger();
+    const payload: IssueCommentPayload = {
+      ...issueCommentPayload,
+      comment: {
+        ...issueCommentPayload.comment,
+        body: "@reef please fix the error handling",
+      },
+    };
+
+    const result = await handleIssueComment(env, log, payload, "trace-2");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "no_mention" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+  });
+
   it("returns early if not a PR", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
@@ -810,6 +847,37 @@ describe("handleReviewComment", () => {
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.content).toContain("can you fix this?");
     expect(promptBody.content).not.toContain("@test-bot");
+  });
+
+  it("responds to @reef mention on review comments when REEF_ALIAS_ENABLED is true", async () => {
+    const env = { ...createMockEnv(), REEF_ALIAS_ENABLED: "true" };
+    const log = createMockLogger();
+    const payload: ReviewCommentPayload = {
+      ...reviewCommentPayload,
+      comment: { ...reviewCommentPayload.comment, body: "@reef can you fix this?" },
+    };
+
+    const result = await handleReviewComment(env, log, payload, "trace-3");
+
+    expect(result.outcome).toBe("processed");
+    const cpFetch = getControlPlaneFetch(env as unknown as Env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain("can you fix this?");
+    expect(promptBody.content).not.toContain("@reef");
+  });
+
+  it("ignores @reef mention on review comments when REEF_ALIAS_ENABLED is not set", async () => {
+    const env = createMockEnv(); // REEF_ALIAS_ENABLED is absent
+    const log = createMockLogger();
+    const payload: ReviewCommentPayload = {
+      ...reviewCommentPayload,
+      comment: { ...reviewCommentPayload.comment, body: "@reef can you fix this?" },
+    };
+
+    const result = await handleReviewComment(env, log, payload, "trace-3");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "no_mention" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
   });
 
   it("returns early if no @mention", async () => {
