@@ -14,9 +14,14 @@ import {
 } from "./utils/linear-client";
 import { callbacksRouter } from "./callbacks";
 import { createLogger } from "./logger";
-import { fetchModelDefaults, resolveAppName, verifyInternalToken } from "@open-inspect/shared";
+import {
+  escapeHtml,
+  fetchModelDefaults,
+  resolveAppName,
+  verifyInternalToken,
+} from "@open-inspect/shared";
 import type { LinearWebhookPayload } from "@open-inspect/shared";
-import { handleAgentSessionEvent, escapeHtml } from "./webhook-handler";
+import { handleAgentSessionEvent } from "./webhook-handler";
 import { handleLinearIssueEvent } from "./automation-events";
 import {
   getTeamRepoMapping,

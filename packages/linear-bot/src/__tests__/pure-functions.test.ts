@@ -56,10 +56,8 @@ describe("extractModelFromLabels", () => {
     expect(extractModelFromLabels([{ name: "model-unknown" }])).toBeNull();
   });
 
-  it("accepts the `implementation-` prefix as an alias of `model-`", () => {
-    expect(extractModelFromLabels([{ name: "implementation-sonnet" }])).toBe(
-      "anthropic/claude-sonnet-4-5"
-    );
+  it("accepts the `build-` prefix as an alias of `model-`", () => {
+    expect(extractModelFromLabels([{ name: "build-sonnet" }])).toBe("anthropic/claude-sonnet-4-5");
   });
 
   it("returns null when no model-* labels are present", () => {

@@ -6,7 +6,7 @@
  */
 
 import { Hono } from "hono";
-import { resolveAppName } from "@open-inspect/shared";
+import { buildUntrustedUserContentBlock, resolveAppName } from "@open-inspect/shared";
 import type {
   Env,
   RepoConfig,
@@ -1184,29 +1184,41 @@ function buildThreadSession(
 }
 
 /**
- * Format thread context for inclusion in a prompt.
- * Returns a formatted string with previous messages from the thread.
+ * Format thread context for inclusion in a prompt. Wraps the previous Slack
+ * messages in a `<user_content>` block per Anthropic's prompting guidance —
+ * thread messages are arbitrary user-generated content and a hostile sender
+ * could otherwise smuggle instructions into the prompt. Each message is
+ * already prefixed with `[username]:` by the caller for attribution.
  */
-function formatThreadContext(previousMessages: string[]): string {
+export function formatThreadContext(previousMessages: string[]): string {
   if (previousMessages.length === 0) {
     return "";
   }
 
-  const context = previousMessages.join("\n");
-  return `Context from the Slack thread:\n---\n${context}\n---\n\n`;
+  return `${buildUntrustedUserContentBlock({
+    source: "slack_thread",
+    author: "slack",
+    content: previousMessages.join("\n"),
+    origin: "a Slack thread",
+  })}\n\n`;
 }
 
 /**
- * Format channel context for inclusion in a prompt.
- * Returns a formatted string with the channel name and optional description.
+ * Format channel context for inclusion in a prompt. Channel name / description
+ * are Slack-controlled but still wrapped for consistency and so the agent can
+ * cleanly distinguish workspace metadata from the live instruction.
  */
-function formatChannelContext(channelName: string, channelDescription?: string): string {
-  let context = `Slack channel context:\n---\nChannel: #${channelName}`;
+export function formatChannelContext(channelName: string, channelDescription?: string): string {
+  let content = `Channel: #${channelName}`;
   if (channelDescription) {
-    context += `\nDescription: ${channelDescription}`;
+    content += `\nDescription: ${channelDescription}`;
   }
-  context += "\n---\n\n";
-  return context;
+  return `${buildUntrustedUserContentBlock({
+    source: "slack_channel",
+    author: "slack",
+    content,
+    origin: "a Slack channel",
+  })}\n\n`;
 }
 
 /**
@@ -1317,8 +1329,10 @@ async function startSessionAndSendPrompt(
   // Build prompt content with channel and thread context if available
   const channelContext = channelName ? formatChannelContext(channelName, channelDescription) : "";
   const threadContext = previousMessages ? formatThreadContext(previousMessages) : "";
+  // Deployment-controlled directive, wrapped so it's cleanly separated from the
+  // live user instruction. Not `<user_content>` because it's not untrusted.
   const slackInstruction =
-    "\n\nNote: Do not use the `slack-notify` tool in this session. Slack sessions automatically post a follow-up notification when triggered from Slack.";
+    "\n\n<system_instruction>\nDo not use the `slack-notify` tool in this session. Slack sessions automatically post a follow-up notification when triggered from Slack.\n</system_instruction>";
   const promptContent = channelContext + threadContext + messageText + slackInstruction;
 
   // Send the prompt to the session

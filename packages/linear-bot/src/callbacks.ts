@@ -51,10 +51,10 @@ function formatPlanAwaitingApproval(
     `### Plan ready — awaiting your approval\n\n` +
     `${appName} proposed the plan below for this issue (version ${plan.version}).\n\n` +
     `**To proceed, reply in this thread:**\n` +
-    `- \`approve\` — start the implementation (uses the model from a \`model-<alias>\` ` +
-    `or \`implementation-<alias>\` label on this issue, else the default)\n` +
+    `- \`approve\` — start the build (uses the model from a \`model-<alias>\` ` +
+    `or \`build-<alias>\` label on this issue, else the default)\n` +
     `- \`reject\` — discard this plan; optionally add a reason on the same line\n\n` +
-    `To switch the implementation model, add a label like \`implementation-sonnet\` or ` +
+    `To switch the build model, add a label like \`build-sonnet\` or ` +
     `\`model-opus\` to this issue before approving. Or ` +
     `[open the session in the web app](${webSessionUrl}#plan) to approve from the web. ` +
     `Any other reply will ask the agent to amend the plan.\n\n` +

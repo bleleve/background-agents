@@ -599,6 +599,23 @@ class AgentBridge:
         return None
 
     @staticmethod
+    def _escape_user_message_close(content: str) -> str:
+        """Neutralize literal `</user_message>` in bot-assembled content.
+
+        `_handle_prompt` wraps `content` in `<user_message>...</user_message>`
+        when a preamble is prepended. Inner user text is escaped against the
+        `<user_content>` boundary by buildUntrustedUserContentBlock but NOT
+        against `<user_message>`, since that outer wrapper is added here.
+        Without this escape, a user typing `</user_message>` in a Linear issue
+        or PR body could close the wrapper early and place text outside the
+        user-data boundary, bypassing the preamble's instructions. Two-pass to
+        avoid re-escaping caller-pre-escaped variants (defense in depth).
+        """
+        return content.replace("<\\/user_message>", "<\\\\/user_message>").replace(
+            "</user_message>", "<\\/user_message>"
+        )
+
+    @staticmethod
     def _build_resume_preamble(resume_context: dict[str, Any]) -> str | None:
         """Build a restate-and-confirm preamble from a resume context payload.
 
@@ -607,6 +624,10 @@ class AgentBridge:
         explicit restate before any destructive action — this re-anchors the
         agent on the plan instead of relying on conversational memory that may
         have been compacted or contaminated by exploration noise.
+
+        Wrapped in XML tags per Anthropic's prompting guidance: the plan body is
+        itself markdown and would otherwise collide with our own headers, making
+        the boundary between embedded data and live instruction ambiguous.
         """
         current_plan = resume_context.get("currentPlan") if resume_context else None
         if not current_plan:
@@ -616,16 +637,18 @@ class AgentBridge:
             return None
         version = current_plan.get("version", "?")
         return (
-            "## Resume context\n\n"
-            f"A saved plan (version {version}) is in force for this session. "
+            "<resume_context>\n"
+            f'<saved_plan version="{version}">\n'
+            f"{plan_content.strip()}\n"
+            "</saved_plan>\n"
+            "<instructions_for_this_turn>\n"
             "Before any tool call that modifies files or runs destructive commands, "
-            "restate (a) which step of the plan you are executing and (b) how the "
-            "new instruction modifies it. Wait for explicit confirmation if your "
-            "interpretation diverges from the saved plan.\n\n"
-            "### Saved plan\n\n"
-            f"{plan_content.strip()}\n\n"
-            "---\n\n"
-            "## New instruction\n\n"
+            "restate (a) which step of the saved plan you are executing and (b) how "
+            "the new instruction modifies it. Wait for explicit confirmation if your "
+            "interpretation diverges from the saved plan.\n"
+            "</instructions_for_this_turn>\n"
+            "</resume_context>\n\n"
+            "<user_message>\n"
         )
 
     @staticmethod
@@ -637,6 +660,9 @@ class AgentBridge:
         that response at end-of-turn and POSTs it to /sessions/:id/plan
         (source=agent), which flips the session into awaiting_approval. The
         user (web UI / Linear / GitHub / Slack) then approves or rejects.
+
+        Wrapped in XML tags per Anthropic's prompting guidance — see the resume
+        preamble docstring for the rationale.
         """
         current_plan = resume_context.get("currentPlan") if resume_context else None
         previous_section = ""
@@ -645,13 +671,18 @@ class AgentBridge:
             version = current_plan.get("version", "?")
             if isinstance(plan_content, str) and plan_content.strip():
                 previous_section = (
-                    f"### Previous plan (version {version})\n\n"
-                    f"{plan_content.strip()}\n\n"
-                    "Amend it based on the new user instruction below. Reuse what is still "
-                    "correct; do not start from scratch unless the instruction explicitly asks.\n\n"
+                    f'<previous_plan version="{version}">\n'
+                    f"{plan_content.strip()}\n"
+                    "</previous_plan>\n"
+                    "<amendment_instruction>\n"
+                    "Amend the previous plan based on the new user instruction below. "
+                    "Reuse what is still correct; do not start from scratch unless the "
+                    "instruction explicitly asks.\n"
+                    "</amendment_instruction>\n"
                 )
         return (
-            "## Planning turn (human-in-the-loop)\n\n"
+            "<planning_turn>\n"
+            "<instructions>\n"
             "This session is in plan mode. Your output for this turn MUST be a single "
             "markdown plan that the user will approve, reject, or amend before any code "
             "is written. Do not edit files, do not run shell commands, do not open a PR. "
@@ -662,10 +693,11 @@ class AgentBridge:
             "2. An ordered list of 3-8 concrete steps (file paths, functions, decisions).\n"
             '3. A short "Risks & open questions" section if anything is uncertain.\n\n'
             "Once you have produced the plan, end your turn. Implementation will only run "
-            "after explicit human approval.\n\n"
+            "after explicit human approval.\n"
+            "</instructions>\n"
             f"{previous_section}"
-            "---\n\n"
-            "## User instruction\n\n"
+            "</planning_turn>\n\n"
+            "<user_message>\n"
         )
 
     async def _handle_prompt(self, cmd: dict[str, Any]) -> None:
@@ -686,12 +718,16 @@ class AgentBridge:
             # capture the textual response and POST it as the new plan version.
             # The model used is the session's selected model — the runtime stays
             # provider-agnostic and does not override which LLM produces the plan.
-            content = self._build_planning_preamble(resume_context) + content
+            safe_content = self._escape_user_message_close(content)
+            content = (
+                self._build_planning_preamble(resume_context) + safe_content + "\n</user_message>"
+            )
             preamble_kind = "planning"
         else:
             preamble = self._build_resume_preamble(resume_context)
             if preamble:
-                content = preamble + content
+                safe_content = self._escape_user_message_close(content)
+                content = preamble + safe_content + "\n</user_message>"
                 preamble_kind = "resume"
             else:
                 preamble_kind = "none"
@@ -957,7 +993,16 @@ class AgentBridge:
             reasoning_effort: Optional reasoning effort level (e.g., "high", "max")
         """
         prompt_suffix = os.environ.get("PROMPT_SUFFIX", "").strip() if include_prompt_suffix else ""
-        prompt_text = f"{content}\n\n{prompt_suffix}" if prompt_suffix else content
+        # Wrap the operator-controlled PROMPT_SUFFIX in <system_instruction> so
+        # the agent can cleanly separate the deployment directive from the user
+        # content above. Defensive escape isn't needed here — PROMPT_SUFFIX is
+        # not user input — but the wrapping matches our convention everywhere
+        # else (resume_context, planning_turn, user_message).
+        prompt_text = (
+            f"{content}\n\n<system_instruction>\n{prompt_suffix}\n</system_instruction>"
+            if prompt_suffix
+            else content
+        )
         request_body: dict[str, Any] = {"parts": [{"type": "text", "text": prompt_text}]}
 
         if opencode_message_id:

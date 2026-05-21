@@ -141,7 +141,7 @@ export function PlanApprovalBanner({
   function scrollToPlan() {
     if (!plan) return;
     const el = document.getElementById(`plan-${plan.id}`);
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   return (

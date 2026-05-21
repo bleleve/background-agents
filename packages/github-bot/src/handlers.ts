@@ -823,8 +823,8 @@ export async function handleIssueComment(
   // Label-based plan / model overrides (dash-separated, unified with Linear).
   //   - `plan`              → opt into plan-mode for this trigger
   //   - `plan-<alias>`      → plan-turn model override
-  //   - `model-<alias>`     → implementation-turn model override
-  //   - `implementation-<alias>` → alias of `model-<alias>` (more readable in plan-mode)
+  //   - `model-<alias>`     → build-turn model override
+  //   - `build-<alias>`     → alias of `model-<alias>` (more readable in plan-mode)
   const issueLabels: GitHubLabel[] = issue.labels ?? [];
   const planMode = hasPlanLabel(issueLabels);
   const implModel = extractModelFromLabels(issueLabels) ?? config.model;

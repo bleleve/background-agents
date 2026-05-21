@@ -170,7 +170,7 @@ class TestBuildPromptRequestBody:
         assert "messageID" not in body
 
     def test_prepends_env_prompt_suffix(self, monkeypatch: pytest.MonkeyPatch):
-        """Should append PROMPT_SUFFIX when include_prompt_suffix=True."""
+        """Should append PROMPT_SUFFIX wrapped in <system_instruction> tags."""
         monkeypatch.setenv("PROMPT_SUFFIX", "Always include this text.")
         bridge = AgentBridge(
             sandbox_id="test-sandbox",
@@ -181,7 +181,20 @@ class TestBuildPromptRequestBody:
 
         body = bridge._build_prompt_request_body("Hello", None)
 
-        assert body["parts"] == [{"type": "text", "text": "Hello\n\nAlways include this text."}]
+        # PROMPT_SUFFIX is operator-controlled; wrapping it in
+        # <system_instruction> keeps it cleanly separated from the user content
+        # above and matches the rest of the runtime's tag convention.
+        assert body["parts"] == [
+            {
+                "type": "text",
+                "text": (
+                    "Hello\n\n"
+                    "<system_instruction>\n"
+                    "Always include this text.\n"
+                    "</system_instruction>"
+                ),
+            }
+        ]
 
     def test_skips_env_prompt_suffix_when_disabled(self, monkeypatch: pytest.MonkeyPatch):
         """Should not append PROMPT_SUFFIX when include_prompt_suffix=False."""

@@ -19,8 +19,8 @@ import {
  *   • `plan`                       → trigger plan-mode (plan model = env default)
  *   • `plan-<alias>`               → trigger plan-mode AND set the plan model
  *                                    (e.g. `plan-sonnet`, `plan-opus`).
- *   • `model-<alias>`              → impl model override (e.g. `model-sonnet`).
- *   • `implementation-<alias>`     → impl model override (alias of `model-<alias>`).
+ *   • `model-<alias>`              → build model override (e.g. `model-sonnet`).
+ *   • `build-<alias>`              → build model override (alias of `model-<alias>`).
  *                                    Useful in plan-mode where it reads more naturally.
  *   • `review-<alias>`             → review model override (GitHub-only feature in
  *                                    practice; kept on Linear for symmetry).
@@ -33,8 +33,8 @@ export interface LinearLabel {
 
 const PREFIX_PLAN = "plan";
 const PREFIX_REVIEW = "review";
-// `model` and `implementation` are interchangeable for the impl-model override.
-const PREFIXES_IMPL_MODEL = ["implementation", "model"] as const;
+// `model` and `build` are interchangeable for the impl-model override.
+const PREFIXES_IMPL_MODEL = ["build", "model"] as const;
 
 /**
  * Extract a model alias from a label of the form `<prefix>-<alias>`. Returns
@@ -90,7 +90,7 @@ export function isPlanModeTriggered(labels: LinearLabel[]): boolean {
 
 /**
  * Extract impl-model override: a label of the form `model-<alias>` or
- * `implementation-<alias>` (the two are interchangeable; first match wins).
+ * `build-<alias>` (the two are interchangeable; first match wins).
  * Returns null when no matching label is applied — caller falls back to
  * env / shared default.
  */

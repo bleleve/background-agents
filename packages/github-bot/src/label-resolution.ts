@@ -5,8 +5,8 @@
  * in labels, so dash unifies both platforms):
  *   - `plan`                       → opt the @mention-triggered session into plan mode
  *   - `plan-<alias>`               → trigger plan-mode AND override plan-turn model
- *   - `model-<alias>`              → override implementation-turn model
- *   - `implementation-<alias>`     → impl model override (alias of `model-<alias>`)
+ *   - `model-<alias>`              → override build-turn model
+ *   - `build-<alias>`              → build model override (alias of `model-<alias>`)
  *   - `review-<alias>`             → override model used when auto-reviewing a PR
  *
  * Omit the label to use the env default — there is no `<prefix>-default` alias.
@@ -21,8 +21,8 @@ export interface GitHubLabel {
   name: string;
 }
 
-// `model` and `implementation` are interchangeable for the impl-model override.
-const PREFIXES_IMPL_MODEL = ["implementation", "model"] as const;
+// `model` and `build` are interchangeable for the impl-model override.
+const PREFIXES_IMPL_MODEL = ["build", "model"] as const;
 
 export function hasPlanLabel(labels: GitHubLabel[]): boolean {
   if (labels.some((l) => l.name.trim().toLowerCase() === "plan")) return true;

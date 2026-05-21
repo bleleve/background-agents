@@ -48,7 +48,7 @@ export const DEFAULT_PLAN_MODEL: ValidModel = "anthropic/claude-opus-4-6";
  * Map from short alias used in labels to the canonical provider/model
  * identifier. Used by Linear/GitHub label parsing — labels are dash-separated
  * (Linear forbids `:` in label names, so we unified on dashes everywhere):
- * `model-<alias>`, `plan-<alias>`, `implementation-<alias>`, `review-<alias>`.
+ * `model-<alias>`, `plan-<alias>`, `build-<alias>`, `review-<alias>`.
  *
  * Keep aliases short and memorable — they are user-facing.
  */

@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildFollowUpPrompt,
-  buildPrompt,
-  buildPromptContextPrompt,
-  escapeHtml,
-} from "./webhook-handler";
+import { escapeHtml } from "@open-inspect/shared";
+import { buildFollowUpPrompt, buildPrompt, buildPromptContextPrompt } from "./webhook-handler";
 
 describe("escapeHtml", () => {
   it("escapes & to &amp;", () => {
