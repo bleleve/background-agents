@@ -14,6 +14,15 @@ function buildCommentGuidelines(isPublicRepo: boolean): string {
 - Compose your full response before posting any comments.`;
 }
 
+const SUGGESTION_QUALITY_BAR = `
+**Quality bar — verify before posting an inline suggestion.**
+A confidently-wrong inline comment costs reviewer time and erodes trust over many PRs.
+- **Verify shell/regex/pattern claims empirically.** Test against representative input in the sandbox (e.g. \`printf 'pod/sidekiq-x\\npod/sourcery-sidekiq-y\\n' | grep -E '/sidekiq-'\`) rather than reasoning from analogous code you've seen elsewhere.
+- **Verify symbol-existence claims with grep.** Deprecated names, missing methods, env vars — confirm against the installed dependency in \`vendor/bundle/\` / \`node_modules/\` / etc., not from a newer library version's changelog.
+- **Verify language/framework behavior claims, not just existence.** If you're asserting how a method or construct *behaves* (Ruby default-argument evaluation timing, ActiveRecord \`with_lock\` reload semantics, JS hoisting, Python GIL, etc.), read the source in \`vendor/bundle/\` / \`node_modules/\` or run a small \`ruby -e\` / \`node -e\` script. Don't pattern-match from analogous-looking code in other languages or older versions of the same framework.
+- **Check that your suggested code is materially different** from the existing line. If the only difference is stylistic (equivalent regex flags for a pattern with no metacharacters, equivalent quote styles, whitespace), do not post.
+- **When uncertain whether the issue is real, do not post.** A missed real issue is recoverable on the next review pass; a confidently-wrong one creates noise on every review.`;
+
 function buildInlineSuggestionWorkflow(params: {
   owner: string;
   repo: string;
@@ -141,6 +150,8 @@ ${prDescriptionBlock}
 5. Leave feedback only as inline suggestion comments on specific changed files/lines when you find an issue worth calling out.
 6. For each inline suggestion comment, use this flow:
 
+${SUGGESTION_QUALITY_BAR}
+
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
 7. If you do not find any actionable file-specific feedback, do not submit a review or a general PR comment.
@@ -216,6 +227,8 @@ ${buildUntrustedUserContentBlock({
    - If code changes are needed, make them and push to the current branch
    - If it's a question, reply in-thread when possible
 4. For code feedback to the PR author, post inline suggestion comments (not top-level PR comments) using this flow:
+
+${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
@@ -298,6 +311,8 @@ ${checkConclusionBlock}
 4. Commit your changes to the current PR branch and push.
 5. Do not open a new PR. Update this existing PR branch only.
 6. When you need to ask the PR author to apply a code change manually, post an inline suggestion comment (not a top-level PR comment) using this flow:
+
+${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
