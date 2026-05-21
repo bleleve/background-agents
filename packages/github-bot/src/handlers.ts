@@ -1,4 +1,10 @@
-import { buildInternalAuthHeaders, resolveAppName } from "@open-inspect/shared";
+import {
+  buildInternalAuthHeaders,
+  fetchModelDefaults,
+  resolveAppName,
+  parsePlanCommand,
+  type PlanCommand,
+} from "@open-inspect/shared";
 import type {
   Env,
   PullRequestOpenedPayload,
@@ -16,6 +22,13 @@ import {
   buildFailedChecksPrompt,
 } from "./prompts";
 import { getGitHubConfig, type ResolvedGitHubConfig } from "./utils/integration-config";
+import {
+  extractModelFromLabels,
+  extractPlanModelFromLabels,
+  extractReviewModelFromLabels,
+  hasPlanLabel,
+  type GitHubLabel,
+} from "./label-resolution";
 
 export type HandlerResult =
   | { outcome: "processed"; session_id: string; message_id: string; handler_action: string }
@@ -40,6 +53,8 @@ async function createSession(
     scmLogin: string;
     scmUserId: string;
     scmAvatarUrl: string;
+    planMode?: boolean;
+    planModel?: string;
   }
 ): Promise<string> {
   const body: Record<string, unknown> = {
@@ -55,6 +70,10 @@ async function createSession(
   if (params.reasoningEffort) {
     body.reasoningEffort = params.reasoningEffort;
   }
+  if (params.planMode) {
+    body.planMode = true;
+    if (params.planModel) body.planModel = params.planModel;
+  }
   const response = await controlPlane.fetch("https://internal/sessions", {
     method: "POST",
     headers,
@@ -66,6 +85,83 @@ async function createSession(
   }
   const result = (await response.json()) as { sessionId: string };
   return result.sessionId;
+}
+
+/**
+ * Resolve the plan model for a label-driven session creation.
+ * Precedence: `plan-<alias>` label → control-plane defaults (DB > env > shared).
+ */
+async function resolvePlanModel(env: Env, labels: GitHubLabel[]): Promise<string> {
+  const labelModel = extractPlanModelFromLabels(labels);
+  if (labelModel) return labelModel;
+  const { defaultPlanModel } = await fetchModelDefaults(env);
+  return defaultPlanModel;
+}
+
+// ─── PR → session mapping (KV) ───────────────────────────────────────────────
+// Stored so that approve/reject comments can resolve which plan-mode session
+// they target. Keyed by `pr:<owner>/<repo>:<number>` with a 7-day TTL.
+
+const PR_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+function getPrSessionKey(repoFullName: string, prNumber: number): string {
+  return `pr-session:${repoFullName}:${prNumber}`;
+}
+
+async function rememberPrSession(
+  env: Env,
+  repoFullName: string,
+  prNumber: number,
+  sessionId: string
+): Promise<void> {
+  await env.GITHUB_KV.put(getPrSessionKey(repoFullName, prNumber), sessionId, {
+    expirationTtl: PR_SESSION_TTL_SECONDS,
+  });
+}
+
+async function lookupPrSession(
+  env: Env,
+  repoFullName: string,
+  prNumber: number
+): Promise<string | null> {
+  return env.GITHUB_KV.get(getPrSessionKey(repoFullName, prNumber));
+}
+
+// ─── Plan approve/reject parsing ─────────────────────────────────────────────
+// parsePlanCommand lives in @open-inspect/shared so command syntax stays in
+// sync between Linear and GitHub. See its docstring for the recognized forms.
+
+async function callPlanCommand(
+  command: PlanCommand,
+  controlPlane: Fetcher,
+  headers: Record<string, string>,
+  sessionId: string,
+  approverLogin: string
+): Promise<{ ok: boolean; status: number; body: string }> {
+  const path =
+    command.command === "approve"
+      ? `https://internal/sessions/${sessionId}/plan/approve`
+      : `https://internal/sessions/${sessionId}/plan/reject`;
+
+  const body: Record<string, unknown> = {
+    approverAuthorId: `github:${approverLogin}`,
+  };
+  if (command.command === "reject" && command.reason) {
+    body.reason = command.reason;
+  }
+
+  const res = await controlPlane.fetch(path, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  let text = "";
+  try {
+    text = await res.text();
+  } catch {
+    /* ignore */
+  }
+  return { ok: res.ok, status: res.status, body: text };
 }
 
 async function sendPrompt(
@@ -311,17 +407,27 @@ export async function handleReviewRequested(
     meta
   );
 
+  // `review-<alias>` label overrides the configured model for PR reviews only.
+  // It must be applied before the PR is opened or the review request fires.
+  const reviewLabels: GitHubLabel[] = pr.labels ?? [];
+  const reviewModel = extractReviewModelFromLabels(reviewLabels) ?? config.model;
+
   const sessionId = await createSession(env.CONTROL_PLANE, headers, {
     repoOwner: owner,
     repoName,
     title: `GitHub: Review PR #${pr.number}`,
-    model: config.model,
+    model: reviewModel,
     reasoningEffort: config.reasoningEffort,
     scmLogin: sender.login,
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
   });
-  log.info("session.created", { ...meta, session_id: sessionId, action: "review" });
+  log.info("session.created", {
+    ...meta,
+    session_id: sessionId,
+    action: "review",
+    review_model: reviewModel,
+  });
 
   const prompt = buildCodeReviewPrompt({
     owner,
@@ -411,17 +517,27 @@ export async function handlePullRequestOpened(
     meta
   );
 
+  // `review-<alias>` label overrides the configured model for the auto-review.
+  // Must be applied before the PR is opened.
+  const autoReviewLabels: GitHubLabel[] = pr.labels ?? [];
+  const autoReviewModel = extractReviewModelFromLabels(autoReviewLabels) ?? config.model;
+
   const sessionId = await createSession(env.CONTROL_PLANE, headers, {
     repoOwner: owner,
     repoName,
     title: `GitHub: Review PR #${pr.number}`,
-    model: config.model,
+    model: autoReviewModel,
     reasoningEffort: config.reasoningEffort,
     scmLogin: sender.login,
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
   });
-  log.info("session.created", { ...meta, session_id: sessionId, action: "auto_review" });
+  log.info("session.created", {
+    ...meta,
+    session_id: sessionId,
+    action: "auto_review",
+    review_model: autoReviewModel,
+  });
 
   const prompt = buildCodeReviewPrompt({
     owner,
@@ -654,7 +770,63 @@ export async function handleIssueComment(
   if (!gating.allowed) return { outcome: "skipped", skip_reason: gating.reason };
   const { ghToken, headers } = gating;
 
-  const commentBody = stripMentions(comment.body, getTriggerMentions(env));
+  const rawCommentBody = stripMentions(comment.body, getTriggerMentions(env));
+
+  // Plan-approval shortcut: if the comment (after stripping the @mention) is
+  // `approve` / `reject` (optionally with extras), route it to the existing
+  // plan-mode session for this PR instead of creating a new session. The
+  // PR→session mapping was written when the plan-mode session was created.
+  const planCommand = parsePlanCommand(rawCommentBody);
+  if (planCommand) {
+    const existingSessionId = await lookupPrSession(env, repoFullName, issue.number);
+    const meta = { trace_id: traceId, repo: repoFullName, pull_number: issue.number };
+    fireAndForgetReaction(
+      log,
+      ghToken,
+      `https://api.github.com/repos/${owner}/${repoName}/issues/comments/${comment.id}/reactions`,
+      resolveAppName(env),
+      meta
+    );
+
+    if (!existingSessionId) {
+      log.info("plan_command.no_session", { ...meta, command: planCommand.command });
+      return { outcome: "skipped", skip_reason: "no_plan_session_for_pr" };
+    }
+
+    const result = await callPlanCommand(
+      planCommand,
+      env.CONTROL_PLANE,
+      headers,
+      existingSessionId,
+      sender.login
+    );
+
+    log.info("plan_command.completed", {
+      ...meta,
+      session_id: existingSessionId,
+      command: planCommand.command,
+      http_status: result.status,
+      ok: result.ok,
+    });
+
+    return {
+      outcome: "processed",
+      session_id: existingSessionId,
+      message_id: "",
+      handler_action: planCommand.command === "approve" ? "plan_approve" : "plan_reject",
+    };
+  }
+
+  // Label-based plan / model overrides (dash-separated, unified with Linear).
+  //   - `plan`              → opt into plan-mode for this trigger
+  //   - `plan-<alias>`      → plan-turn model override
+  //   - `model-<alias>`     → implementation-turn model override
+  //   - `implementation-<alias>` → alias of `model-<alias>` (more readable in plan-mode)
+  const issueLabels: GitHubLabel[] = issue.labels ?? [];
+  const planMode = hasPlanLabel(issueLabels);
+  const implModel = extractModelFromLabels(issueLabels) ?? config.model;
+  const planModel = planMode ? await resolvePlanModel(env, issueLabels) : undefined;
+  const commentBody = rawCommentBody;
 
   const meta = { trace_id: traceId, repo: repoFullName, pull_number: issue.number };
   fireAndForgetReaction(
@@ -669,13 +841,28 @@ export async function handleIssueComment(
     repoOwner: owner,
     repoName,
     title: `GitHub: PR #${issue.number} comment`,
-    model: config.model,
+    model: implModel,
     reasoningEffort: config.reasoningEffort,
     scmLogin: sender.login,
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
+    planMode,
+    planModel,
   });
-  log.info("session.created", { ...meta, session_id: sessionId, action: "comment" });
+  log.info("session.created", {
+    ...meta,
+    session_id: sessionId,
+    action: "comment",
+    plan_mode: planMode,
+    plan_model: planModel ?? null,
+    impl_model: implModel,
+  });
+
+  // Plan-mode sessions need a PR→session mapping so subsequent approve/reject
+  // comments resolve to this session.
+  if (planMode) {
+    await rememberPrSession(env, repoFullName, issue.number, sessionId);
+  }
 
   const prompt = buildCommentActionPrompt({
     owner,

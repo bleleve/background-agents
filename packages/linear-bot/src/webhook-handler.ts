@@ -18,6 +18,7 @@ import {
   updateAgentSession,
   getRepoSuggestions,
   normalizeLinearCommentBody,
+  type LinearApiClient,
 } from "./utils/linear-client";
 import { buildInternalAuthHeaders } from "./utils/internal";
 import { classifyRepo } from "./classifier";
@@ -28,8 +29,11 @@ import { makePlan } from "./plan";
 import {
   resolveStaticRepo,
   extractModelFromLabels,
+  extractPlanModelFromLabels,
+  isPlanModeTriggered,
   resolveSessionModelSettings,
 } from "./model-resolution";
+import { fetchModelDefaults, parsePlanCommand, type PlanCommand } from "@open-inspect/shared";
 import {
   getTeamRepoMapping,
   getProjectRepoMapping,
@@ -157,6 +161,8 @@ async function createSession(
     actorUserId?: string;
     actorDisplayName?: string;
     actorEmail?: string;
+    planMode?: boolean;
+    planModel?: string;
   },
   traceId?: string
 ): Promise<{ ok: true; sessionId: string } | { ok: false; status: number; body: string }> {
@@ -184,6 +190,90 @@ async function createSession(
   return { ok: true, sessionId: result.sessionId };
 }
 
+/**
+ * Dispatch a Linear-originated plan approve / reject command to the control
+ * plane and surface the outcome in the Linear agent activity stream. Emits
+ * exactly one terminal activity (response or error).
+ *
+ * `appUserId` is used to attribute the approval in the control-plane event
+ * log; it is the Linear user clicking the button / sending the comment.
+ */
+async function handlePlanCommand(
+  command: PlanCommand,
+  env: Env,
+  client: LinearApiClient,
+  sessionId: string,
+  agentSessionId: string,
+  appUserId: string | null,
+  traceId?: string
+): Promise<void> {
+  const headers = await getAuthHeaders(env, traceId);
+  const path =
+    command.command === "approve"
+      ? `https://internal/sessions/${sessionId}/plan/approve`
+      : `https://internal/sessions/${sessionId}/plan/reject`;
+
+  const body: Record<string, unknown> = {
+    approverAuthorId: appUserId ? `linear:${appUserId}` : "linear:unknown",
+  };
+  if (command.command === "reject" && command.reason) {
+    body.reason = command.reason;
+  }
+
+  let res: Response;
+  try {
+    res = await env.CONTROL_PLANE.fetch(path, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    log.error("plan_command.transport_error", {
+      trace_id: traceId,
+      session_id: sessionId,
+      command: command.command,
+      error: e instanceof Error ? e : new Error(String(e)),
+    });
+    await emitAgentActivity(client, agentSessionId, {
+      type: "error",
+      body: `Failed to ${command.command} the plan (network error).`,
+    });
+    return;
+  }
+
+  if (!res.ok) {
+    let errBody = "";
+    try {
+      errBody = await res.text();
+    } catch {
+      /* ignore */
+    }
+    log.warn("plan_command.failed", {
+      trace_id: traceId,
+      session_id: sessionId,
+      command: command.command,
+      http_status: res.status,
+      response_body: errBody.slice(0, 300),
+    });
+    await emitAgentActivity(client, agentSessionId, {
+      type: "error",
+      body:
+        command.command === "approve"
+          ? `Approve failed (HTTP ${res.status}). The plan may already be approved, rejected, or the session is no longer in plan mode.`
+          : `Reject failed (HTTP ${res.status}).`,
+    });
+    return;
+  }
+
+  await emitAgentActivity(client, agentSessionId, {
+    type: "response",
+    body:
+      command.command === "approve"
+        ? "Plan approved. Implementation is starting."
+        : `Plan rejected${command.reason ? `: ${command.reason}` : ""}.`,
+  });
+}
+
 // ─── Sub-handlers ────────────────────────────────────────────────────────────
 
 async function handleStop(webhook: AgentSessionWebhook, env: Env, traceId: string): Promise<void> {
@@ -202,6 +292,48 @@ async function handleStop(webhook: AgentSessionWebhook, env: Env, traceId: strin
     const existingSession = await lookupIssueSession(env, issueId);
     if (existingSession) {
       const headers = await getAuthHeaders(env, traceId);
+
+      // If the user clicked Dismiss while a plan was awaiting approval,
+      // mark the plan rejected before stopping so the lifecycle is auditable.
+      // Best-effort: any failure here does not block the stop call.
+      try {
+        const planRes = await env.CONTROL_PLANE.fetch(
+          `https://internal/sessions/${existingSession.sessionId}/plan`,
+          { method: "GET", headers }
+        );
+        if (planRes.ok) {
+          const planBody = (await planRes.json()) as { plan?: { id: string } | null };
+          if (planBody.plan) {
+            const rejectRes = await env.CONTROL_PLANE.fetch(
+              `https://internal/sessions/${existingSession.sessionId}/plan/reject`,
+              {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                  reason: "Dismissed from Linear",
+                  approverAuthorId: webhook.appUserId ? `linear:${webhook.appUserId}` : null,
+                }),
+              }
+            );
+            log.info("agent_session.plan_auto_reject", {
+              trace_id: traceId,
+              session_id: existingSession.sessionId,
+              issue_id: issueId,
+              status: rejectRes.status,
+              // 409 = plan was not in awaiting_approval state; this is expected
+              // for sessions whose plan was already approved or already rejected.
+              skipped: rejectRes.status === 409,
+            });
+          }
+        }
+      } catch (e) {
+        log.warn("agent_session.plan_auto_reject_failed", {
+          trace_id: traceId,
+          session_id: existingSession.sessionId,
+          error: e instanceof Error ? e : new Error(String(e)),
+        });
+      }
+
       try {
         const stopRes = await env.CONTROL_PLANE.fetch(
           `https://internal/sessions/${existingSession.sessionId}/stop`,
@@ -284,6 +416,34 @@ async function handleFollowUp(
   const normalizedCommentBody = comment ? normalizeLinearCommentBody(comment) : "";
   const followUpContent =
     agentActivity?.content?.body || normalizedCommentBody || "Follow-up on the issue.";
+
+  // Plan-approval shortcut: if the user replied with `approve` or
+  // `reject [reason]`, route to the control-plane plan endpoint instead of
+  // forwarding as a regular prompt. Impl model is decided by the
+  // `model-<alias>` (or `implementation-<alias>`) label on the ticket —
+  // no inline override.
+  const planCommand = parsePlanCommand(followUpContent);
+  if (planCommand) {
+    await handlePlanCommand(
+      planCommand,
+      env,
+      client,
+      existingSession.sessionId,
+      agentSessionId,
+      webhook.appUserId ?? null,
+      traceId
+    );
+    log.info("agent_session.followup", {
+      trace_id: traceId,
+      issue_identifier: issue.identifier,
+      session_id: existingSession.sessionId,
+      agent_session_id: agentSessionId,
+      route: "plan_command",
+      command: planCommand.command,
+      duration_ms: Date.now() - startTime,
+    });
+    return;
+  }
   const followUpMetadata = agentActivity?.content?.body
     ? { followUpSource: "linear_agent_activity", followUpAuthor: "linear" }
     : { followUpSource: "linear_comment", followUpAuthor: "unknown" };
@@ -613,8 +773,9 @@ async function handleNewSession(
   }
 
   const labelModel = extractModelFromLabels(labels);
+  const modelDefaults = await fetchModelDefaults(env);
   const { model, reasoningEffort } = resolveSessionModelSettings({
-    envDefaultModel: env.DEFAULT_MODEL,
+    envDefaultModel: modelDefaults.defaultModel,
     configModel: integrationConfig.model,
     configReasoningEffort: integrationConfig.reasoningEffort,
     allowUserPreferenceOverride: integrationConfig.allowUserPreferenceOverride,
@@ -637,6 +798,25 @@ async function handleNewSession(
     true
   );
 
+  // Plan-mode trigger: a label named `plan` (case-insensitive) on the Linear
+  // issue opts this session into the HITL plan-first workflow. The agent
+  // proposes a markdown plan that the user must approve before any
+  // implementation step runs.
+  //
+  // Label conventions on Linear (which forbids `:` in label names, so we use
+  // flat dash-separated labels — see isPlanModeTriggered / extractByPrefix
+  // in model-resolution.ts):
+  //   • `plan` or `plan-<alias>`     → trigger plan-mode; alias sets plan model
+  //                                    (`plan` or `plan-default` = env default).
+  //   • `model-<alias>`              → impl model override.
+  //   • `implementation-<alias>`     → impl model override (alias of `model-<alias>`).
+  //                                    Useful in plan-mode where it reads more naturally.
+  //   • `review-<alias>`             → review model override (GitHub-only feature).
+  const planMode = isPlanModeTriggered(labels);
+  const planModel = planMode
+    ? (extractPlanModelFromLabels(labels) ?? modelDefaults.defaultPlanModel)
+    : undefined;
+
   const sessionResult = await createSession(
     env,
     {
@@ -648,6 +828,8 @@ async function handleNewSession(
       actorUserId: appUserId,
       actorDisplayName,
       actorEmail,
+      planMode,
+      planModel,
     },
     traceId
   );

@@ -6,6 +6,7 @@ export * from "./types";
 export * from "./git";
 export * from "./auth";
 export * from "./models";
+export * from "./model-defaults";
 export * from "./cron";
 export * from "./triggers";
 export * from "./completion/extractor";

@@ -17,6 +17,7 @@ export interface Env {
   CONTROL_PLANE_URL: string;
   WEB_APP_URL: string;
   DEFAULT_MODEL: string;
+  DEFAULT_PLAN_MODEL?: string;
   CLASSIFICATION_MODEL: string;
   APP_NAME?: string;
 
@@ -111,6 +112,7 @@ export type SlackInteractionPayload = {
   actions?: Array<{
     action_id: string;
     selected_option?: { value: string };
+    selected_options?: Array<{ value: string }>;
     value?: string;
   }>;
   channel?: { id: string };

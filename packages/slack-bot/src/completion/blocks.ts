@@ -3,15 +3,23 @@
  */
 
 import type { AgentResponse, SlackCallbackContext } from "../types";
-import type { ManualPullRequestArtifactMetadata } from "@open-inspect/shared";
+import type { ManualPullRequestArtifactMetadata, PlanArtifact } from "@open-inspect/shared";
 
 /**
- * Slack Block Kit block type (subset).
+ * Slack Block Kit block type (subset). `elements` allows the button-specific
+ * fields (`value`, `style`) needed by plan approve/reject buttons.
  */
 interface SlackBlock {
   type: string;
   text?: { type: string; text: string };
-  elements?: Array<{ type: string; text?: unknown; url?: string; action_id?: string }>;
+  elements?: Array<{
+    type: string;
+    text?: unknown;
+    url?: string;
+    action_id?: string;
+    value?: string;
+    style?: "primary" | "danger";
+  }>;
 }
 
 /**
@@ -127,6 +135,66 @@ export function buildCompletionBlocks(
  */
 export function getFallbackText(response: AgentResponse): string {
   return response.textContent.slice(0, FALLBACK_TEXT_LIMIT) || "Agent completed.";
+}
+
+/**
+ * Build Block Kit message for a plan that's awaiting approval. The user can
+ * Approve (opens a modal to pick the implementation model) or Reject (opens
+ * a modal for an optional reason), or jump to the web UI.
+ *
+ * The session id is carried in each button's `value` so the action handler
+ * can route the click to the right control-plane plan endpoint.
+ */
+export function buildPlanAwaitingApprovalBlocks(
+  sessionId: string,
+  plan: PlanArtifact,
+  webAppUrl: string
+): SlackBlock[] {
+  // Slack section blocks cap at 3000 chars; truncate well under that so the
+  // surrounding header and footer always render.
+  const planBody =
+    plan.content.length > 2500 ? plan.content.slice(0, 2500) + "\n\n_…truncated_" : plan.content;
+
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `:scroll: *Plan v${plan.version}* — awaiting your approval`,
+      },
+    },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: planBody },
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "Approve & implement" },
+          action_id: "plan_approve",
+          // value carries the session id so the action handler can route the
+          // click to the right control-plane plan endpoint.
+          value: sessionId,
+          style: "primary",
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "Reject" },
+          action_id: "plan_reject",
+          value: sessionId,
+          style: "danger",
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "View plan in web" },
+          url: `${webAppUrl}/session/${sessionId}#plan`,
+          action_id: "view_session",
+        },
+      ],
+    },
+  ];
 }
 
 /**

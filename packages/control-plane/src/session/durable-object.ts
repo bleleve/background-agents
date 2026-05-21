@@ -73,6 +73,8 @@ import { SessionMessageQueue } from "./message-queue";
 import { SessionSandboxEventProcessor } from "./sandbox-events";
 import { createSessionInternalRoutes } from "./http/routes";
 import { createMessagesHandler, type MessagesHandler } from "./http/handlers/messages.handler";
+import { createPlansHandler, type PlansHandler } from "./http/handlers/plans.handler";
+import { PlanService } from "./services/plan.service";
 import {
   createChildSessionsHandler,
   type ChildSessionsHandler,
@@ -164,6 +166,10 @@ export class SessionDO extends DurableObject<Env> {
   private _messageService: MessageService | null = null;
   // Messages handler (lazily initialized)
   private _messagesHandler: MessagesHandler | null = null;
+  // Plan service (lazily initialized)
+  private _planService: PlanService | null = null;
+  // Plans handler (lazily initialized)
+  private _plansHandler: PlansHandler | null = null;
   // Child sessions handler (lazily initialized)
   private _childSessionsHandler: ChildSessionsHandler | null = null;
   // Sandbox handler (lazily initialized)
@@ -205,6 +211,11 @@ export class SessionDO extends DurableObject<Env> {
     childSummary: () => this.childSessionsHandler.getChildSummary(),
     cancel: () => this.sessionLifecycleHandler.cancel(),
     childSessionUpdate: (request) => this.childSessionsHandler.childSessionUpdate(request),
+    savePlan: (request) => this.plansHandler.savePlan(request),
+    getCurrentPlan: () => this.plansHandler.getCurrentPlan(),
+    listPlans: (_request, url) => this.plansHandler.listPlans(url),
+    approvePlan: (request) => this.plansHandler.approvePlan(request),
+    rejectPlan: (request) => this.plansHandler.rejectPlan(request),
   });
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -377,6 +388,35 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     return this._messagesHandler;
+  }
+
+  private get planService(): PlanService {
+    if (!this._planService) {
+      this._planService = new PlanService({
+        repository: this.repository,
+        generateId: () => generateId(),
+        now: () => Date.now(),
+        onPlanApproved: async () => {
+          // Flush any user message that arrived while we were awaiting approval.
+          // The queue gate (planMode && status !== "approved") is now lifted.
+          await this.messageQueue.processMessageQueue();
+        },
+      });
+    }
+    return this._planService;
+  }
+
+  private get plansHandler(): PlansHandler {
+    if (!this._plansHandler) {
+      this._plansHandler = createPlansHandler({
+        planService: this.planService,
+        getLog: () => this.log,
+        broadcast: (message) => this.broadcast(message),
+        getPlanApprovalStatus: () => this.repository.getSession()?.plan_approval_status ?? null,
+        validateReasoningEffort: (model, effort) => this.validateReasoningEffort(model, effort),
+      });
+    }
+    return this._plansHandler;
   }
 
   private get childSessionsHandler(): ChildSessionsHandler {
@@ -1677,6 +1717,8 @@ export class SessionDO extends DurableObject<Env> {
       }
     }
 
+    const currentPlanRow = session?.plan_mode === 1 ? this.repository.getCurrentPlan() : null;
+
     return {
       id: this.getPublicSessionId(session),
       title: session?.title ?? null,
@@ -1698,6 +1740,21 @@ export class SessionDO extends DurableObject<Env> {
       tunnelUrls: sandbox?.tunnel_urls ? this.safeParseTunnelUrls(sandbox.tunnel_urls) : null,
       ttydUrl: sandbox?.ttyd_url ?? null,
       ttydToken,
+      planMode: session?.plan_mode === 1,
+      planModel: session?.plan_model ?? null,
+      planApprovalStatus: session?.plan_approval_status ?? null,
+      planCostSnapshot: session?.plan_cost_snapshot ?? null,
+      currentPlan: currentPlanRow
+        ? {
+            id: currentPlanRow.id,
+            version: currentPlanRow.version,
+            content: currentPlanRow.content,
+            createdByAuthorId: currentPlanRow.created_by_author_id,
+            createdByMessageId: currentPlanRow.created_by_message_id,
+            source: currentPlanRow.source,
+            createdAt: currentPlanRow.created_at,
+          }
+        : null,
     };
   }
 

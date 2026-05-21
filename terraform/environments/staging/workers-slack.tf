@@ -47,6 +47,7 @@ module "slack_bot_worker" {
     { name = "WEB_APP_URL", value = local.web_app_url },
     { name = "DEPLOYMENT_NAME", value = var.deployment_name },
     { name = "DEFAULT_MODEL", value = "claude-sonnet-4-6" },
+    { name = "DEFAULT_PLAN_MODEL", value = "claude-opus-4-6" },
     { name = "CLASSIFICATION_MODEL", value = "claude-haiku-4-5" },
   ]
 

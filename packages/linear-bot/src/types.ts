@@ -17,6 +17,7 @@ export interface Env {
   CONTROL_PLANE_URL: string;
   WEB_APP_URL: string;
   DEFAULT_MODEL: string;
+  DEFAULT_PLAN_MODEL?: string;
   APP_NAME?: string;
 
   // OAuth app credentials

@@ -53,8 +53,8 @@ import {
 } from "./branch-preferences";
 import {
   MODEL_OPTIONS,
-  DEFAULT_MODEL,
   DEFAULT_ENABLED_MODELS,
+  fetchModelDefaults,
   isValidModel,
   getValidModelOrDefault,
   getReasoningConfig,
@@ -93,7 +93,9 @@ async function createSession(
   traceId?: string,
   slackUserId?: string,
   actorDisplayName?: string,
-  actorEmail?: string
+  actorEmail?: string,
+  planMode?: boolean,
+  planModel?: string
 ): Promise<{ sessionId: string; status: string } | null> {
   const startTime = Date.now();
   const base = {
@@ -104,6 +106,8 @@ async function createSession(
     reasoning_effort: reasoningEffort,
     branch,
     slack_user_id: slackUserId,
+    plan_mode: planMode === true,
+    plan_model: planMode ? (planModel ?? null) : null,
   };
   try {
     const headers = await getAuthHeaders(env, traceId);
@@ -121,6 +125,8 @@ async function createSession(
         actorUserId: slackUserId,
         actorDisplayName,
         actorEmail,
+        planMode: planMode === true,
+        ...(planMode && planModel ? { planModel } : {}),
       }),
     });
 
@@ -394,15 +400,56 @@ async function saveUserPreferences(
       });
       return false;
     }
+    // Preserve plan-mode prefs across other-pref updates by merging with the
+    // current value. saveUserPlanPreferences is the only writer that toggles
+    // plan-mode fields, so we never want this function to clobber them.
+    const existing = await getUserPreferences(env, userId);
     const prefs: UserPreferences = {
       userId,
       model,
       reasoningEffort,
       branch: normalizedBranch,
+      planModeDefault: existing?.planModeDefault,
+      planModel: existing?.planModel,
       updatedAt: Date.now(),
     };
     // No TTL - preferences persist indefinitely
     await createKvCacheStore(env.SLACK_KV).put(key, JSON.stringify(prefs));
+    return true;
+  } catch (e) {
+    log.error("kv.put", {
+      key_prefix: "user_prefs",
+      user_id: userId,
+      error: e instanceof Error ? e : new Error(String(e)),
+    });
+    return false;
+  }
+}
+
+/**
+ * Save plan-mode preferences (toggle + plan model) without touching the
+ * other UserPreferences fields. Used by the App Home plan-mode handlers.
+ */
+async function saveUserPlanPreferences(
+  env: Env,
+  userId: string,
+  patch: { planModeDefault?: boolean; planModel?: string }
+): Promise<boolean> {
+  try {
+    const key = getUserPreferencesKey(userId);
+    const existing = await getUserPreferences(env, userId);
+    const { defaultModel } = await fetchModelDefaults(env);
+    const next: UserPreferences = {
+      userId,
+      model: existing?.model ?? defaultModel,
+      reasoningEffort: existing?.reasoningEffort,
+      branch: existing?.branch,
+      planModeDefault:
+        patch.planModeDefault !== undefined ? patch.planModeDefault : existing?.planModeDefault,
+      planModel: patch.planModel !== undefined ? patch.planModel : existing?.planModel,
+      updatedAt: Date.now(),
+    };
+    await createKvCacheStore(env.SLACK_KV).put(key, JSON.stringify(next));
     return true;
   } catch (e) {
     log.error("kv.put", {
@@ -462,9 +509,9 @@ async function getRepoBranchSuggestionOptions(
  */
 async function publishAppHome(env: Env, userId: string): Promise<void> {
   const prefs = await getUserPreferences(env, userId);
-  const fallback = env.DEFAULT_MODEL || DEFAULT_MODEL;
+  const { defaultModel, defaultPlanModel } = await fetchModelDefaults(env);
   // Normalize model to ensure it's valid - UI and behavior will be consistent
-  const currentModel = getValidModelOrDefault(prefs?.model ?? fallback);
+  const currentModel = getValidModelOrDefault(prefs?.model ?? defaultModel);
   const availableModels = await getAvailableModels(env);
   const currentModelInfo =
     availableModels.find((m) => m.value === currentModel) || availableModels[0];
@@ -553,6 +600,74 @@ async function publishAppHome(env: Env, userId: string): Promise<void> {
       }
     );
   }
+
+  // ─── Plan mode preferences ─────────────────────────────────────────────────
+  // Plan-mode is per-user: when on, every new session this user starts is
+  // gated by a human-approved plan. Plan model defaults to the deployment's
+  // configured plan model (Settings → Models) until the user picks a different
+  // one here.
+  const planModeDefault = prefs?.planModeDefault === true;
+  const currentPlanModel = getValidModelOrDefault(prefs?.planModel ?? defaultPlanModel);
+  const currentPlanModelInfo =
+    availableModels.find((m) => m.value === currentPlanModel) || availableModels[0];
+  const planModeOption = {
+    text: {
+      type: "plain_text" as const,
+      text: "Plan first, then implement",
+    },
+    description: {
+      type: "plain_text" as const,
+      text: "New sessions propose a plan you approve before any code change.",
+    },
+    value: "plan_mode_on",
+  };
+
+  blocks.push(
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: "*Plan mode*\nWhen on, every new session you start proposes a plan that you must approve before any code change.",
+      },
+    },
+    {
+      type: "actions",
+      block_id: "plan_mode_selection",
+      elements: [
+        {
+          type: "checkboxes",
+          action_id: "select_plan_mode_default",
+          options: [planModeOption],
+          ...(planModeDefault ? { initial_options: [planModeOption] } : {}),
+        },
+      ],
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: "*Plan model*\nModel used to propose the plan (you can pick a different implementation model at approve time).",
+      },
+    },
+    {
+      type: "actions",
+      block_id: "plan_model_selection",
+      elements: [
+        {
+          type: "static_select",
+          action_id: "select_plan_model",
+          initial_option: {
+            text: { type: "plain_text", text: currentPlanModelInfo.label },
+            value: currentPlanModelInfo.value,
+          },
+          options: availableModels.map((m) => ({
+            text: { type: "plain_text", text: m.label },
+            value: m.value,
+          })),
+        },
+      ],
+    }
+  );
 
   blocks.push(
     {
@@ -691,6 +806,231 @@ async function publishAppHome(env: Env, userId: string): Promise<void> {
   if (!result.ok) {
     log.error("slack.app_home", { user_id: userId, outcome: "error", slack_error: result.error });
   }
+}
+
+// ─── Plan approve / reject modals ──────────────────────────────────────────
+
+const PLAN_APPROVE_MODAL_CALLBACK_ID = "plan_approve_modal";
+const PLAN_REJECT_MODAL_CALLBACK_ID = "plan_reject_modal";
+const PLAN_APPROVE_MODEL_BLOCK_ID = "plan_approve_model_block";
+const PLAN_APPROVE_MODEL_ACTION_ID = "plan_approve_model_select";
+const PLAN_REJECT_REASON_BLOCK_ID = "plan_reject_reason_block";
+const PLAN_REJECT_REASON_ACTION_ID = "plan_reject_reason_input";
+
+interface PlanModalMetadata {
+  sessionId: string;
+}
+
+/**
+ * Open a modal asking the user to confirm plan approval. The model picker
+ * defaults to the session's plan_model (or DEFAULT_PLAN_MODEL) so the user
+ * can switch to a cheaper / faster impl model before implementation runs.
+ */
+async function openPlanApproveModal(
+  env: Env,
+  triggerId: string,
+  sessionId: string,
+  slackUserId: string | undefined
+): Promise<void> {
+  // Best-effort: fetch the session state so we can default the impl selector
+  // to whatever was used for planning (plan_model when set, else session.model).
+  const { defaultModel } = await fetchModelDefaults(env);
+  let defaultImplModel = defaultModel;
+  try {
+    const headers = await getAuthHeaders(env);
+    const stateRes = await env.CONTROL_PLANE.fetch(`https://internal/sessions/${sessionId}/state`, {
+      method: "GET",
+      headers,
+    });
+    if (stateRes.ok) {
+      const state = (await stateRes.json()) as {
+        model?: string;
+        planModel?: string | null;
+      };
+      defaultImplModel = state.planModel || state.model || defaultImplModel;
+    }
+  } catch (e) {
+    log.warn("slack.plan_modal.state_fetch_failed", {
+      session_id: sessionId,
+      user_id: slackUserId,
+      error: e instanceof Error ? e : new Error(String(e)),
+    });
+  }
+
+  const availableModels = await getAvailableModels(env);
+  const defaultOption =
+    availableModels.find((m) => m.value === defaultImplModel) || availableModels[0];
+
+  const view = {
+    type: "modal",
+    callback_id: PLAN_APPROVE_MODAL_CALLBACK_ID,
+    title: { type: "plain_text", text: "Approve plan" },
+    submit: { type: "plain_text", text: "Approve" },
+    close: { type: "plain_text", text: "Cancel" },
+    private_metadata: JSON.stringify({ sessionId } satisfies PlanModalMetadata),
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "The plan will run with the selected implementation model. Defaults to the model used for planning.",
+        },
+      },
+      {
+        type: "input",
+        block_id: PLAN_APPROVE_MODEL_BLOCK_ID,
+        label: { type: "plain_text", text: "Implementation model" },
+        element: {
+          type: "static_select",
+          action_id: PLAN_APPROVE_MODEL_ACTION_ID,
+          initial_option: {
+            text: { type: "plain_text", text: defaultOption.label },
+            value: defaultOption.value,
+          },
+          options: availableModels.map((m) => ({
+            text: { type: "plain_text", text: m.label },
+            value: m.value,
+          })),
+        },
+      },
+    ],
+  };
+
+  const result = await openView(env.SLACK_BOT_TOKEN, triggerId, view);
+  if (!result.ok) {
+    log.error("slack.open_plan_approve_modal", {
+      session_id: sessionId,
+      user_id: slackUserId,
+      slack_error: result.error,
+    });
+  }
+}
+
+async function openPlanRejectModal(env: Env, triggerId: string, sessionId: string): Promise<void> {
+  const view = {
+    type: "modal",
+    callback_id: PLAN_REJECT_MODAL_CALLBACK_ID,
+    title: { type: "plain_text", text: "Reject plan" },
+    submit: { type: "plain_text", text: "Reject" },
+    close: { type: "plain_text", text: "Cancel" },
+    private_metadata: JSON.stringify({ sessionId } satisfies PlanModalMetadata),
+    blocks: [
+      {
+        type: "input",
+        block_id: PLAN_REJECT_REASON_BLOCK_ID,
+        optional: true,
+        label: { type: "plain_text", text: "Reason (optional)" },
+        element: {
+          type: "plain_text_input",
+          action_id: PLAN_REJECT_REASON_ACTION_ID,
+          multiline: true,
+          placeholder: {
+            type: "plain_text",
+            text: "What needs to change in the plan?",
+          },
+        },
+      },
+    ],
+  };
+
+  const result = await openView(env.SLACK_BOT_TOKEN, triggerId, view);
+  if (!result.ok) {
+    log.error("slack.open_plan_reject_modal", {
+      session_id: sessionId,
+      slack_error: result.error,
+    });
+  }
+}
+
+function parsePlanModalMetadata(raw: string | undefined): PlanModalMetadata | null {
+  if (!raw) return null;
+  try {
+    const meta = JSON.parse(raw) as PlanModalMetadata;
+    return typeof meta.sessionId === "string" ? meta : null;
+  } catch {
+    return null;
+  }
+}
+
+async function handlePlanApproveSubmission(
+  payload: SlackInteractionPayload,
+  env: Env,
+  userId: string | undefined,
+  traceId?: string
+): Promise<void> {
+  const meta = parsePlanModalMetadata(payload.view?.private_metadata);
+  if (!meta) {
+    log.warn("slack.plan_approve_submission.missing_metadata", { trace_id: traceId });
+    return;
+  }
+
+  const selected =
+    payload.view?.state?.values?.[PLAN_APPROVE_MODEL_BLOCK_ID]?.[PLAN_APPROVE_MODEL_ACTION_ID];
+  const implementationModel =
+    selected && "selected_option" in selected
+      ? ((selected as { selected_option?: { value?: string } }).selected_option?.value ?? null)
+      : null;
+
+  const headers = await getAuthHeaders(env, traceId);
+  const body: Record<string, unknown> = {
+    approverAuthorId: userId ? `slack:${userId}` : "slack:unknown",
+  };
+  if (implementationModel && isValidModel(implementationModel)) {
+    body.implementationModel = implementationModel;
+  }
+
+  const res = await env.CONTROL_PLANE.fetch(
+    `https://internal/sessions/${meta.sessionId}/plan/approve`,
+    { method: "POST", headers, body: JSON.stringify(body) }
+  );
+
+  log.info("slack.plan_approve", {
+    trace_id: traceId,
+    session_id: meta.sessionId,
+    user_id: userId,
+    impl_model: implementationModel,
+    http_status: res.status,
+    ok: res.ok,
+  });
+}
+
+async function handlePlanRejectSubmission(
+  payload: SlackInteractionPayload,
+  env: Env,
+  userId: string | undefined,
+  traceId?: string
+): Promise<void> {
+  const meta = parsePlanModalMetadata(payload.view?.private_metadata);
+  if (!meta) {
+    log.warn("slack.plan_reject_submission.missing_metadata", { trace_id: traceId });
+    return;
+  }
+
+  const reasonField =
+    payload.view?.state?.values?.[PLAN_REJECT_REASON_BLOCK_ID]?.[PLAN_REJECT_REASON_ACTION_ID];
+  const reason = reasonField?.value?.trim() || null;
+
+  const headers = await getAuthHeaders(env, traceId);
+  const res = await env.CONTROL_PLANE.fetch(
+    `https://internal/sessions/${meta.sessionId}/plan/reject`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        approverAuthorId: userId ? `slack:${userId}` : "slack:unknown",
+        ...(reason ? { reason } : {}),
+      }),
+    }
+  );
+
+  log.info("slack.plan_reject", {
+    trace_id: traceId,
+    session_id: meta.sessionId,
+    user_id: userId,
+    has_reason: Boolean(reason),
+    http_status: res.status,
+    ok: res.ok,
+  });
 }
 
 /**
@@ -889,8 +1229,8 @@ async function startSessionAndSendPrompt(
 ): Promise<{ sessionId: string } | null> {
   // Fetch user's preferred model and reasoning effort
   const userPrefs = await getUserPreferences(env, userId);
-  const fallback = env.DEFAULT_MODEL || DEFAULT_MODEL;
-  const model = getValidModelOrDefault(userPrefs?.model ?? fallback);
+  const { defaultModel, defaultPlanModel } = await fetchModelDefaults(env);
+  const model = getValidModelOrDefault(userPrefs?.model ?? defaultModel);
   const reasoningEffort =
     userPrefs?.reasoningEffort && isValidReasoningEffort(model, userPrefs.reasoningEffort)
       ? userPrefs.reasoningEffort
@@ -898,6 +1238,11 @@ async function startSessionAndSendPrompt(
   const globalBranch = getValidatedBranch(userPrefs?.branch);
   const repoBranch = await getUserRepoBranchPreference(env, userId, repo.id);
   const branch = repoBranch ?? globalBranch;
+
+  // Plan-mode is driven by the user's App Home preference. Plan-turn model
+  // defaults to the App Home plan model, then the deployment's defaultPlanModel.
+  const planMode = userPrefs?.planModeDefault === true;
+  const planModel = planMode ? userPrefs?.planModel || defaultPlanModel : undefined;
 
   // Best-effort user info resolution for identity linking
   let displayName: string | undefined;
@@ -927,7 +1272,9 @@ async function startSessionAndSendPrompt(
     traceId,
     userId,
     displayName,
-    email
+    email,
+    planMode,
+    planModel
   );
 
   if (!session) {
@@ -946,6 +1293,16 @@ async function startSessionAndSendPrompt(
     threadTs,
     buildThreadSession(session.sessionId, repo, model, reasoningEffort)
   );
+
+  if (planMode) {
+    await postMessage(
+      env.SLACK_BOT_TOKEN,
+      channel,
+      `_Plan mode_: a plan will be proposed before any code change. ` +
+        `Approve or reject it from ${env.WEB_APP_URL}/session/${session.sessionId}#plan.`,
+      { thread_ts: threadTs }
+    );
+  }
 
   // Build callback context for follow-up notification
   const callbackContext: CallbackContext = {
@@ -1750,6 +2107,18 @@ async function handleSlackInteraction(
   const userId = payload.user?.id;
 
   if (payload.type === "view_submission") {
+    // Plan approve / reject modal submissions take precedence over the branch
+    // modal early-return below: they carry the session id in private_metadata
+    // and call the control-plane plan endpoint directly.
+    if (payload.view?.callback_id === PLAN_APPROVE_MODAL_CALLBACK_ID) {
+      await handlePlanApproveSubmission(payload, env, userId, traceId);
+      return;
+    }
+    if (payload.view?.callback_id === PLAN_REJECT_MODAL_CALLBACK_ID) {
+      await handlePlanRejectSubmission(payload, env, userId, traceId);
+      return;
+    }
+
     if (!isBranchModalCallbackId(payload.view?.callback_id) || !userId) {
       return;
     }
@@ -1769,9 +2138,8 @@ async function handleSlackInteraction(
 
     if (payload.view?.callback_id === BRANCH_MODAL_CALLBACK_ID) {
       const currentPrefs = await getUserPreferences(env, userId);
-      const model = getValidModelOrDefault(
-        currentPrefs?.model ?? env.DEFAULT_MODEL ?? DEFAULT_MODEL
-      );
+      const { defaultModel } = await fetchModelDefaults(env);
+      const model = getValidModelOrDefault(currentPrefs?.model ?? defaultModel);
       const reasoningEffort =
         currentPrefs?.reasoningEffort && isValidReasoningEffort(model, currentPrefs.reasoningEffort)
           ? currentPrefs.reasoningEffort
@@ -1857,9 +2225,8 @@ async function handleSlackInteraction(
       const selectedEffort = action.selected_option?.value;
       if (selectedEffort && userId) {
         const currentPrefs = await getUserPreferences(env, userId);
-        const currentModel = getValidModelOrDefault(
-          currentPrefs?.model ?? env.DEFAULT_MODEL ?? DEFAULT_MODEL
-        );
+        const { defaultModel } = await fetchModelDefaults(env);
+        const currentModel = getValidModelOrDefault(currentPrefs?.model ?? defaultModel);
         const preservedBranch = getValidatedBranch(currentPrefs?.branch);
         if (isValidReasoningEffort(currentModel, selectedEffort)) {
           await saveUserPreferences(env, userId, currentModel, selectedEffort, preservedBranch);
@@ -1912,9 +2279,8 @@ async function handleSlackInteraction(
     case "clear_branch_preference": {
       if (!userId) return;
       const currentPrefs = await getUserPreferences(env, userId);
-      const model = getValidModelOrDefault(
-        currentPrefs?.model ?? env.DEFAULT_MODEL ?? DEFAULT_MODEL
-      );
+      const { defaultModel } = await fetchModelDefaults(env);
+      const model = getValidModelOrDefault(currentPrefs?.model ?? defaultModel);
       const reasoningEffort =
         currentPrefs?.reasoningEffort && isValidReasoningEffort(model, currentPrefs.reasoningEffort)
           ? currentPrefs.reasoningEffort
@@ -1935,6 +2301,49 @@ async function handleSlackInteraction(
 
     case "view_session": {
       // This is a URL button, no action needed
+      break;
+    }
+
+    case "select_plan_mode_default": {
+      // Checkbox: ON if the user ticked the option, OFF otherwise.
+      if (!userId) return;
+      const checked = Boolean(
+        action.selected_options &&
+        Array.isArray(action.selected_options) &&
+        action.selected_options.some((o) => o.value === "plan_mode_on")
+      );
+      await saveUserPlanPreferences(env, userId, { planModeDefault: checked });
+      await publishAppHome(env, userId);
+      break;
+    }
+
+    case "select_plan_model": {
+      if (!userId) return;
+      const selectedModel = action.selected_option?.value;
+      if (selectedModel && isValidModel(selectedModel)) {
+        await saveUserPlanPreferences(env, userId, {
+          planModel: getValidModelOrDefault(selectedModel),
+        });
+        await publishAppHome(env, userId);
+      }
+      break;
+    }
+
+    case "plan_approve": {
+      // Open a modal so the user can override the implementation model
+      // before approval. action.value carries the session id.
+      if (!payload.trigger_id) return;
+      const sessionId = action.value;
+      if (!sessionId) return;
+      await openPlanApproveModal(env, payload.trigger_id, sessionId, userId ?? undefined);
+      break;
+    }
+
+    case "plan_reject": {
+      if (!payload.trigger_id) return;
+      const sessionId = action.value;
+      if (!sessionId) return;
+      await openPlanRejectModal(env, payload.trigger_id, sessionId);
       break;
     }
   }

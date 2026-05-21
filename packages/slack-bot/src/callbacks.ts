@@ -2,14 +2,54 @@
  * Callback handlers for control-plane notifications.
  */
 
-import { computeHmacHex, postMessage, removeReaction, timingSafeEqual } from "@open-inspect/shared";
+import {
+  buildInternalAuthHeaders,
+  computeHmacHex,
+  postMessage,
+  removeReaction,
+  timingSafeEqual,
+} from "@open-inspect/shared";
+import type { PlanApprovalStatus, PlanArtifact } from "@open-inspect/shared";
 import { Hono } from "hono";
 import type { Env, CompletionCallback } from "./types";
 import { extractAgentResponse } from "./completion/extractor";
-import { buildCompletionBlocks, getFallbackText, truncateError } from "./completion/blocks";
+import {
+  buildCompletionBlocks,
+  buildPlanAwaitingApprovalBlocks,
+  getFallbackText,
+  truncateError,
+} from "./completion/blocks";
 import { createLogger } from "./logger";
 
 const log = createLogger("callback");
+
+async function fetchPlanSnapshot(
+  env: Env,
+  sessionId: string,
+  traceId?: string
+): Promise<{ status: PlanApprovalStatus | null; plan: PlanArtifact | null } | null> {
+  try {
+    if (!env.INTERNAL_CALLBACK_SECRET) return null;
+    const headers = await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET, traceId);
+    const res = await env.CONTROL_PLANE.fetch(`https://internal/sessions/${sessionId}/plan`, {
+      method: "GET",
+      headers,
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      plan: PlanArtifact | null;
+      status: PlanApprovalStatus | null;
+    };
+    return { status: body.status ?? null, plan: body.plan ?? null };
+  } catch (e) {
+    log.warn("callback.plan_snapshot_failed", {
+      trace_id: traceId,
+      session_id: sessionId,
+      error: e instanceof Error ? e : new Error(String(e)),
+    });
+    return null;
+  }
+}
 
 async function clearThinkingReaction(
   env: Env,
@@ -199,6 +239,39 @@ async function handleCompletionCallback(
       if (context.reactionMessageTs) {
         await clearThinkingReaction(env, context.channel, context.reactionMessageTs, traceId);
       }
+      return;
+    }
+
+    // Plan-mode short-circuit: if the agent's turn produced a plan that's now
+    // awaiting approval, post an in-thread Block Kit message with Approve /
+    // Reject buttons instead of the regular completion. The buttons trigger
+    // modals that call the control-plane plan endpoint directly.
+    const planSnapshot = payload.success ? await fetchPlanSnapshot(env, sessionId, traceId) : null;
+    if (payload.success && planSnapshot?.status === "awaiting_approval" && planSnapshot.plan) {
+      const planBlocks = buildPlanAwaitingApprovalBlocks(
+        sessionId,
+        planSnapshot.plan,
+        env.WEB_APP_URL
+      );
+      await postMessage(
+        env.SLACK_BOT_TOKEN,
+        context.channel,
+        `Plan ready (v${planSnapshot.plan.version}) — awaiting your approval`,
+        { thread_ts: context.threadTs, blocks: planBlocks }
+      );
+
+      if (context.reactionMessageTs) {
+        await clearThinkingReaction(env, context.channel, context.reactionMessageTs, traceId);
+      }
+
+      log.info("callback.complete", {
+        ...base,
+        outcome: "success",
+        agent_success: payload.success,
+        flow: "plan_awaiting_approval",
+        plan_version: planSnapshot.plan.version,
+        duration_ms: Date.now() - startTime,
+      });
       return;
     }
 

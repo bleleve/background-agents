@@ -17,6 +17,12 @@ export interface Env {
   /** Default model ID for new sessions. */
   DEFAULT_MODEL: string;
 
+  /**
+   * Default model used during planning turns (plan-mode sessions). When unset,
+   * the shared DEFAULT_PLAN_MODEL constant from @open-inspect/shared is used.
+   */
+  DEFAULT_PLAN_MODEL?: string;
+
   /** GitHub App bot username (e.g., "open-inspect-bot[bot]"). */
   GITHUB_BOT_USERNAME: string;
 
@@ -54,6 +60,7 @@ export interface PullRequestOpenedPayload {
     head: { ref: string; sha: string };
     base: { ref: string };
     draft: boolean;
+    labels?: Array<{ name: string }>;
   };
   repository: { owner: { login: string }; name: string; private: boolean };
   sender: { login: string; id: number; avatar_url: string };
@@ -68,6 +75,7 @@ export interface ReviewRequestedPayload {
     user: { login: string };
     head: { ref: string; sha: string };
     base: { ref: string };
+    labels?: Array<{ name: string }>;
   };
   requested_reviewer?: { login: string };
   repository: { owner: { login: string }; name: string; private: boolean };
@@ -80,6 +88,7 @@ export interface IssueCommentPayload {
     number: number;
     title: string;
     pull_request?: { url: string };
+    labels?: Array<{ name: string }>;
   };
   comment: {
     id: number;
@@ -97,6 +106,7 @@ export interface ReviewCommentPayload {
     title: string;
     head: { ref: string; sha: string };
     base: { ref: string };
+    labels?: Array<{ name: string }>;
   };
   comment: {
     id: number;

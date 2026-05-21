@@ -14,7 +14,7 @@ import {
 } from "./utils/linear-client";
 import { callbacksRouter } from "./callbacks";
 import { createLogger } from "./logger";
-import { resolveAppName, verifyInternalToken } from "@open-inspect/shared";
+import { fetchModelDefaults, resolveAppName, verifyInternalToken } from "@open-inspect/shared";
 import type { LinearWebhookPayload } from "@open-inspect/shared";
 import { handleAgentSessionEvent, escapeHtml } from "./webhook-handler";
 import { handleLinearIssueEvent } from "./automation-events";
@@ -364,9 +364,10 @@ app.get("/config/user-prefs/:userId", async (c) => {
 app.put("/config/user-prefs/:userId", async (c) => {
   const userId = c.req.param("userId");
   const body = (await c.req.json()) as Partial<UserPreferences>;
+  const { defaultModel } = await fetchModelDefaults(c.env);
   const prefs: UserPreferences = {
     userId,
-    model: body.model || c.env.DEFAULT_MODEL,
+    model: body.model || defaultModel,
     reasoningEffort: body.reasoningEffort,
     updatedAt: Date.now(),
   };

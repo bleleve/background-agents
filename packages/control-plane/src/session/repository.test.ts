@@ -106,6 +106,9 @@ describe("SessionRepository", () => {
         0,
         0,
         null,
+        0, // plan_mode default
+        null, // plan_approval_status default
+        null, // plan_model default
         1000,
         2000,
       ]);

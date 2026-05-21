@@ -598,6 +598,76 @@ class AgentBridge:
             self.log.debug("bridge.unknown_command", cmd_type=cmd_type)
         return None
 
+    @staticmethod
+    def _build_resume_preamble(resume_context: dict[str, Any]) -> str | None:
+        """Build a restate-and-confirm preamble from a resume context payload.
+
+        The control plane attaches `resumeContext.currentPlan` when a saved plan
+        exists for this session. We surface it back to the agent and ask for an
+        explicit restate before any destructive action — this re-anchors the
+        agent on the plan instead of relying on conversational memory that may
+        have been compacted or contaminated by exploration noise.
+        """
+        current_plan = resume_context.get("currentPlan") if resume_context else None
+        if not current_plan:
+            return None
+        plan_content = current_plan.get("content")
+        if not isinstance(plan_content, str) or not plan_content.strip():
+            return None
+        version = current_plan.get("version", "?")
+        return (
+            "## Resume context\n\n"
+            f"A saved plan (version {version}) is in force for this session. "
+            "Before any tool call that modifies files or runs destructive commands, "
+            "restate (a) which step of the plan you are executing and (b) how the "
+            "new instruction modifies it. Wait for explicit confirmation if your "
+            "interpretation diverges from the saved plan.\n\n"
+            "### Saved plan\n\n"
+            f"{plan_content.strip()}\n\n"
+            "---\n\n"
+            "## New instruction\n\n"
+        )
+
+    @staticmethod
+    def _build_planning_preamble(resume_context: dict[str, Any]) -> str:
+        """Build the system preamble for a plan-first (HITL) planning turn.
+
+        The agent must output a single markdown plan as its response and stop —
+        no file edits, no shell commands, no PR creation. The bridge captures
+        that response at end-of-turn and POSTs it to /sessions/:id/plan
+        (source=agent), which flips the session into awaiting_approval. The
+        user (web UI / Linear / GitHub / Slack) then approves or rejects.
+        """
+        current_plan = resume_context.get("currentPlan") if resume_context else None
+        previous_section = ""
+        if isinstance(current_plan, dict):
+            plan_content = current_plan.get("content")
+            version = current_plan.get("version", "?")
+            if isinstance(plan_content, str) and plan_content.strip():
+                previous_section = (
+                    f"### Previous plan (version {version})\n\n"
+                    f"{plan_content.strip()}\n\n"
+                    "Amend it based on the new user instruction below. Reuse what is still "
+                    "correct; do not start from scratch unless the instruction explicitly asks.\n\n"
+                )
+        return (
+            "## Planning turn (human-in-the-loop)\n\n"
+            "This session is in plan mode. Your output for this turn MUST be a single "
+            "markdown plan that the user will approve, reject, or amend before any code "
+            "is written. Do not edit files, do not run shell commands, do not open a PR. "
+            "Read-only investigation tools (Read, Grep, Glob) are fine when you genuinely "
+            "need to verify an assumption.\n\n"
+            "Structure your plan as:\n"
+            "1. A one-sentence restatement of the user's goal.\n"
+            "2. An ordered list of 3-8 concrete steps (file paths, functions, decisions).\n"
+            '3. A short "Risks & open questions" section if anything is uncertain.\n\n'
+            "Once you have produced the plan, end your turn. Implementation will only run "
+            "after explicit human approval.\n\n"
+            f"{previous_section}"
+            "---\n\n"
+            "## User instruction\n\n"
+        )
+
     async def _handle_prompt(self, cmd: dict[str, Any]) -> None:
         """Handle prompt command - send to OpenCode and stream response."""
         message_id = cmd.get("messageId") or cmd.get("message_id", "unknown")
@@ -605,15 +675,39 @@ class AgentBridge:
         model = cmd.get("model")
         reasoning_effort = cmd.get("reasoningEffort")
         author_data = cmd.get("author", {})
+        resume_context = cmd.get("resumeContext") or {}
+        plan_mode = bool(cmd.get("planMode"))
         start_time = time.time()
         outcome = "success"
+
+        if plan_mode:
+            # Planning turn: instruct the agent to output a markdown plan and stop.
+            # We do NOT inject the impl-mode restate-and-confirm — the bridge will
+            # capture the textual response and POST it as the new plan version.
+            # The model used is the session's selected model — the runtime stays
+            # provider-agnostic and does not override which LLM produces the plan.
+            content = self._build_planning_preamble(resume_context) + content
+            preamble_kind = "planning"
+        else:
+            preamble = self._build_resume_preamble(resume_context)
+            if preamble:
+                content = preamble + content
+                preamble_kind = "resume"
+            else:
+                preamble_kind = "none"
 
         self.log.info(
             "prompt.start",
             message_id=message_id,
             model=model,
             reasoning_effort=reasoning_effort,
+            preamble=preamble_kind,
+            plan_mode=plan_mode,
         )
+
+        # Buffer the agent's textual output during the turn so we can capture
+        # it as a plan when planMode=True. Cheap (string concat in append-mode).
+        text_buffer: list[str] = []
 
         try:
             scm_name = author_data.get("scmName")
@@ -636,10 +730,29 @@ class AgentBridge:
                 if event.get("type") == "error":
                     had_error = True
                     error_message = event.get("error")
+                if plan_mode and event.get("type") == "token":
+                    token_text = event.get("content")
+                    if isinstance(token_text, str):
+                        text_buffer.append(token_text)
                 await self._send_event(event)
 
             if had_error:
                 outcome = "error"
+
+            if plan_mode and not had_error:
+                # Best-effort: persist the agent's response as the new plan version.
+                # If this fails, we still complete the turn — the user will see the
+                # text response and can re-trigger via the bots/UI.
+                plan_text = "".join(text_buffer).strip()
+                if plan_text:
+                    try:
+                        await self._save_agent_plan(plan_text, message_id)
+                    except Exception as plan_err:
+                        self.log.error(
+                            "plan.save_failed",
+                            exc=plan_err,
+                            message_id=message_id,
+                        )
 
             await self._send_event(
                 {
@@ -671,6 +784,38 @@ class AgentBridge:
                 outcome=outcome,
                 duration_ms=duration_ms,
             )
+
+    async def _save_agent_plan(self, content: str, message_id: str) -> None:
+        """POST the agent's plan content to the control plane.
+
+        Used at end-of-turn when planMode=True. The control plane will flip the
+        session into awaiting_approval (since plan_mode=1) and broadcast a
+        plan_status event to subscribed clients.
+        """
+        if not self.http_client:
+            raise RuntimeError("HTTP client not initialized")
+
+        url = f"{self.control_plane_url}/sessions/{self.session_id}/plan"
+        headers = {
+            "Authorization": f"Bearer {self.auth_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "content": content,
+            "source": "agent",
+            "messageId": message_id,
+        }
+        resp = await self.http_client.post(url, json=payload, headers=headers, timeout=30.0)
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"control plane refused plan save: HTTP {resp.status_code} {resp.text[:300]}"
+            )
+        self.log.info(
+            "plan.saved",
+            message_id=message_id,
+            http_status=resp.status_code,
+            bytes=len(content),
+        )
 
     async def _create_opencode_session(self) -> None:
         """Create a new OpenCode session."""

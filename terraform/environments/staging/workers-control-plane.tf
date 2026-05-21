@@ -68,6 +68,11 @@ module "control_plane_worker" {
       { name = "WORKER_URL", value = local.control_plane_url },
       { name = "DEPLOYMENT_NAME", value = var.deployment_name },
       { name = "SANDBOX_PROVIDER", value = var.sandbox_provider },
+      # Surfaced to the web UI via GET /model-preferences so the dropdown's
+      # initial selection matches this deployment instead of the shared
+      # library constant. Keep aligned with the bot workers in this env.
+      { name = "DEFAULT_MODEL", value = "claude-sonnet-4-6" },
+      { name = "DEFAULT_PLAN_MODEL", value = "claude-opus-4-6" },
     ],
     local.use_modal_backend ? [{ name = "MODAL_WORKSPACE", value = var.modal_workspace }] : [],
     local.use_daytona_backend ? [

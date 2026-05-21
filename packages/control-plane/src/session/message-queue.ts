@@ -29,6 +29,13 @@ interface PromptMessageData {
   model?: string;
   reasoningEffort?: string;
   attachments?: Array<{ type: string; name: string; url?: string; content?: string }>;
+  /**
+   * When true, the next dispatch runs as a planning turn even if the
+   * session wasn't created with plan_mode=1. The DO flips plan_mode on and
+   * clears any terminal status (approved/rejected) before enqueueing so the
+   * standard isPlanningTurn gate picks it up.
+   */
+  planMode?: boolean;
 }
 
 interface MessageQueueDeps {
@@ -126,6 +133,22 @@ export class SessionMessageQueue {
       data.reasoningEffort
     );
 
+    // Per-prompt plan toggle: turn plan_mode on and clear any terminal
+    // status so the dispatch runs as a planning turn. No-op when the
+    // session is already mid-plan.
+    if (data.planMode) {
+      const currentSession = this.deps.getSession();
+      if (currentSession && currentSession.plan_mode !== 1) {
+        this.deps.repository.setPlanMode(true, now);
+      }
+      if (
+        currentSession?.plan_approval_status === "approved" ||
+        currentSession?.plan_approval_status === "rejected"
+      ) {
+        this.deps.repository.updatePlanApprovalStatus(null, now);
+      }
+    }
+
     this.deps.repository.createMessage({
       id: messageId,
       authorId: participant.id,
@@ -218,11 +241,41 @@ export class SessionMessageQueue {
 
     const author = this.deps.repository.getParticipantById(message.author_id);
     const session = this.deps.getSession();
-    const resolvedModel = getValidModelOrDefault(message.model || session?.model);
+
+    // Plan-mode gating:
+    //  - The session runs as a "planning turn" until the current plan reaches
+    //    a terminal status (approved or rejected). Once terminal, the
+    //    session reverts to a normal build flow so the next prompt is
+    //    dispatched to the build agent — rejecting effectively exits plan
+    //    mode for subsequent prompts without flipping plan_mode itself
+    //    (which would hide the plan-bubble history in the UI).
+    //  - While awaiting_approval, processMessageQueue() returns earlier;
+    //    the gate is message-driven, so the queue naturally idles.
+    const isPlanningTurn =
+      session?.plan_mode === 1 &&
+      session?.plan_approval_status !== "approved" &&
+      session?.plan_approval_status !== "rejected";
+
+    // Planning turns use plan_model (if configured) instead of the session's
+    // implementation model. Per-message overrides still win over both.
+    const sessionPreferredModel =
+      isPlanningTurn && session?.plan_model ? session.plan_model : session?.model;
+    const resolvedModel = getValidModelOrDefault(message.model || sessionPreferredModel);
     const resolvedEffort =
       message.reasoning_effort ??
       session?.reasoning_effort ??
       getDefaultReasoningEffort(resolvedModel);
+
+    const currentPlan = this.deps.repository.getCurrentPlan();
+    const resumeContext = currentPlan
+      ? {
+          currentPlan: {
+            version: currentPlan.version,
+            content: currentPlan.content,
+            createdAt: currentPlan.created_at,
+          },
+        }
+      : undefined;
 
     const command: SandboxCommand = {
       type: "prompt",
@@ -236,6 +289,8 @@ export class SessionMessageQueue {
         scmEmail: author?.scm_email ?? null,
       },
       attachments: message.attachments ? JSON.parse(message.attachments) : undefined,
+      resumeContext,
+      planMode: isPlanningTurn,
     };
 
     const sent = this.deps.wsManager.send(sandboxWs, command);

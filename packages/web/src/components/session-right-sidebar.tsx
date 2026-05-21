@@ -77,6 +77,10 @@ export function SessionRightSidebarContent({
           createdAt={sessionState.createdAt}
           model={sessionState.model}
           reasoningEffort={sessionState.reasoningEffort}
+          planMode={sessionState.planMode}
+          planModel={sessionState.planModel}
+          planApprovalStatus={sessionState.planApprovalStatus}
+          planCostSnapshot={sessionState.planCostSnapshot}
           baseBranch={sessionState.baseBranch}
           branchName={sessionState.branchName || undefined}
           repoOwner={sessionState.repoOwner}
