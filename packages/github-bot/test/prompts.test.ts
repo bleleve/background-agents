@@ -132,6 +132,26 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("materially different");
     expect(prompt).toContain("When uncertain whether the issue is real, do not post");
   });
+
+  it("forbids submitting a review when autoApproveOnOpen is false (default)", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).toContain("Do not submit a pull request review.");
+    expect(prompt).not.toContain("APPROVE|REQUEST_CHANGES");
+  });
+
+  it("includes APPROVE/REQUEST_CHANGES/COMMENT submit instruction when autoApproveOnOpen is true", () => {
+    const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
+    expect(prompt).toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
+    expect(prompt).toContain("repos/acme/widgets/pulls/42/reviews");
+    expect(prompt).toContain("extremely low-risk");
+    expect(prompt).not.toContain("Do not submit a pull request review.");
+  });
+
+  it("autoApproveOnOpen: true still includes inline suggestion workflow", () => {
+    const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
+    expect(prompt).toContain("Find the exact replacement range");
+    expect(prompt).toContain("Quality bar — verify before posting");
+  });
 });
 
 describe("buildCommentActionPrompt", () => {

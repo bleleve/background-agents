@@ -75,6 +75,7 @@ export function GitHubIntegrationSettings() {
   const repoOverrides = repoSettingsData?.repos ?? [];
   const availableRepos = reposData?.repos ?? [];
   const defaultAutoReviewOnOpen = settings?.defaults?.autoReviewOnOpen ?? true;
+  const defaultAutoApproveOnOpen = settings?.defaults?.autoApproveOnOpen ?? false;
 
   return (
     <div>
@@ -110,6 +111,7 @@ export function GitHubIntegrationSettings() {
           availableRepos={availableRepos}
           enabledModelOptions={enabledModelOptions}
           defaultAutoReviewOnOpen={defaultAutoReviewOnOpen}
+          defaultAutoApproveOnOpen={defaultAutoApproveOnOpen}
         />
       </Section>
     </div>
@@ -125,6 +127,9 @@ function GlobalSettingsSection({
 }) {
   const [autoReviewOnOpen, setAutoReviewOnOpen] = useState(
     settings?.defaults?.autoReviewOnOpen ?? true
+  );
+  const [autoApproveOnOpen, setAutoApproveOnOpen] = useState(
+    settings?.defaults?.autoApproveOnOpen ?? false
   );
   const [enabledRepos, setEnabledRepos] = useState<string[]>(settings?.enabledRepos ?? []);
   const [repoScopeMode, setRepoScopeMode] = useState<"all" | "selected">(
@@ -153,6 +158,7 @@ function GlobalSettingsSection({
     if (settings !== undefined && !initialized) {
       if (settings) {
         setAutoReviewOnOpen(settings.defaults?.autoReviewOnOpen ?? true);
+        setAutoApproveOnOpen(settings.defaults?.autoApproveOnOpen ?? false);
         setEnabledRepos(settings.enabledRepos ?? []);
         setRepoScopeMode(settings.enabledRepos === undefined ? "all" : "selected");
         setAllowedTriggerUsers(settings.defaults?.allowedTriggerUsers ?? []);
@@ -182,6 +188,7 @@ function GlobalSettingsSection({
       if (res.ok) {
         mutate(GLOBAL_SETTINGS_KEY);
         setAutoReviewOnOpen(true);
+        setAutoApproveOnOpen(false);
         setEnabledRepos([]);
         setRepoScopeMode("all");
         setAllowedTriggerUsers([]);
@@ -209,6 +216,7 @@ function GlobalSettingsSection({
     const body: GitHubGlobalConfig = {
       defaults: {
         autoReviewOnOpen,
+        autoApproveOnOpen,
         ...(triggerUserMode === "specific" ? { allowedTriggerUsers } : {}),
         ...(codeReviewInstructions ? { codeReviewInstructions } : {}),
         ...(commentActionInstructions ? { commentActionInstructions } : {}),
@@ -266,7 +274,7 @@ function GlobalSettingsSection({
 
       <label
         htmlFor="auto-review-toggle"
-        className="flex items-center justify-between px-4 py-3 border border-border hover:bg-muted/50 transition cursor-pointer mb-4 rounded-sm"
+        className="flex items-center justify-between px-4 py-3 border border-border hover:bg-muted/50 transition cursor-pointer mb-2 rounded-sm"
       >
         <div>
           <span className="text-sm font-medium text-foreground">Auto-review new PRs</span>
@@ -279,6 +287,27 @@ function GlobalSettingsSection({
           checked={autoReviewOnOpen}
           onCheckedChange={(checked) => {
             setAutoReviewOnOpen(checked);
+            setDirty(true);
+            setError("");
+          }}
+        />
+      </label>
+
+      <label
+        htmlFor="auto-approve-toggle"
+        className="flex items-center justify-between px-4 py-3 border border-border hover:bg-muted/50 transition cursor-pointer mb-4 rounded-sm"
+      >
+        <div>
+          <span className="text-sm font-medium text-foreground">Auto-approve low-risk PRs</span>
+          <span className="text-sm text-muted-foreground ml-2">
+            Submit an approval for extremely low-risk PRs (docs, tests, trivial config)
+          </span>
+        </div>
+        <Switch
+          id="auto-approve-toggle"
+          checked={autoApproveOnOpen}
+          onCheckedChange={(checked) => {
+            setAutoApproveOnOpen(checked);
             setDirty(true);
             setError("");
           }}
@@ -509,11 +538,13 @@ function RepoOverridesSection({
   availableRepos,
   enabledModelOptions,
   defaultAutoReviewOnOpen,
+  defaultAutoApproveOnOpen,
 }: {
   overrides: RepoSettingsEntry[];
   availableRepos: EnrichedRepository[];
   enabledModelOptions: { category: string; models: { id: string; name: string }[] }[];
   defaultAutoReviewOnOpen: boolean;
+  defaultAutoApproveOnOpen: boolean;
 }) {
   const [addingRepo, setAddingRepo] = useState("");
 
@@ -556,6 +587,7 @@ function RepoOverridesSection({
               entry={entry}
               enabledModelOptions={enabledModelOptions}
               defaultAutoReviewOnOpen={defaultAutoReviewOnOpen}
+              defaultAutoApproveOnOpen={defaultAutoApproveOnOpen}
             />
           ))}
         </div>
@@ -590,10 +622,12 @@ function RepoOverrideRow({
   entry,
   enabledModelOptions,
   defaultAutoReviewOnOpen,
+  defaultAutoApproveOnOpen,
 }: {
   entry: RepoSettingsEntry;
   enabledModelOptions: { category: string; models: { id: string; name: string }[] }[];
   defaultAutoReviewOnOpen: boolean;
+  defaultAutoApproveOnOpen: boolean;
 }) {
   const [model, setModel] = useState(entry.settings.model ?? "");
   const [effort, setEffort] = useState(entry.settings.reasoningEffort ?? "");
@@ -621,6 +655,12 @@ function RepoOverrideRow({
   const [autoReviewOnOpen, setAutoReviewOnOpen] = useState(
     entry.settings.autoReviewOnOpen ?? defaultAutoReviewOnOpen
   );
+  const [autoApproveMode, setAutoApproveMode] = useState<"global" | "override">(
+    entry.settings.autoApproveOnOpen !== undefined ? "override" : "global"
+  );
+  const [autoApproveOnOpen, setAutoApproveOnOpen] = useState(
+    entry.settings.autoApproveOnOpen ?? defaultAutoApproveOnOpen
+  );
   const [newUsername, setNewUsername] = useState("");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -644,6 +684,14 @@ function RepoOverrideRow({
     setDirty(true);
   };
 
+  const handleAutoApproveModeChange = (newMode: "global" | "override") => {
+    setAutoApproveMode(newMode);
+    if (newMode === "override" && entry.settings.autoApproveOnOpen === undefined) {
+      setAutoApproveOnOpen(defaultAutoApproveOnOpen);
+    }
+    setDirty(true);
+  };
+
   const handleSave = async () => {
     setSaving(true);
 
@@ -656,6 +704,7 @@ function RepoOverrideRow({
     if (commentActionMode === "override")
       settings.commentActionInstructions = commentActionInstructions;
     if (autoReviewMode === "override") settings.autoReviewOnOpen = autoReviewOnOpen;
+    if (autoApproveMode === "override") settings.autoApproveOnOpen = autoApproveOnOpen;
 
     try {
       const res = await fetch(`/api/integration-settings/github/repos/${owner}/${name}`, {
@@ -785,6 +834,33 @@ function RepoOverrideRow({
                 }}
               />
               <span>{autoReviewOnOpen ? "Enabled" : "Disabled"}</span>
+            </label>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs font-medium text-muted-foreground mb-1">Auto-approve low-risk PRs</p>
+        <div className="flex items-center gap-2 mb-1">
+          <Select value={autoApproveMode} onValueChange={handleAutoApproveModeChange}>
+            <SelectTrigger density="compact" className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="global">Use global default</SelectItem>
+              <SelectItem value="override">Override for this repo</SelectItem>
+            </SelectContent>
+          </Select>
+          {autoApproveMode === "override" && (
+            <label className="flex items-center gap-2 text-xs text-foreground">
+              <Switch
+                checked={autoApproveOnOpen}
+                onCheckedChange={(checked) => {
+                  setAutoApproveOnOpen(checked);
+                  setDirty(true);
+                }}
+              />
+              <span>{autoApproveOnOpen ? "Enabled" : "Disabled"}</span>
             </label>
           )}
         </div>

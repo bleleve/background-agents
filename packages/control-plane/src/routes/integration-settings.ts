@@ -308,6 +308,7 @@ async function handleGetResolvedConfig(
         model: githubSettings.model ?? null,
         reasoningEffort,
         autoReviewOnOpen: githubSettings.autoReviewOnOpen ?? true,
+        autoApproveOnOpen: githubSettings.autoApproveOnOpen ?? false,
         enabledRepos,
         allowedTriggerUsers: githubSettings.allowedTriggerUsers ?? null,
         codeReviewInstructions: githubSettings.codeReviewInstructions ?? null,

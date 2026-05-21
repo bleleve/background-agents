@@ -28,6 +28,7 @@ vi.mock("../src/utils/integration-config", () => ({
     model: "anthropic/claude-haiku-4-5",
     reasoningEffort: null,
     autoReviewOnOpen: true,
+    autoApproveOnOpen: false,
     enabledRepos: null,
     allowedTriggerUsers: null,
     codeReviewInstructions: null,
@@ -39,6 +40,7 @@ const defaultConfig: ResolvedGitHubConfig = {
   model: "anthropic/claude-haiku-4-5",
   reasoningEffort: null,
   autoReviewOnOpen: true,
+  autoApproveOnOpen: false,
   enabledRepos: null,
   allowedTriggerUsers: null,
   codeReviewInstructions: null,
@@ -1227,5 +1229,63 @@ describe("integration config", () => {
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.content).not.toContain("## Custom Instructions");
+  });
+
+  it("includes APPROVE/REQUEST_CHANGES instruction when autoApproveOnOpen is true", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      autoApproveOnOpen: true,
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    await handleReviewRequested(env, log, reviewRequestedPayload, "trace-aa-review");
+
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
+    expect(promptBody.content).not.toContain("Do not submit a pull request review.");
+  });
+
+  it("omits APPROVE instruction and forbids review submission when autoApproveOnOpen is false", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    await handleReviewRequested(env, log, reviewRequestedPayload, "trace-no-aa-review");
+
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain("Do not submit a pull request review.");
+    expect(promptBody.content).not.toContain("APPROVE|REQUEST_CHANGES");
+  });
+});
+
+describe("handlePullRequestOpened autoApproveOnOpen", () => {
+  it("includes APPROVE/REQUEST_CHANGES instruction in prompt when autoApproveOnOpen is true", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      autoApproveOnOpen: true,
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-aa-open");
+
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
+    expect(promptBody.content).not.toContain("Do not submit a pull request review.");
+  });
+
+  it("omits APPROVE instruction when autoApproveOnOpen is false", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-no-aa-open");
+
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain("Do not submit a pull request review.");
+    expect(promptBody.content).not.toContain("APPROVE|REQUEST_CHANGES");
   });
 });

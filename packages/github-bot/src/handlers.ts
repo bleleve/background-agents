@@ -441,6 +441,7 @@ export async function handleReviewRequested(
     head: pr.head.ref,
     isPublic: !repo.private,
     codeReviewInstructions: config.codeReviewInstructions,
+    autoApproveOnOpen: config.autoApproveOnOpen,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
@@ -551,6 +552,7 @@ export async function handlePullRequestOpened(
     head: pr.head.ref,
     isPublic: !repo.private,
     codeReviewInstructions: config.codeReviewInstructions,
+    autoApproveOnOpen: config.autoApproveOnOpen,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {

@@ -100,9 +100,21 @@ export function buildCodeReviewPrompt(params: {
   head: string;
   isPublic: boolean;
   codeReviewInstructions?: string | null;
+  autoApproveOnOpen?: boolean;
 }): string {
-  const { owner, repo, number, title, body, author, base, head, isPublic, codeReviewInstructions } =
-    params;
+  const {
+    owner,
+    repo,
+    number,
+    title,
+    body,
+    author,
+    base,
+    head,
+    isPublic,
+    codeReviewInstructions,
+    autoApproveOnOpen,
+  } = params;
 
   const prTitleBlock = buildUntrustedUserContentBlock({
     source: "github_pr_title",
@@ -125,6 +137,19 @@ export function buildCodeReviewPrompt(params: {
     content: body ?? "_No description provided._",
   });
 
+  const reviewInstruction = autoApproveOnOpen
+    ? `4. When your review is complete, submit it via:
+
+   gh api -X POST "repos/${owner}/${repo}/pulls/${number}/reviews" \\
+     -f body="<your review summary>" \\
+     -f event="APPROVE|REQUEST_CHANGES|COMMENT"
+
+   Use APPROVE only if the changes are extremely low-risk (documentation, comments, test-only updates,
+   trivial config, or minor refactors with no behavioral change) and you found no issues. Use
+   REQUEST_CHANGES if you found real issues. Use COMMENT for general feedback that does not block merging.
+   If you found no issues and the changes are not clearly low-risk, do not submit a review at all.`
+    : `4. Do not submit a pull request review.`;
+
   return `You are reviewing Pull Request #${number} in ${owner}/${repo}.
 The repository has been cloned and you are on the PR head branch.
 
@@ -146,7 +171,7 @@ ${prDescriptionBlock}
    - Performance implications
    - Code clarity and maintainability
 3. You may read individual files in the repo for additional context beyond the diff
-4. Do not submit a pull request review.
+${reviewInstruction}
 5. Leave feedback only as inline suggestion comments on specific changed files/lines when you find an issue worth calling out.
 6. For each inline suggestion comment, use this flow:
 

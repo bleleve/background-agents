@@ -62,6 +62,7 @@ describe("getGitHubConfig", () => {
       model: "anthropic/claude-opus-4-6",
       reasoningEffort: "high",
       autoReviewOnOpen: true,
+      autoApproveOnOpen: false,
       enabledRepos: null,
       allowedTriggerUsers: null,
       codeReviewInstructions: "Be thorough",
@@ -80,6 +81,7 @@ describe("getGitHubConfig", () => {
       model: "anthropic/claude-sonnet-4-6",
       reasoningEffort: null,
       autoReviewOnOpen: false,
+      autoApproveOnOpen: false,
       enabledRepos: [],
       allowedTriggerUsers: [],
       codeReviewInstructions: null,
@@ -106,6 +108,7 @@ describe("getGitHubConfig", () => {
       model: "anthropic/claude-sonnet-4-6",
       reasoningEffort: null,
       autoReviewOnOpen: false,
+      autoApproveOnOpen: false,
       enabledRepos: [],
       allowedTriggerUsers: [],
       codeReviewInstructions: null,
@@ -130,6 +133,7 @@ describe("getGitHubConfig", () => {
       model: "anthropic/claude-sonnet-4-6",
       reasoningEffort: null,
       autoReviewOnOpen: false,
+      autoApproveOnOpen: false,
       enabledRepos: [],
       allowedTriggerUsers: [],
       codeReviewInstructions: null,
@@ -149,11 +153,39 @@ describe("getGitHubConfig", () => {
       model: "anthropic/claude-sonnet-4-6",
       reasoningEffort: null,
       autoReviewOnOpen: true,
+      autoApproveOnOpen: false,
       enabledRepos: null,
       allowedTriggerUsers: null,
       codeReviewInstructions: null,
       commentActionInstructions: null,
     });
     expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it("passes autoApproveOnOpen: true when set in config", async () => {
+    const env = createMockEnv(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            config: {
+              model: null,
+              reasoningEffort: null,
+              autoReviewOnOpen: true,
+              autoApproveOnOpen: true,
+              enabledRepos: null,
+              allowedTriggerUsers: null,
+              codeReviewInstructions: null,
+              commentActionInstructions: null,
+            },
+          }),
+          { status: 200 }
+        )
+      )
+    );
+    const log = createMockLogger();
+
+    const result = await getGitHubConfig(env, "acme/widgets", log);
+
+    expect(result.autoApproveOnOpen).toBe(true);
   });
 });
