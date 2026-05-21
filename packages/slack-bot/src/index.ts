@@ -602,22 +602,23 @@ async function publishAppHome(env: Env, userId: string): Promise<void> {
   }
 
   // ─── Plan mode preferences ─────────────────────────────────────────────────
-  // Plan-mode is per-user: when on, every new session this user starts is
-  // gated by a human-approved plan. Plan model defaults to the deployment's
-  // configured plan model (Settings → Models) until the user picks a different
-  // one here.
-  const planModeDefault = prefs?.planModeDefault === true;
+  // Plan-mode is opt-in per user. When ON, every new session you start is
+  // gated by a human-approved plan. When OFF (the default), the bot decides
+  // plan-vs-build automatically based on the prompt text (see classifier).
+  // Plan model defaults to the deployment's configured plan model
+  // (Settings → Models) until the user picks a different one here.
+  const planModeForced = prefs?.planModeDefault === true;
   const currentPlanModel = getValidModelOrDefault(prefs?.planModel ?? defaultPlanModel);
   const currentPlanModelInfo =
     availableModels.find((m) => m.value === currentPlanModel) || availableModels[0];
   const planModeOption = {
     text: {
       type: "plain_text" as const,
-      text: "Plan first, then implement",
+      text: "Plan first, then build",
     },
     description: {
       type: "plain_text" as const,
-      text: "New sessions propose a plan you approve before any code change.",
+      text: "Force a plan on every session. When off, the bot decides automatically based on your message.",
     },
     value: "plan_mode_on",
   };
@@ -627,7 +628,7 @@ async function publishAppHome(env: Env, userId: string): Promise<void> {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: "*Plan mode*\nWhen on, every new session you start proposes a plan that you must approve before any code change.",
+        text: "*Plan mode*\nBy default the bot decides plan-vs-build automatically from your prompt. Turn this on to force a plan on every session you start.",
       },
     },
     {
@@ -638,7 +639,7 @@ async function publishAppHome(env: Env, userId: string): Promise<void> {
           type: "checkboxes",
           action_id: "select_plan_mode_default",
           options: [planModeOption],
-          ...(planModeDefault ? { initial_options: [planModeOption] } : {}),
+          ...(planModeForced ? { initial_options: [planModeOption] } : {}),
         },
       ],
     },
@@ -646,7 +647,7 @@ async function publishAppHome(env: Env, userId: string): Promise<void> {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: "*Plan model*\nModel used to propose the plan (you can pick a different implementation model at approve time).",
+        text: "*Plan model*\nModel used to propose the plan (you can pick a different build model at approve time).",
       },
     },
     {
@@ -873,13 +874,13 @@ async function openPlanApproveModal(
         type: "section",
         text: {
           type: "mrkdwn",
-          text: "The plan will run with the selected implementation model. Defaults to the model used for planning.",
+          text: "The plan will run with the selected build model. Defaults to the model used for planning.",
         },
       },
       {
         type: "input",
         block_id: PLAN_APPROVE_MODEL_BLOCK_ID,
-        label: { type: "plain_text", text: "Implementation model" },
+        label: { type: "plain_text", text: "Build model" },
         element: {
           type: "static_select",
           action_id: PLAN_APPROVE_MODEL_ACTION_ID,
@@ -1237,8 +1238,14 @@ async function startSessionAndSendPrompt(
   previousMessages?: string[],
   channelName?: string,
   channelDescription?: string,
-  traceId?: string
-): Promise<{ sessionId: string } | null> {
+  traceId?: string,
+  /**
+   * Plan-vs-build intent inferred from the prompt by the repo classifier.
+   * When the user's App Home toggle is OFF, this flag decides plan mode.
+   * When the toggle is ON, plan mode is forced regardless of this value.
+   */
+  classifierShouldPlan?: boolean
+): Promise<{ sessionId: string; planMode: boolean } | null> {
   // Fetch user's preferred model and reasoning effort
   const userPrefs = await getUserPreferences(env, userId);
   const { defaultModel, defaultPlanModel } = await fetchModelDefaults(env);
@@ -1251,9 +1258,12 @@ async function startSessionAndSendPrompt(
   const repoBranch = await getUserRepoBranchPreference(env, userId, repo.id);
   const branch = repoBranch ?? globalBranch;
 
-  // Plan-mode is driven by the user's App Home preference. Plan-turn model
-  // defaults to the App Home plan model, then the deployment's defaultPlanModel.
-  const planMode = userPrefs?.planModeDefault === true;
+  // Plan-mode is opt-in via the App Home toggle (saves `planModeDefault:
+  // true`). When the toggle is OFF (the default), the bot infers plan-vs-
+  // build intent from the prompt text via the repo classifier — see
+  // `classifierShouldPlan`. Plan-turn model defaults to the App Home plan
+  // model, then the deployment's defaultPlanModel.
+  const planMode = userPrefs?.planModeDefault === true || classifierShouldPlan === true;
   const planModel = planMode ? userPrefs?.planModel || defaultPlanModel : undefined;
 
   // Best-effort user info resolution for identity linking
@@ -1355,7 +1365,7 @@ async function startSessionAndSendPrompt(
     return null;
   }
 
-  return { sessionId: session.sessionId };
+  return { sessionId: session.sessionId, planMode };
 }
 
 /**
@@ -1572,7 +1582,11 @@ app.post("/interactions", async (c) => {
     duration_ms: Date.now() - startTime,
   });
 
-  if (isViewSubmission && isBranchModalCallbackId(payload.view?.callback_id)) {
+  // Slack view_submission responses must be either an empty body, a
+  // `response_action`, or it will surface "Problèmes de connexion" in the
+  // modal even though the work succeeded server-side. Always close the modal
+  // for view_submissions; non-modal interactions get the plain `{ok: true}`.
+  if (isViewSubmission) {
     return c.json({ response_action: "clear" });
   }
 
@@ -1896,7 +1910,9 @@ async function handleIncomingMessage(params: IncomingMessageParams): Promise<voi
 
   const ackTs = ackResult.ok ? ackResult.ts : undefined;
 
-  // Create session and send prompt using shared logic
+  // Create session and send prompt using shared logic. The classifier's
+  // plan-vs-build verdict feeds into plan-mode resolution: the App Home
+  // toggle wins when ON; otherwise the classifier decides.
   const sessionResult = await startSessionAndSendPrompt(
     env,
     repo,
@@ -1907,14 +1923,15 @@ async function handleIncomingMessage(params: IncomingMessageParams): Promise<voi
     previousMessages,
     channelName,
     channelDescription,
-    traceId
+    traceId,
+    result.shouldPlan
   );
 
   if (!sessionResult) {
     return;
   }
 
-  // Update the acknowledgment message with session link button
+  // Update the acknowledgment message with session link button.
   if (ackTs) {
     await updateMessage(env.SLACK_BOT_TOKEN, channel, ackTs, `Working on *${repo.fullName}*...`, {
       blocks: [
@@ -1930,10 +1947,7 @@ async function handleIncomingMessage(params: IncomingMessageParams): Promise<voi
           elements: [
             {
               type: "button",
-              text: {
-                type: "plain_text",
-                text: "View Session",
-              },
+              text: { type: "plain_text", text: "View Session" },
               url: `${env.WEB_APP_URL}/session/${sessionResult.sessionId}`,
               action_id: "view_session",
             },
@@ -2344,8 +2358,8 @@ async function handleSlackInteraction(
     }
 
     case "plan_approve": {
-      // Open a modal so the user can override the implementation model
-      // before approval. action.value carries the session id.
+      // Open a modal so the user can override the build model before
+      // approval. action.value carries the session id.
       if (!payload.trigger_id) return;
       const sessionId = action.value;
       if (!sessionId) return;

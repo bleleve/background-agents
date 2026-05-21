@@ -81,6 +81,8 @@ describe("RepoClassifier", () => {
             confidence: "high",
             reasoning: "The message explicitly mentions prod.",
             alternatives: [],
+            shouldPlan: false,
+            planReasoning: "Small, well-scoped fix.",
           },
         },
       ],

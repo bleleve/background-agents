@@ -139,8 +139,8 @@ export function getFallbackText(response: AgentResponse): string {
 
 /**
  * Build Block Kit message for a plan that's awaiting approval. The user can
- * Approve (opens a modal to pick the implementation model) or Reject (opens
- * a modal for an optional reason), or jump to the web UI.
+ * Approve (opens a modal to pick the build model) or Reject (opens a modal
+ * for an optional reason), or jump to the web UI.
  *
  * The session id is carried in each button's `value` so the action handler
  * can route the click to the right control-plane plan endpoint.
@@ -172,7 +172,7 @@ export function buildPlanAwaitingApprovalBlocks(
       elements: [
         {
           type: "button",
-          text: { type: "plain_text", text: "Approve & implement" },
+          text: { type: "plain_text", text: "Approve" },
           action_id: "plan_approve",
           // value carries the session id so the action handler can route the
           // click to the right control-plane plan endpoint.
