@@ -1965,7 +1965,11 @@ async function handleIncomingMessage(params: IncomingMessageParams): Promise<voi
       return;
     }
 
-    // Store original message in KV for later retrieval when user selects a repo
+    // Store original message in KV for later retrieval when user selects a
+    // repo. `shouldPlan` rides along so the classifier's plan-vs-build verdict
+    // survives the repo-picker detour — otherwise the manual selection path
+    // would silently fall back to build mode even when the prompt warranted
+    // a plan.
     const pendingKey = `pending:${channel}:${threadTs || ts}`;
     await createKvCacheStore(env.SLACK_KV).put(
       pendingKey,
@@ -1975,6 +1979,7 @@ async function handleIncomingMessage(params: IncomingMessageParams): Promise<voi
         previousMessages,
         channelName,
         channelDescription,
+        shouldPlan: result.shouldPlan,
       }),
       { expirationTtl: 3600 } // Expire after 1 hour
     );
@@ -2213,12 +2218,14 @@ async function handleRepoSelection(
     previousMessages,
     channelName,
     channelDescription,
+    shouldPlan,
   } = pendingData as {
     message: string;
     userId: string;
     previousMessages?: string[];
     channelName?: string;
     channelDescription?: string;
+    shouldPlan?: boolean;
   };
 
   // Find the repo config
@@ -2242,7 +2249,9 @@ async function handleRepoSelection(
 
   const threadKey = threadTs || messageTs;
 
-  // Create session and send prompt using shared logic
+  // Create session and send prompt using shared logic. `shouldPlan` from the
+  // pre-picker classification feeds plan-mode resolution so the manual repo
+  // selection path benefits from smart detection too.
   const sessionResult = await startSessionAndSendPrompt(
     env,
     repo,
@@ -2253,7 +2262,8 @@ async function handleRepoSelection(
     previousMessages,
     channelName,
     channelDescription,
-    traceId
+    traceId,
+    shouldPlan
   );
 
   if (!sessionResult) {
