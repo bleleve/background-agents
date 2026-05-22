@@ -137,6 +137,10 @@ export function getFallbackText(response: AgentResponse): string {
   return response.textContent.slice(0, FALLBACK_TEXT_LIMIT) || "Agent completed.";
 }
 
+function truncatePlanBody(content: string): string {
+  return content.length > 2500 ? content.slice(0, 2500) + "\n\n_…truncated_" : content;
+}
+
 /**
  * Build Block Kit message for a plan that's awaiting approval. The user can
  * Approve (opens a modal to pick the build model) or Reject (opens a modal
@@ -152,8 +156,7 @@ export function buildPlanAwaitingApprovalBlocks(
 ): SlackBlock[] {
   // Slack section blocks cap at 3000 chars; truncate well under that so the
   // surrounding header and footer always render.
-  const planBody =
-    plan.content.length > 2500 ? plan.content.slice(0, 2500) + "\n\n_…truncated_" : plan.content;
+  const planBody = truncatePlanBody(plan.content);
 
   return [
     {
@@ -191,6 +194,63 @@ export function buildPlanAwaitingApprovalBlocks(
           text: { type: "plain_text", text: "View plan in web" },
           url: `${webAppUrl}/session/${sessionId}#plan`,
           action_id: "view_session",
+        },
+      ],
+    },
+  ];
+}
+
+/**
+ * Build Block Kit message for a plan that has reached a terminal verdict
+ * (approved or rejected). Same shape as `buildPlanAwaitingApprovalBlocks`
+ * minus the action buttons, with a verdict header and a context line. Used
+ * to update the original plan message after the user submits the approve /
+ * reject modal so the buttons no longer look clickable.
+ */
+export function buildPlanDecidedBlocks(params: {
+  sessionId: string;
+  plan: PlanArtifact;
+  webAppUrl: string;
+  verdict: "approved" | "rejected";
+  /** Slack-formatted actor mention, e.g. `<@U123>`, or a plain string fallback. */
+  actorMention: string;
+  /** Approve only — human-readable build model label, e.g. "Claude Sonnet 4.5". */
+  implementationModelLabel?: string;
+  /** Reject only — optional reason provided by the rejecter. */
+  reason?: string | null;
+}): SlackBlock[] {
+  const { sessionId, plan, webAppUrl, verdict, actorMention } = params;
+  const icon = verdict === "approved" ? ":white_check_mark:" : ":x:";
+  const verb = verdict === "approved" ? "approved" : "rejected";
+  const planBody = truncatePlanBody(plan.content);
+
+  const contextParts: string[] = [`${verb[0].toUpperCase() + verb.slice(1)} by ${actorMention}`];
+  if (verdict === "approved" && params.implementationModelLabel) {
+    contextParts.push(`building with ${params.implementationModelLabel}`);
+  }
+  if (verdict === "rejected" && params.reason && params.reason.trim().length > 0) {
+    contextParts.push(`Reason: "${params.reason.trim()}"`);
+  }
+  contextParts.push(`<${webAppUrl}/session/${sessionId}|View in web>`);
+
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `${icon} *Plan v${plan.version}* — ${verb}`,
+      },
+    },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: planBody },
+    },
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: contextParts.join(" • "),
         },
       ],
     },

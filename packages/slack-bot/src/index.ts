@@ -31,6 +31,8 @@ import { resolveUserNames } from "@open-inspect/shared";
 import { createClassifier } from "./classifier";
 import { getAvailableRepos } from "./classifier/repos";
 import { callbacksRouter } from "./callbacks";
+import { buildPlanDecidedBlocks } from "./completion/blocks";
+import type { PlanArtifact } from "@open-inspect/shared";
 import { buildInternalAuthHeaders } from "@open-inspect/shared";
 import { createLogger } from "./logger";
 import { createKvCacheStore } from "@open-inspect/shared";
@@ -820,6 +822,13 @@ const PLAN_REJECT_REASON_ACTION_ID = "plan_reject_reason_input";
 
 interface PlanModalMetadata {
   sessionId: string;
+  /**
+   * Origin block_actions message — when set, the submission handler will
+   * `chat.update` it to remove the buttons and show the verdict. Optional so
+   * older modal payloads still deserialize.
+   */
+  channel?: string;
+  messageTs?: string;
 }
 
 /**
@@ -831,7 +840,8 @@ async function openPlanApproveModal(
   env: Env,
   triggerId: string,
   sessionId: string,
-  slackUserId: string | undefined
+  slackUserId: string | undefined,
+  originMessage?: { channel: string; ts: string }
 ): Promise<void> {
   // Best-effort: fetch the session state so we can default the impl selector
   // to whatever was used for planning (plan_model when set, else session.model).
@@ -868,7 +878,10 @@ async function openPlanApproveModal(
     title: { type: "plain_text", text: "Approve plan" },
     submit: { type: "plain_text", text: "Approve" },
     close: { type: "plain_text", text: "Cancel" },
-    private_metadata: JSON.stringify({ sessionId } satisfies PlanModalMetadata),
+    private_metadata: JSON.stringify({
+      sessionId,
+      ...(originMessage ? { channel: originMessage.channel, messageTs: originMessage.ts } : {}),
+    } satisfies PlanModalMetadata),
     blocks: [
       {
         type: "section",
@@ -907,14 +920,22 @@ async function openPlanApproveModal(
   }
 }
 
-async function openPlanRejectModal(env: Env, triggerId: string, sessionId: string): Promise<void> {
+async function openPlanRejectModal(
+  env: Env,
+  triggerId: string,
+  sessionId: string,
+  originMessage?: { channel: string; ts: string }
+): Promise<void> {
   const view = {
     type: "modal",
     callback_id: PLAN_REJECT_MODAL_CALLBACK_ID,
     title: { type: "plain_text", text: "Reject plan" },
     submit: { type: "plain_text", text: "Reject" },
     close: { type: "plain_text", text: "Cancel" },
-    private_metadata: JSON.stringify({ sessionId } satisfies PlanModalMetadata),
+    private_metadata: JSON.stringify({
+      sessionId,
+      ...(originMessage ? { channel: originMessage.channel, messageTs: originMessage.ts } : {}),
+    } satisfies PlanModalMetadata),
     blocks: [
       {
         type: "input",
@@ -993,6 +1014,22 @@ async function handlePlanApproveSubmission(
     http_status: res.status,
     ok: res.ok,
   });
+
+  if (res.ok && meta.channel && meta.messageTs) {
+    const approveResponse = await parsePlanResponse(res);
+    if (approveResponse?.plan) {
+      await updateOriginPlanMessage(env, meta.channel, meta.messageTs, {
+        sessionId: meta.sessionId,
+        plan: approveResponse.plan,
+        verdict: "approved",
+        actorMention: userId ? `<@${userId}>` : "someone",
+        implementationModelLabel: implementationModel
+          ? await resolveModelLabel(env, implementationModel)
+          : undefined,
+        traceId,
+      });
+    }
+  }
 }
 
 async function handlePlanRejectSubmission(
@@ -1032,6 +1069,107 @@ async function handlePlanRejectSubmission(
     http_status: res.status,
     ok: res.ok,
   });
+
+  if (res.ok && meta.channel && meta.messageTs) {
+    const rejectResponse = await parsePlanResponse(res);
+    if (rejectResponse?.plan) {
+      await updateOriginPlanMessage(env, meta.channel, meta.messageTs, {
+        sessionId: meta.sessionId,
+        plan: rejectResponse.plan,
+        verdict: "rejected",
+        actorMention: userId ? `<@${userId}>` : "someone",
+        reason,
+        traceId,
+      });
+    }
+  }
+}
+
+/**
+ * Parse the `{plan, status}` payload returned by `/plan/{approve,reject}`.
+ * Returns null on any parse failure — the caller skips the message update,
+ * which is preferable to crashing the submission handler.
+ */
+async function parsePlanResponse(
+  res: Response
+): Promise<{ plan: PlanArtifact | null; status: string } | null> {
+  try {
+    return (await res.json()) as { plan: PlanArtifact | null; status: string };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Best-effort: map a canonical model id (e.g. `anthropic/claude-sonnet-4-5`)
+ * to the user-facing label shown in the model picker (e.g. "Claude Sonnet").
+ * Falls back to the raw id when no match exists or the lookup throws.
+ */
+async function resolveModelLabel(env: Env, modelId: string): Promise<string> {
+  try {
+    const models = await getAvailableModels(env);
+    return models.find((m) => m.value === modelId)?.label ?? modelId;
+  } catch {
+    return modelId;
+  }
+}
+
+/**
+ * Rebuild the plan-awaiting-approval message into its terminal-verdict form
+ * (no buttons, status header, context line) and post the update via
+ * `chat.update`. Failures are logged but never thrown so a Slack hiccup
+ * doesn't fail the submission handler — the control-plane already committed
+ * the verdict at this point.
+ */
+async function updateOriginPlanMessage(
+  env: Env,
+  channel: string,
+  messageTs: string,
+  params: {
+    sessionId: string;
+    plan: PlanArtifact;
+    verdict: "approved" | "rejected";
+    actorMention: string;
+    implementationModelLabel?: string;
+    reason?: string | null;
+    traceId?: string;
+  }
+): Promise<void> {
+  try {
+    const blocks = buildPlanDecidedBlocks({
+      sessionId: params.sessionId,
+      plan: params.plan,
+      webAppUrl: env.WEB_APP_URL,
+      verdict: params.verdict,
+      actorMention: params.actorMention,
+      implementationModelLabel: params.implementationModelLabel,
+      reason: params.reason,
+    });
+    const fallback =
+      params.verdict === "approved"
+        ? `Plan v${params.plan.version} approved`
+        : `Plan v${params.plan.version} rejected`;
+    const result = await updateMessage(env.SLACK_BOT_TOKEN, channel, messageTs, fallback, {
+      blocks,
+    });
+    if (!result.ok) {
+      log.warn("slack.plan_message.update_failed", {
+        trace_id: params.traceId,
+        session_id: params.sessionId,
+        channel,
+        message_ts: messageTs,
+        slack_error: result.error,
+      });
+    }
+  } catch (e) {
+    log.warn("slack.plan_message.update_error", {
+      trace_id: params.traceId,
+      session_id: params.sessionId,
+      channel,
+      message_ts: messageTs,
+      error: e instanceof Error ? e : new Error(String(e)),
+    });
+  }
 }
 
 /**
@@ -2359,11 +2497,23 @@ async function handleSlackInteraction(
 
     case "plan_approve": {
       // Open a modal so the user can override the build model before
-      // approval. action.value carries the session id.
+      // approval. action.value carries the session id; payload.channel + .message
+      // identify the plan-awaiting-approval message so the submission handler
+      // can update it (remove buttons, show verdict) on success.
       if (!payload.trigger_id) return;
       const sessionId = action.value;
       if (!sessionId) return;
-      await openPlanApproveModal(env, payload.trigger_id, sessionId, userId ?? undefined);
+      const originMessage =
+        payload.channel?.id && payload.message?.ts
+          ? { channel: payload.channel.id, ts: payload.message.ts }
+          : undefined;
+      await openPlanApproveModal(
+        env,
+        payload.trigger_id,
+        sessionId,
+        userId ?? undefined,
+        originMessage
+      );
       break;
     }
 
@@ -2371,7 +2521,11 @@ async function handleSlackInteraction(
       if (!payload.trigger_id) return;
       const sessionId = action.value;
       if (!sessionId) return;
-      await openPlanRejectModal(env, payload.trigger_id, sessionId);
+      const originMessage =
+        payload.channel?.id && payload.message?.ts
+          ? { channel: payload.channel.id, ts: payload.message.ts }
+          : undefined;
+      await openPlanRejectModal(env, payload.trigger_id, sessionId, originMessage);
       break;
     }
   }
