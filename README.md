@@ -180,14 +180,19 @@ See **[docs/OPENAI_MODELS.md](docs/OPENAI_MODELS.md)** for setup instructions.
 Interact with agents from wherever your team already works:
 
 - **Web UI** — Full session management with real-time streaming, model/reasoning selectors, terminal
-  panel, and multiplayer presence
+  panel, multiplayer presence, and an optional plan-mode HITL gate for non-trivial requests
 - **Slack Bot** — @mention or DM to start a session; replies thread back with results. Per-user
-  model and branch preferences via App Home
+  model, branch, and plan-mode preferences via App Home; the bot also auto-detects plan-vs-build
+  intent from your message text
 - **GitHub Bot** — Auto-review on PR open, respond to @mentions in PR comments, or trigger on
-  reviewer assignment. Configurable per-repo
+  reviewer assignment. Configurable per-repo. `plan` / `build-<alias>` labels gate planning and pick
+  the build model
 - **Linear Bot** — Assign an issue to the agent and it creates a coding session, posts progress
-  activities, and links the resulting PR
+  activities, and links the resulting PR. Same `plan` / `build-<alias>` label conventions as GitHub
 - **Webhooks** — Trigger sessions from any external system via authenticated HTTP POST
+
+Plan mode proposes a markdown plan and waits for your approval before any code changes. See
+[docs/PLAN_MODE.md](docs/PLAN_MODE.md) for the full workflow.
 
 ### Automations
 

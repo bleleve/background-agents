@@ -644,6 +644,24 @@ curl -I https://open-inspect-web-{deployment_name}.YOUR-SUBDOMAIN.workers.dev
 3. Create a new session with a repository
 4. Send a prompt and verify the sandbox starts
 
+### Configure Default Models
+
+The web UI exposes a **Settings → Models → Default Models** section that controls which build and
+plan models the deployment uses by default. Bots (Linear, GitHub, Slack) read these values at
+session-creation time, so changes propagate without a Terraform redeploy.
+
+1. Open **Settings → Models** in the web UI.
+2. Under **Default Models**, pick:
+   - **Default model** — the build model used when no per-request override is in play.
+   - **Default plan model** — the model that runs the planning turn when plan mode is enabled.
+3. Save. The values are stored in D1; bots fall back to the worker's `DEFAULT_MODEL` /
+   `DEFAULT_PLAN_MODEL` env var only when the control plane is unreachable, then to a shared
+   constant.
+
+Disabling a model that is the current default is blocked inline — pick a new default first.
+
+See [PLAN_MODE.md](PLAN_MODE.md) for the full plan-mode workflow these defaults feed into.
+
 ---
 
 ## Step 10: Set Up CI/CD (Optional)

@@ -57,13 +57,14 @@ if needed.
 
 ### What's Stored in a Session
 
-| Data          | Description                                       |
-| ------------- | ------------------------------------------------- |
-| Messages      | Prompts you've sent and their metadata            |
-| Events        | Tool calls, token streams, status updates         |
-| Artifacts     | PRs created, screenshots captured                 |
-| Participants  | Users who have joined the session                 |
-| Sandbox state | Reference to the current sandbox and its snapshot |
+| Data          | Description                                                                                                                 |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Messages      | Prompts you've sent and their metadata                                                                                      |
+| Events        | Tool calls, token streams, status updates                                                                                   |
+| Artifacts     | PRs created, screenshots captured                                                                                           |
+| Participants  | Users who have joined the session                                                                                           |
+| Sandbox state | Reference to the current sandbox and its snapshot                                                                           |
+| Plans         | Versioned markdown plans + approval status (`awaiting_approval`, `approved`, `rejected`) — see [PLAN_MODE.md](PLAN_MODE.md) |
 
 Each session gets its own SQLite database in a Cloudflare Durable Object, ensuring isolation and
 high performance even with hundreds of concurrent sessions.
@@ -290,6 +291,26 @@ Prompt 1 (processing) ──▶ Prompt 2 (queued) ──▶ Prompt 3 (queued)
 This lets you send follow-up thoughts while the agent works. Prompts are processed in order.
 
 You can also stop the current execution if the agent is going down the wrong path.
+
+### Plan-Mode Gate
+
+When a session is in plan mode, the message queue is gated by an explicit human approval. The
+session runs a planning turn, the agent emits a markdown plan, then dispatching pauses until the
+user approves, rejects, or amends. Concretely: while `plan_mode = 1` and
+`plan_approval_status != "approved"`, `processMessageQueue()` returns early — new prompts that
+arrive in the meantime are stored but not sent to the sandbox. Approve or reject lifts the gate; the
+next prompt then runs as a normal build turn. The full workflow (triggers, approval UIs, amendments,
+plan vs build model split) lives in [PLAN_MODE.md](PLAN_MODE.md).
+
+### Prompt-Safety Wrapping
+
+Bot-assembled prompts can contain untrusted text (a Linear issue body, a PR description, a Slack
+thread). To stop prompt injection across the trusted/untrusted boundary, the bots wrap each piece of
+user-supplied content in `<user_content>` blocks via `buildUntrustedUserContentBlock` from
+`@open-inspect/shared` (HTML-escapes attributes, neutralizes literal `</user_content>` inside the
+body). The sandbox bridge then wraps the whole prompt in `<user_message>` when a plan or resume
+preamble is prepended, and also neutralizes literal `</user_message>` so a user can't close the
+outer wrapper from inside.
 
 ---
 
