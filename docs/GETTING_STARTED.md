@@ -318,21 +318,8 @@ Save these values somewhere secure—you'll need them in the next step.
 ```bash
 cd terraform/environments/production
 
-# Copy the example files
+# Copy the example file and fill in values
 cp terraform.tfvars.example terraform.tfvars
-cp backend.tfvars.example backend.tfvars
-```
-
-### Configure `backend.tfvars`
-
-Fill in your R2 credentials:
-
-```hcl
-access_key = "your-r2-access-key-id"
-secret_key = "your-r2-secret-access-key"
-endpoints = {
-  s3 = "https://YOUR_CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com"
-}
 ```
 
 ### Configure `terraform.tfvars`
@@ -456,8 +443,11 @@ Then run:
 ```bash
 cd terraform/environments/production
 
-# Initialize Terraform with backend config
-terraform init -backend-config=backend.tfvars
+# Initialize Terraform with R2 backend credentials
+terraform init \
+  -backend-config="access_key=YOUR_R2_ACCESS_KEY_ID" \
+  -backend-config="secret_key=YOUR_R2_SECRET_ACCESS_KEY" \
+  -backend-config='endpoints={s3="https://YOUR_CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com"}'
 
 # Deploy (phase 1 - creates workers without bindings)
 terraform apply
@@ -648,9 +638,16 @@ curl -I https://open-inspect-web-{deployment_name}.YOUR-SUBDOMAIN.workers.dev
 
 ## Step 10: Set Up CI/CD (Optional)
 
-Enable automatic deployments when you push to main by adding GitHub Secrets.
+Enable automatic deployments by configuring GitHub Environments and secrets:
 
-Go to your fork's Settings → Secrets and variables → Actions, and add:
+- **`main` branch** → deploys **staging** (`terraform/environments/staging`)
+- **`stable` branch** → deploys **production** (`terraform/environments/production`)
+
+Create `staging` and `production` environments under Settings → Environments. Add secrets to each
+environment (or use repository-level secrets shared by both). Pull requests to `main` run
+`terraform plan` against staging.
+
+Go to your fork's Settings → Secrets and variables → Actions (or per-environment secrets), and add:
 
 | Secret Name                   | Value                                                                         |
 | ----------------------------- | ----------------------------------------------------------------------------- |
@@ -718,8 +715,9 @@ gh secret set GH_APP_PRIVATE_KEY < private-key-pkcs8.pem
 
 Once configured, the GitHub Actions workflow will:
 
-- Run `terraform plan` on pull requests (with PR comment)
-- Run `terraform apply` when merged to main
+- Run `terraform plan` on pull requests to `main` (staging, with PR comment)
+- Run `terraform apply` on pushes to `main` (staging)
+- Run `terraform apply` on pushes to `stable` (production)
 
 ---
 
@@ -748,7 +746,10 @@ terraform apply
 Re-run init with backend config:
 
 ```bash
-terraform init -backend-config=backend.tfvars
+terraform init \
+  -backend-config="access_key=YOUR_R2_ACCESS_KEY_ID" \
+  -backend-config="secret_key=YOUR_R2_SECRET_ACCESS_KEY" \
+  -backend-config='endpoints={s3="https://YOUR_CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com"}'
 ```
 
 ### GitHub App authentication fails

@@ -138,7 +138,8 @@ under 72 characters. Use the PR body for details, not the commit message.
 
 ## CI/CD
 
-Pushing to `main` auto-deploys changed services:
+Pushing to `main` deploys **staging**; pushing to `stable` deploys **production**. Changed services
+auto-deploy when path filters match:
 
 - **Terraform** → control plane + D1 migrations + web app if `web_platform = "cloudflare"`
   (triggers: `terraform/`, `packages/*/`)

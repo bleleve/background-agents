@@ -2,7 +2,7 @@ name: Terraform
 
 on:
   push:
-    branches: [main]
+    branches: [main, stable]
     paths:
       - "terraform/**"
       - "scripts/**"
@@ -31,7 +31,16 @@ on:
       - "packages/shared/**"
       - "packages/web/**"
       - ".github/workflows/terraform.yml"
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
 
 permissions:
   contents: read
@@ -44,13 +53,48 @@ concurrency:
 
 env:
   TF_VERSION: "1.14.8"
-  TF_WORKING_DIR: terraform/environments/production
 
 jobs:
+  resolve-target:
+    name: Resolve Target
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      deploy_environment: ${{ steps.resolve.outputs.deploy_environment }}
+      tf_working_dir: ${{ steps.resolve.outputs.tf_working_dir }}
+      should_apply: ${{ steps.resolve.outputs.should_apply }}
+    steps:
+      - name: Resolve deployment target
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DEPLOY_ENV="${{ inputs.environment }}"
+          elif [ "${{ github.ref }}" = "refs/heads/stable" ]; then
+            DEPLOY_ENV="production"
+          else
+            DEPLOY_ENV="staging"
+          fi
+
+          echo "deploy_environment=${DEPLOY_ENV}" >> "$GITHUB_OUTPUT"
+          echo "tf_working_dir=terraform/environments/${DEPLOY_ENV}" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            SHOULD_APPLY="false"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHOULD_APPLY="true"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.ref }}" = "refs/heads/stable" ]; then
+            SHOULD_APPLY="true"
+          else
+            SHOULD_APPLY="false"
+          fi
+          echo "should_apply=${SHOULD_APPLY}" >> "$GITHUB_OUTPUT"
+
   check-secrets:
     name: Check Secrets
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    needs: [resolve-target]
+    environment: ${{ needs.resolve-target.outputs.deploy_environment }}
     outputs:
       has-secrets: ${{ steps.check.outputs.has-secrets }}
     steps:
@@ -61,14 +105,14 @@ jobs:
             echo "has-secrets=true" >> $GITHUB_OUTPUT
           else
             echo "has-secrets=false" >> $GITHUB_OUTPUT
-            echo "::notice::Terraform plan/apply skipped - secrets not configured. See docs/GETTING_STARTED.md for setup instructions."
+            echo "::notice::Terraform plan/apply skipped - secrets not configured for environment '${{ needs.resolve-target.outputs.deploy_environment }}'. See docs/GETTING_STARTED.md for setup instructions."
           fi
 
   validate:
     name: Validate
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [check-secrets]
+    needs: [check-secrets, resolve-target]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -87,12 +131,12 @@ jobs:
         id: init
         run: |
           terraform init -backend=false
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: ${{ needs.resolve-target.outputs.tf_working_dir }}
 
       - name: Terraform Validate
         id: validate
         run: terraform validate -no-color
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: ${{ needs.resolve-target.outputs.tf_working_dir }}
 
       - name: Post Validation Results
         if: github.event_name == 'pull_request'
@@ -100,11 +144,14 @@ jobs:
         with:
           script: |
             const hasSecrets = '${{ needs.check-secrets.outputs.has-secrets }}' === 'true';
+            const deployEnvironment = '${{ needs.resolve-target.outputs.deploy_environment }}';
             const planNote = hasSecrets
               ? ''
-              : '\n\n> **Note:** Terraform plan was skipped because secrets are not configured. This is expected for external contributors. See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for setup instructions.';
+              : `\n\n> **Note:** Terraform plan was skipped because secrets are not configured for the \`${deployEnvironment}\` environment. This is expected for external contributors. See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for setup instructions.`;
 
             const output = `### Terraform Validation Results
+
+            **Target environment:** \`${deployEnvironment}\`
 
             | Step | Status |
             |------|--------|
@@ -134,8 +181,9 @@ jobs:
     name: Plan
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [validate, check-secrets]
+    needs: [validate, check-secrets, resolve-target]
     if: github.event_name == 'pull_request' && needs.check-secrets.outputs.has-secrets == 'true'
+    environment: ${{ needs.resolve-target.outputs.deploy_environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -168,7 +216,7 @@ jobs:
             -backend-config="access_key=${{ secrets.R2_ACCESS_KEY_ID }}" \
             -backend-config="secret_key=${{ secrets.R2_SECRET_ACCESS_KEY }}" \
             -backend-config='endpoints={s3="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"}'
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: ${{ needs.resolve-target.outputs.tf_working_dir }}
 
       - name: Terraform Plan
         id: plan
@@ -177,7 +225,7 @@ jobs:
           echo "plan<<EOF" >> $GITHUB_OUTPUT
           cat plan_output.txt | head -c 60000 >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: ${{ needs.resolve-target.outputs.tf_working_dir }}
         continue-on-error: true
         env:
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -190,9 +238,9 @@ jobs:
           TF_VAR_modal_workspace: ${{ secrets.MODAL_WORKSPACE }}
           TF_VAR_github_client_id: ${{ secrets.GH_OAUTH_CLIENT_ID }}
           TF_VAR_github_client_secret: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
-          TF_VAR_github_app_id: ${{ secrets.GH_APP_ID }}
+          TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
           TF_VAR_github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          TF_VAR_github_app_installation_id: ${{ secrets.GH_APP_INSTALLATION_ID }}
+          TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
           TF_VAR_enable_slack_bot: "${{ secrets.ENABLE_SLACK_BOT || 'true' }}"
           TF_VAR_slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
           TF_VAR_slack_signing_secret: ${{ secrets.SLACK_SIGNING_SECRET }}
@@ -202,7 +250,7 @@ jobs:
           TF_VAR_internal_callback_secret: ${{ secrets.INTERNAL_CALLBACK_SECRET }}
           TF_VAR_nextauth_secret: ${{ secrets.NEXTAUTH_SECRET }}
           TF_VAR_modal_api_secret: ${{ secrets.MODAL_API_SECRET }}
-          TF_VAR_allowed_users: ${{ secrets.ALLOWED_USERS }}
+          TF_VAR_allowed_users: ${{ vars.ALLOWED_USERS }}
           TF_VAR_allowed_email_domains: ${{ secrets.ALLOWED_EMAIL_DOMAINS }}
           TF_VAR_deployment_name: ${{ secrets.DEPLOYMENT_NAME }}
           TF_VAR_enable_github_bot: "${{ secrets.ENABLE_GITHUB_BOT || 'false' }}"
@@ -222,6 +270,12 @@ jobs:
           TF_VAR_daytona_api_key: ${{ secrets.DAYTONA_API_KEY }}
           TF_VAR_daytona_base_snapshot: ${{ secrets.DAYTONA_BASE_SNAPSHOT }}
           TF_VAR_daytona_target: ${{ secrets.DAYTONA_TARGET }}
+          TF_VAR_langfuse_public_key: ${{ vars.LANGFUSE_PUBLIC_KEY }}
+          TF_VAR_langfuse_secret_key: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          TF_VAR_langfuse_baseurl: ${{ vars.LANGFUSE_BASEURL }}
+          TF_VAR_cf_access_client_id: ${{ vars.CF_ACCESS_CLIENT_ID }}
+          TF_VAR_cf_access_client_secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          TF_VAR_cf_access_token_url: ${{ vars.CF_ACCESS_TOKEN_URL }}
 
       - name: Post Plan Results
         uses: actions/github-script@v8
@@ -229,6 +283,7 @@ jobs:
           script: |
             const planOutcome = '${{ steps.plan.outcome }}';
             const plan = `${{ steps.plan.outputs.plan }}`;
+            const deployEnvironment = '${{ needs.resolve-target.outputs.deploy_environment }}';
 
             const truncatedPlan = plan.length > 60000
               ? plan.substring(0, 60000) + '\n... (truncated)'
@@ -236,6 +291,7 @@ jobs:
 
             const output = `### Terraform Plan Results
 
+            **Target environment:** \`${deployEnvironment}\`
             **Status:** ${planOutcome === 'success' ? '✅ Success' : '❌ Failed'}
 
             <details><summary>Show Plan</summary>
@@ -263,9 +319,9 @@ jobs:
     name: Apply
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [validate, check-secrets]
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && needs.check-secrets.outputs.has-secrets == 'true'
-    environment: production
+    needs: [validate, check-secrets, resolve-target]
+    if: needs.resolve-target.outputs.should_apply == 'true' && needs.check-secrets.outputs.has-secrets == 'true'
+    environment: ${{ needs.resolve-target.outputs.deploy_environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -305,11 +361,11 @@ jobs:
             -backend-config="access_key=${{ secrets.R2_ACCESS_KEY_ID }}" \
             -backend-config="secret_key=${{ secrets.R2_SECRET_ACCESS_KEY }}" \
             -backend-config='endpoints={s3="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"}'
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: ${{ needs.resolve-target.outputs.tf_working_dir }}
 
       - name: Terraform Apply
         run: terraform apply -auto-approve
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: ${{ needs.resolve-target.outputs.tf_working_dir }}
         env:
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -321,9 +377,9 @@ jobs:
           TF_VAR_modal_workspace: ${{ secrets.MODAL_WORKSPACE }}
           TF_VAR_github_client_id: ${{ secrets.GH_OAUTH_CLIENT_ID }}
           TF_VAR_github_client_secret: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
-          TF_VAR_github_app_id: ${{ secrets.GH_APP_ID }}
+          TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
           TF_VAR_github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          TF_VAR_github_app_installation_id: ${{ secrets.GH_APP_INSTALLATION_ID }}
+          TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
           TF_VAR_enable_slack_bot: "${{ secrets.ENABLE_SLACK_BOT || 'true' }}"
           TF_VAR_slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
           TF_VAR_slack_signing_secret: ${{ secrets.SLACK_SIGNING_SECRET }}
@@ -333,7 +389,7 @@ jobs:
           TF_VAR_internal_callback_secret: ${{ secrets.INTERNAL_CALLBACK_SECRET }}
           TF_VAR_nextauth_secret: ${{ secrets.NEXTAUTH_SECRET }}
           TF_VAR_modal_api_secret: ${{ secrets.MODAL_API_SECRET }}
-          TF_VAR_allowed_users: ${{ secrets.ALLOWED_USERS }}
+          TF_VAR_allowed_users: ${{ vars.ALLOWED_USERS }}
           TF_VAR_allowed_email_domains: ${{ secrets.ALLOWED_EMAIL_DOMAINS }}
           TF_VAR_deployment_name: ${{ secrets.DEPLOYMENT_NAME }}
           TF_VAR_enable_github_bot: "${{ secrets.ENABLE_GITHUB_BOT || 'false' }}"
@@ -353,8 +409,12 @@ jobs:
           TF_VAR_daytona_api_key: ${{ secrets.DAYTONA_API_KEY }}
           TF_VAR_daytona_base_snapshot: ${{ secrets.DAYTONA_BASE_SNAPSHOT }}
           TF_VAR_daytona_target: ${{ secrets.DAYTONA_TARGET }}
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          TF_VAR_langfuse_public_key: ${{ vars.LANGFUSE_PUBLIC_KEY }}
+          TF_VAR_langfuse_secret_key: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          TF_VAR_langfuse_baseurl: ${{ vars.LANGFUSE_BASEURL }}
+          TF_VAR_cf_access_client_id: ${{ vars.CF_ACCESS_CLIENT_ID }}
+          TF_VAR_cf_access_client_secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          TF_VAR_cf_access_token_url: ${{ vars.CF_ACCESS_TOKEN_URL }}
 
       - name: Post Apply Results
         if: always()
@@ -362,5 +422,6 @@ jobs:
           echo "### Terraform Apply Results"
           echo "Status: ${{ job.status }}"
           echo "Commit: ${{ github.sha }}"
-          echo "Environment: production"
+          echo "Environment: ${{ needs.resolve-target.outputs.deploy_environment }}"
+          echo "Terraform directory: ${{ needs.resolve-target.outputs.tf_working_dir }}"
           echo "Applied by: ${{ github.actor }}"

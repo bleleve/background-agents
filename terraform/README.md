@@ -113,26 +113,24 @@ Create at [Slack API](https://api.slack.com/apps) and note:
 ```bash
 cd terraform/environments/production
 
-# Copy example files and fill in values
+# Copy example file and fill in values
 cp terraform.tfvars.example terraform.tfvars
-cp backend.tfvars.example backend.tfvars
 
 # Edit with your values
 vim terraform.tfvars
-vim backend.tfvars
 ```
 
 ### 2. Initialize Terraform
 
 ```bash
-# Initialize with R2 backend config file
-terraform init -backend-config=backend.tfvars
-
-# Or pass values directly:
+# Pass backend credentials directly:
 terraform init \
   -backend-config="access_key=YOUR_R2_ACCESS_KEY_ID" \
   -backend-config="secret_key=YOUR_R2_SECRET_ACCESS_KEY" \
   -backend-config='endpoints={s3="https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com"}'
+
+# Or create a backend.tfvars file (gitignored) and pass it:
+terraform init -backend-config=backend.tfvars
 ```
 
 ### 3. Plan Changes
@@ -151,14 +149,18 @@ terraform apply
 
 The GitHub Actions workflow (`.github/workflows/terraform.yml`) automates:
 
-| Trigger       | Action                           |
-| ------------- | -------------------------------- |
-| Pull Request  | `terraform plan` with PR comment |
-| Merge to main | `terraform apply` (auto-approve) |
+| Trigger             | Target environment | Action                           |
+| ------------------- | ------------------ | -------------------------------- |
+| Pull Request → main | staging            | `terraform plan` with PR comment |
+| Push to main        | staging            | `terraform apply` (auto-approve) |
+| Push to stable      | production         | `terraform apply` (auto-approve) |
+
+Jobs use GitHub Environments (`staging`, `production`) so secrets and protection rules can differ
+per target. Create both environments under repository Settings → Environments.
 
 ### Required GitHub Secrets
 
-Add these secrets to your repository settings:
+Add these secrets to each GitHub Environment (or at repository level if shared):
 
 ```
 # Deployment

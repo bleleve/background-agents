@@ -324,7 +324,7 @@ variable "sandbox_provider" {
 variable "web_platform" {
   description = "Platform for the web app deployment: 'vercel' or 'cloudflare' (OpenNext)"
   type        = string
-  default     = "vercel"
+  default     = "cloudflare"
 
   validation {
     condition     = contains(["vercel", "cloudflare"], var.web_platform)
@@ -340,7 +340,7 @@ variable "deployment_name" {
 variable "app_name" {
   description = "Display name shown in the web UI tab title, sidebar logo, sign-in page, bot messages (Slack, Linear), PR body footer, and outbound HTTP User-Agent headers."
   type        = string
-  default     = "Open-Inspect"
+  default     = "Reef"
 }
 
 variable "app_short_name" {

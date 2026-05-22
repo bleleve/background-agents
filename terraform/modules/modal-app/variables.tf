@@ -11,8 +11,9 @@ variable "modal_token_secret" {
 }
 
 variable "app_name" {
-  description = "Name of the Modal app"
+  description = "Display name shown in the web UI tab title, sidebar logo, sign-in page, bot messages (Slack, Linear), PR body footer, and outbound HTTP User-Agent headers."
   type        = string
+  default     = "Reef"
 }
 
 variable "workspace" {

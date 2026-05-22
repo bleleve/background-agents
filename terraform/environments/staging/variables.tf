@@ -324,7 +324,7 @@ variable "sandbox_provider" {
 variable "web_platform" {
   description = "Platform for the web app deployment: 'vercel' or 'cloudflare' (OpenNext)"
   type        = string
-  default     = "vercel"
+  default     = "cloudflare"
 
   validation {
     condition     = contains(["vercel", "cloudflare"], var.web_platform)
