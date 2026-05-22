@@ -247,6 +247,25 @@ describe("buildPlanDecidedBlocks", () => {
     expect(contextText).not.toContain("Reason");
   });
 
+  it("truncates a long reject reason so the context line stays under Slack's 2000-char limit", () => {
+    // The reject modal caps input at 500 chars; this asserts the defensive
+    // truncate that catches any future programmatic / API call site too.
+    const longReason = "x".repeat(3000);
+    const blocks = buildPlanDecidedBlocks({
+      sessionId: "sess-1",
+      plan: BASE_PLAN,
+      webAppUrl: "https://app.openinspect.dev",
+      verdict: "rejected",
+      actorMention: "<@U123>",
+      reason: longReason,
+    });
+    const context = blocks.find((b) => b.type === "context");
+    const contextText = (context?.elements?.[0] as { text?: string } | undefined)?.text ?? "";
+    expect(contextText.length).toBeLessThan(2000);
+    expect(contextText).toContain("…");
+    expect(contextText).toMatch(/Reason: "x{500}…"/);
+  });
+
   it("truncates long plan bodies the same way as the awaiting variant", () => {
     const longPlan: PlanArtifact = { ...BASE_PLAN, content: "x".repeat(5000) };
     const blocks = buildPlanDecidedBlocks({

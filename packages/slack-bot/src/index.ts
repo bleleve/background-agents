@@ -946,6 +946,11 @@ async function openPlanRejectModal(
           type: "plain_text_input",
           action_id: PLAN_REJECT_REASON_ACTION_ID,
           multiline: true,
+          // Cap input client-side so a long reason can't exceed Slack's
+          // 2000-char limit on `context` block mrkdwn elements when the
+          // origin message is updated post-submit. Without this cap the
+          // chat.update silently fails and the buttons would stay clickable.
+          max_length: 500,
           placeholder: {
             type: "plain_text",
             text: "What needs to change in the plan?",

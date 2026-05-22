@@ -229,7 +229,13 @@ export function buildPlanDecidedBlocks(params: {
     contextParts.push(`building with ${params.implementationModelLabel}`);
   }
   if (verdict === "rejected" && params.reason && params.reason.trim().length > 0) {
-    contextParts.push(`Reason: "${params.reason.trim()}"`);
+    // Defense in depth: the reject modal caps the input at 500 chars, but
+    // truncate again here so any future call site (API, programmatic reject)
+    // can't push a long reason past Slack's 2000-char limit on `context`
+    // block mrkdwn elements, which would silently fail `chat.update`.
+    const trimmed = params.reason.trim();
+    const truncated = trimmed.length > 500 ? trimmed.slice(0, 500) + "…" : trimmed;
+    contextParts.push(`Reason: "${truncated}"`);
   }
   contextParts.push(`<${webAppUrl}/session/${sessionId}|View in web>`);
 
