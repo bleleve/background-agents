@@ -215,7 +215,7 @@ jobs:
           terraform init \
             -backend-config="access_key=${{ secrets.R2_ACCESS_KEY_ID }}" \
             -backend-config="secret_key=${{ secrets.R2_SECRET_ACCESS_KEY }}" \
-            -backend-config='endpoints={s3="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"}'
+            -backend-config='endpoints={s3="https://${{ vars.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"}'
         working-directory: ${{ needs.resolve-target.outputs.tf_working_dir }}
 
       - name: Terraform Plan
@@ -229,7 +229,7 @@ jobs:
         continue-on-error: true
         env:
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TF_VAR_cloudflare_account_id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           TF_VAR_cloudflare_worker_subdomain: ${{ secrets.CLOUDFLARE_WORKER_SUBDOMAIN }}
           TF_VAR_vercel_api_token: "${{ secrets.VERCEL_API_TOKEN || 'unused' }}"
           TF_VAR_vercel_team_id: "${{ secrets.VERCEL_TEAM_ID || 'unused' }}"
@@ -360,7 +360,7 @@ jobs:
           terraform init \
             -backend-config="access_key=${{ secrets.R2_ACCESS_KEY_ID }}" \
             -backend-config="secret_key=${{ secrets.R2_SECRET_ACCESS_KEY }}" \
-            -backend-config='endpoints={s3="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"}'
+            -backend-config='endpoints={s3="https://${{ vars.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"}'
         working-directory: ${{ needs.resolve-target.outputs.tf_working_dir }}
 
       - name: Terraform Apply
@@ -368,7 +368,7 @@ jobs:
         working-directory: ${{ needs.resolve-target.outputs.tf_working_dir }}
         env:
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TF_VAR_cloudflare_account_id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           TF_VAR_cloudflare_worker_subdomain: ${{ secrets.CLOUDFLARE_WORKER_SUBDOMAIN }}
           TF_VAR_vercel_api_token: "${{ secrets.VERCEL_API_TOKEN || 'unused' }}"
           TF_VAR_vercel_team_id: "${{ secrets.VERCEL_TEAM_ID || 'unused' }}"
