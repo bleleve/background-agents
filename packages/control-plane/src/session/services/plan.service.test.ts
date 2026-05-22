@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SessionRepository } from "../repository";
 import type { PlanRow } from "../types";
-import { PlanService } from "./plan.service";
+import { buildPlanImplementationPrompt, PlanService } from "./plan.service";
 
-function createService(now = 1_700_000_000_000) {
+interface CreateServiceOptions {
+  now?: number;
+  onDispatchImplementationPrompt?: (planVersion: number) => void | Promise<void>;
+}
+
+function createService({
+  now = 1_700_000_000_000,
+  onDispatchImplementationPrompt,
+}: CreateServiceOptions = {}) {
   let nextId = 0;
   const repository = {
     savePlan: vi.fn(),
@@ -22,6 +30,7 @@ function createService(now = 1_700_000_000_000) {
       repository,
       generateId: () => `plan-${++nextId}`,
       now: () => now,
+      onDispatchImplementationPrompt,
     }),
     repository,
   };
@@ -29,7 +38,7 @@ function createService(now = 1_700_000_000_000) {
 
 describe("PlanService.savePlan", () => {
   it("persists trimmed content and returns the row mapped to a response", () => {
-    const { service, repository } = createService(1234);
+    const { service, repository } = createService({ now: 1234 });
     vi.mocked(repository.savePlan).mockImplementation((data) => ({
       id: data.id,
       version: 1,
@@ -131,7 +140,7 @@ describe("PlanService.getCurrentPlan", () => {
 
 describe("PlanService.approvePlan", () => {
   it("snapshots total_cost into plan_cost_snapshot when approving", () => {
-    const { service, repository } = createService(5000);
+    const { service, repository } = createService({ now: 5000 });
     vi.mocked(repository.getSession).mockReturnValue({
       plan_mode: 1,
       plan_approval_status: "awaiting_approval",
@@ -150,6 +159,98 @@ describe("PlanService.approvePlan", () => {
 
     expect(repository.updatePlanApprovalStatus).toHaveBeenCalledWith("approved", 5000);
     expect(repository.snapshotPlanCost).toHaveBeenCalledWith(5000);
+  });
+});
+
+describe("PlanService.approvePlanAndFlush", () => {
+  it("dispatches the implementation prompt with the approved plan version", async () => {
+    const onDispatchImplementationPrompt = vi.fn();
+    const { service, repository } = createService({ onDispatchImplementationPrompt });
+    vi.mocked(repository.getSession).mockReturnValue({
+      plan_mode: 1,
+      plan_approval_status: "awaiting_approval",
+      model: "claude-opus-4-6",
+      reasoning_effort: "high",
+      plan_cost_snapshot: 42,
+    } as never);
+    vi.mocked(repository.getCurrentPlan).mockReturnValue({
+      id: "p1",
+      version: 7,
+      content: "plan",
+      created_by_author_id: null,
+      created_by_message_id: null,
+      source: "api",
+      created_at: 100,
+    });
+
+    const result = await service.approvePlanAndFlush();
+
+    expect(onDispatchImplementationPrompt).toHaveBeenCalledExactlyOnceWith(7);
+    expect(result.plan.version).toBe(7);
+  });
+
+  it("dispatches AFTER the session model/effort has been written (so the dispatched prompt picks them up)", async () => {
+    const seen: Array<{ updates: number }> = [];
+    const { service, repository } = createService({
+      onDispatchImplementationPrompt: async () => {
+        // Capture call ordering: by the time the dispatch fires, the
+        // session-model updates must already have happened.
+        seen.push({
+          updates:
+            vi.mocked(repository.updateSessionModel).mock.calls.length +
+            vi.mocked(repository.updateSessionReasoningEffort).mock.calls.length,
+        });
+      },
+    });
+    vi.mocked(repository.getSession).mockReturnValue({
+      plan_mode: 1,
+      plan_approval_status: "awaiting_approval",
+    } as never);
+    vi.mocked(repository.getCurrentPlan).mockReturnValue({
+      id: "p1",
+      version: 1,
+      content: "plan",
+      created_by_author_id: null,
+      created_by_message_id: null,
+      source: "api",
+      created_at: 100,
+    });
+
+    await service.approvePlanAndFlush({
+      implementationModel: "anthropic/claude-sonnet-4-6",
+      implementationReasoningEffort: "high",
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].updates).toBe(2);
+  });
+
+  it("is a no-op (beyond approvePlan) when no dispatch callback is wired", async () => {
+    const { service, repository } = createService();
+    vi.mocked(repository.getSession).mockReturnValue({
+      plan_mode: 1,
+      plan_approval_status: "awaiting_approval",
+    } as never);
+    vi.mocked(repository.getCurrentPlan).mockReturnValue({
+      id: "p1",
+      version: 1,
+      content: "plan",
+      created_by_author_id: null,
+      created_by_message_id: null,
+      source: "api",
+      created_at: 100,
+    });
+
+    await expect(service.approvePlanAndFlush()).resolves.toEqual(
+      expect.objectContaining({ status: "approved" })
+    );
+  });
+});
+
+describe("buildPlanImplementationPrompt", () => {
+  it("interpolates the plan version into the canonical implementation prompt", () => {
+    expect(buildPlanImplementationPrompt(3)).toContain("v3");
+    expect(buildPlanImplementationPrompt(3)).toMatch(/Follow its steps exactly/);
   });
 });
 

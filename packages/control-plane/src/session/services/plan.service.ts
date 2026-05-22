@@ -69,17 +69,26 @@ export interface ApprovalResult {
  */
 export const MAX_PLAN_CONTENT_BYTES = 16 * 1024;
 
+/**
+ * Synthetic prompt that kicks off the implementation turn once a plan is
+ * approved. Enqueued server-side so every client (web + every bot) triggers
+ * the same build turn — clients only call the approve endpoint.
+ */
+export const buildPlanImplementationPrompt = (version: number): string =>
+  `Implement the approved plan v${version}. Follow its steps exactly; flag any deviation before applying it.`;
+
 interface PlanServiceDeps {
   repository: SessionRepository;
   generateId: () => string;
   now: () => number;
   /**
-   * Invoked after a plan is approved (status flipped to "approved").
-   * The session DO uses this to flush any queued user message: a follow-up
-   * sent while the plan was awaiting approval should be dispatched as the
-   * first implementation turn.
+   * Invoked after a plan is approved (status flipped to "approved"). The
+   * session DO uses this to enqueue the synthetic implementation prompt
+   * that kicks off the build turn. The DO's enqueue path already flushes
+   * the message queue itself, so any user messages that piled up during
+   * awaiting_approval get dispatched in the same pass.
    */
-  onPlanApproved?: () => void | Promise<void>;
+  onDispatchImplementationPrompt?: (planVersion: number) => void | Promise<void>;
 }
 
 function toResponse(row: PlanRow): PlanResponse {
@@ -158,8 +167,8 @@ export class PlanService {
 
   async approvePlanAndFlush(request: ApprovalRequest = {}): Promise<ApprovalResult> {
     const result = this.approvePlan(request);
-    if (this.deps.onPlanApproved) {
-      await this.deps.onPlanApproved();
+    if (this.deps.onDispatchImplementationPrompt) {
+      await this.deps.onDispatchImplementationPrompt(result.plan.version);
     }
     return result;
   }
