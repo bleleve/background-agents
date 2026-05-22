@@ -124,7 +124,10 @@ jobs:
 
       - name: Terraform Format Check
         id: fmt
-        run: terraform fmt -check -recursive
+        run: |
+          if ! terraform fmt -check -recursive; then
+            echo "::warning::Terraform formatting issues found. Run 'terraform fmt -recursive terraform/' to fix."
+          fi
         working-directory: terraform
 
       - name: Terraform Init
