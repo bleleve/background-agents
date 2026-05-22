@@ -157,7 +157,7 @@ export function PlanApprovalBanner({
         </button>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1 text-xs text-secondary-foreground">
-            <span>Implement with</span>
+            <span>Build with</span>
             <select
               value={implModel}
               onChange={(e) => setImplModel(e.target.value)}

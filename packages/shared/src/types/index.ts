@@ -458,6 +458,16 @@ export interface ClassificationResult {
   reasoning: string;
   alternatives?: RepoConfig[];
   needsClarification: boolean;
+  /**
+   * Plan-vs-build intent inferred from the same LLM call. True when the
+   * prompt warrants a human-approved plan before code changes (multi-step
+   * refactor, design question, architectural decision). False for trivial
+   * fixes or questions. Undefined when no classification was run (e.g. no
+   * repos available).
+   */
+  shouldPlan?: boolean;
+  /** Brief explanation of the plan-vs-build decision. */
+  planReasoning?: string;
 }
 
 export interface EventResponse {
