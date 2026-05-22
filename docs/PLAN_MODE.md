@@ -153,8 +153,9 @@ Key invariants:
 
 - **Plan persistence** — plans live in the SessionDO SQLite `plans` table with monotonic versions
   per session. v1 is `SUPERSEDED` once v2 lands. Approve/reject is terminal.
-- **Queue gate** — while `plan_mode = 1` and `plan_approval_status != "approved"`, the message queue
-  stops dispatching. Reject lifts the gate and subsequent prompts run as build.
+- **Dispatch gate** — while `plan_mode = 1` and `plan_approval_status = "awaiting_approval"`, every
+  prompt is dispatched as a planning turn (amendments produce plan v2, v3, …). Approve or reject
+  sets `isPlanningTurn` to false and subsequent prompts run as build turns.
 - **Resume anchoring** — `_build_resume_preamble` injects the saved plan into the next prompt as
   `<resume_context><saved_plan>…</saved_plan></resume_context>` so the agent re-anchors even after
   context compaction.

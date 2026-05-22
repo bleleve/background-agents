@@ -294,13 +294,13 @@ You can also stop the current execution if the agent is going down the wrong pat
 
 ### Plan-Mode Gate
 
-When a session is in plan mode, the message queue is gated by an explicit human approval. The
-session runs a planning turn, the agent emits a markdown plan, then dispatching pauses until the
-user approves, rejects, or amends. Concretely: while `plan_mode = 1` and
-`plan_approval_status != "approved"`, `processMessageQueue()` returns early — new prompts that
-arrive in the meantime are stored but not sent to the sandbox. Approve or reject lifts the gate; the
-next prompt then runs as a normal build turn. The full workflow (triggers, approval UIs, amendments,
-plan vs build model split) lives in [PLAN_MODE.md](PLAN_MODE.md).
+When a session is in plan mode the message queue is not blocked — what changes is **how** each
+prompt is dispatched. While `plan_mode = 1` and `plan_approval_status = "awaiting_approval"` (or
+unset, pre-plan), every dispatched prompt runs as a planning turn (`planMode: true` in the command),
+so a follow-up sent before you approve is treated as an amendment and produces plan v2 — not
+blocked. Approve or reject flips `isPlanningTurn` to false; the next prompt then runs as a normal
+build turn. The full workflow (triggers, approval UIs, amendments, plan vs build model split) lives
+in [PLAN_MODE.md](PLAN_MODE.md).
 
 ### Prompt-Safety Wrapping
 
