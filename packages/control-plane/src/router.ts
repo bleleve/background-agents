@@ -65,6 +65,7 @@ import { repoImageRoutes } from "./routes/repo-images";
 import { secretsRoutes } from "./routes/secrets";
 import { automationRoutes } from "./routes/automations";
 import { mcpServerRoutes } from "./routes/mcp-servers";
+import { preambleRulesRoutes } from "./routes/preamble-rules";
 import { analyticsRoutes } from "./routes/analytics";
 import { handleSlackNotify } from "./routes/slack-notify";
 import { webhookRoutes } from "./webhooks";
@@ -589,6 +590,9 @@ const routes: Route[] = [
 
   // MCP servers
   ...mcpServerRoutes,
+
+  // Preamble rules (CRUD + /preambles/resolve)
+  ...preambleRulesRoutes,
 
   // Analytics
   ...analyticsRoutes,
