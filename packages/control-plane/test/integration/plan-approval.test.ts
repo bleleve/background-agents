@@ -64,6 +64,75 @@ describe("POST /internal/plan/approve dispatches implementation prompt", () => {
     expect(messages[0].author_id).toBe(participants[0].id);
   });
 
+  it("inherits source + callback_context from the plan's triggering message", async () => {
+    // Drive the full Slack flow: user prompt arrives with a callback envelope,
+    // agent saves a plan tied to that prompt, user approves. The synthetic
+    // implementation message must carry the same callback envelope so the
+    // completion notification routes back to the same Slack thread —
+    // otherwise CallbackNotificationService.notifyComplete short-circuits
+    // on the missing callback_context and the bot stays silent.
+    const { stub } = await initSession({ planMode: true });
+    const callbackContext = {
+      channel: "C1234",
+      threadTs: "1234567890.123456",
+      repoFullName: "acme/web-app",
+    };
+
+    const promptRes = await stub.fetch("http://internal/internal/prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: "Fix the README typo",
+        authorId: "user-slack-1",
+        source: "slack",
+        callbackContext,
+      }),
+    });
+    const { messageId: triggerMessageId } = await promptRes.json<{ messageId: string }>();
+
+    await stub.fetch("http://internal/internal/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: "Step 1: locate the typo\nStep 2: fix it\nStep 3: open PR",
+        messageId: triggerMessageId,
+      }),
+    });
+    const approveRes = await stub.fetch("http://internal/internal/plan/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(approveRes.status).toBe(200);
+
+    const systemMessages = await queryDO<{
+      source: string;
+      callback_context: string | null;
+    }>(
+      stub,
+      "SELECT source, callback_context FROM messages WHERE author_id = (SELECT id FROM participants WHERE user_id = 'system')"
+    );
+    expect(systemMessages).toHaveLength(1);
+    expect(systemMessages[0].source).toBe("slack");
+    expect(systemMessages[0].callback_context).not.toBeNull();
+    expect(JSON.parse(systemMessages[0].callback_context!)).toEqual(callbackContext);
+  });
+
+  it("falls back to source='system' with no callback_context when the plan has no triggering message", async () => {
+    // API-driven plan (no messageId on the save) — there's no user-facing
+    // channel to report back to, so the synthetic prompt is enqueued without
+    // a callback envelope. The completion-notification path will short-circuit
+    // safely (no bot to notify) instead of crashing.
+    const { stub } = await setupApprovedSession();
+
+    const systemMessages = await queryDO<{
+      source: string;
+      callback_context: string | null;
+    }>(stub, "SELECT source, callback_context FROM messages WHERE source = 'system'");
+    expect(systemMessages).toHaveLength(1);
+    expect(systemMessages[0].callback_context).toBeNull();
+  });
+
   it("re-uses the existing system participant on a second plan/approve cycle", async () => {
     const { stub } = await initSession({ planMode: true });
 
