@@ -416,11 +416,37 @@ export class SessionDO extends DurableObject<Env> {
           // gate-lifted queue (planMode && status === "approved") picks up
           // both this prompt AND any user messages that landed during
           // awaiting_approval — no separate flush needed here.
+          //
+          // Inherit source + callback_context from the message that produced
+          // the approved plan so the completion callback routes back to the
+          // originating channel (Slack thread, Linear issue, etc.). Without
+          // this, CallbackNotificationService.notifyComplete short-circuits
+          // on the missing callback_context and the bot stays silent after
+          // the build finishes.
+          const plan = this.repository.getCurrentPlan();
+          const triggerMessageId = plan?.created_by_message_id ?? null;
+          const envelope = triggerMessageId
+            ? this.repository.getMessageCallbackContext(triggerMessageId)
+            : null;
+          const callbackContext = envelope?.callback_context
+            ? (JSON.parse(envelope.callback_context) as Record<string, unknown>)
+            : undefined;
+          const source = envelope?.source ?? "system";
+
+          if (!callbackContext) {
+            this.log.warn("plan_approval.dispatch_without_callback", {
+              plan_version: planVersion,
+              trigger_message_id: triggerMessageId,
+              reason: envelope ? "trigger_message_has_no_callback_context" : "no_trigger_message",
+            });
+          }
+
           await this.messageService.enqueuePrompt({
             content: buildPlanImplementationPrompt(planVersion),
             authorId: SYSTEM_USER_ID,
             authorDisplayName: SYSTEM_DISPLAY_NAME,
-            source: "system",
+            source,
+            callbackContext,
           });
         },
       });
