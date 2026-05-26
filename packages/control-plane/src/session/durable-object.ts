@@ -434,7 +434,12 @@ export class SessionDO extends DurableObject<Env> {
           const source = envelope?.source ?? "system";
 
           if (!callbackContext) {
-            this.log.warn("plan_approval.dispatch_without_callback", {
+            // Plans saved via the API without a messageId are a documented
+            // fallback path (no user-facing channel to notify), so log at
+            // debug. A missing callback_context on an existing trigger
+            // message IS anomalous — keep that case at warn so it shows up.
+            const logFn = envelope ? this.log.warn.bind(this.log) : this.log.debug.bind(this.log);
+            logFn("plan_approval.dispatch_without_callback", {
               plan_version: planVersion,
               trigger_message_id: triggerMessageId,
               reason: envelope ? "trigger_message_has_no_callback_context" : "no_trigger_message",
