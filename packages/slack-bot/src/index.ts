@@ -69,17 +69,36 @@ const log = createLogger("handler");
 const MAX_REPO_SUGGESTION_OPTIONS = 100;
 
 /**
- * Deployment-controlled directive appended to every prompt sent to a Slack-
- * originated session. Tells the agent not to call `slack-notify` itself, since
- * the bot already posts a follow-up notification on its behalf when the turn
- * ends. Wrapped in `<system_instruction>` (not `<user_content>`) because the
+ * Deployment-controlled directives appended to every prompt sent to a Slack-
+ * originated session. Covers two concerns:
+ *
+ * 1. **Tool guard** — tells the agent not to call `slack-notify` itself, since
+ *    the bot already posts a follow-up notification on its behalf when the turn
+ *    ends.
+ * 2. **Formatting** — instructs the agent to use Slack mrkdwn syntax instead
+ *    of standard Markdown so the response renders correctly in Slack threads.
+ *
+ * Wrapped in `<system_instruction>` (not `<user_content>`) because the
  * directive is trusted infrastructure, not arbitrary user input. Appended on
  * every turn — the agent's conversation history can be compacted and the
  * plan-mode preamble adds its own competing instructions, so we re-state the
  * rule each time rather than relying on the model remembering turn 1.
  */
-export const SLACK_NOTIFY_GUARD_INSTRUCTION =
-  "\n\n<system_instruction>\nDo not use the `slack-notify` tool in this session. Slack sessions automatically post a follow-up notification when triggered from Slack.\n</system_instruction>";
+export const SLACK_SESSION_INSTRUCTIONS =
+  "\n\n<system_instruction>\n" +
+  "Do not use the `slack-notify` tool in this session. Slack sessions automatically post a follow-up notification when triggered from Slack.\n" +
+  "\n" +
+  "Your response will be posted to a Slack thread. Slack uses its own mrkdwn format, NOT standard Markdown. You MUST follow these formatting rules:\n" +
+  "- Bold: *text* (single asterisks, NOT **double**)\n" +
+  "- Italic: _text_ (NOT *single asterisks*)\n" +
+  "- Strikethrough: ~text~ (NOT ~~double tildes~~)\n" +
+  "- No headings: Slack has no heading syntax. Do NOT use # or ## — use *bold text* on its own line instead.\n" +
+  "- Links: <https://example.com|label> (NOT [label](url))\n" +
+  "- Code: `inline` and ```code blocks``` work the same as Markdown.\n" +
+  "- Lists: - or • for bullets (same as Markdown).\n" +
+  "- Blockquotes: > text (same as Markdown).\n" +
+  "- No tables, no images, no HTML.\n" +
+  "</system_instruction>";
 
 export function buildAppHomeIntroText(appName: string): string {
   return `Configure your ${appName} preferences below.`;
@@ -1495,8 +1514,7 @@ async function startSessionAndSendPrompt(
   // Build prompt content with channel and thread context if available
   const channelContext = channelName ? formatChannelContext(channelName, channelDescription) : "";
   const threadContext = previousMessages ? formatThreadContext(previousMessages) : "";
-  const promptContent =
-    channelContext + threadContext + messageText + SLACK_NOTIFY_GUARD_INSTRUCTION;
+  const promptContent = channelContext + threadContext + messageText + SLACK_SESSION_INSTRUCTIONS;
 
   // Send the prompt to the session
   const promptResult = await sendPrompt(
@@ -1912,7 +1930,7 @@ async function handleIncomingMessage(params: IncomingMessageParams): Promise<voi
         : "";
       const threadContext = previousMessages ? formatThreadContext(previousMessages) : "";
       const promptContent =
-        channelContext + threadContext + messageText + SLACK_NOTIFY_GUARD_INSTRUCTION;
+        channelContext + threadContext + messageText + SLACK_SESSION_INSTRUCTIONS;
 
       const promptResult = await sendPrompt(
         env,

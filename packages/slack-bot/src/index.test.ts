@@ -26,7 +26,7 @@ import app, {
   buildAppHomeIntroText,
   formatChannelContext,
   formatThreadContext,
-  SLACK_NOTIFY_GUARD_INSTRUCTION,
+  SLACK_SESSION_INSTRUCTIONS,
 } from "./index";
 import { clearLocalCache } from "./classifier/repos";
 
@@ -79,16 +79,24 @@ describe("formatChannelContext", () => {
   });
 });
 
-describe("SLACK_NOTIFY_GUARD_INSTRUCTION", () => {
+describe("SLACK_SESSION_INSTRUCTIONS", () => {
   it("forbids the slack-notify tool inside a system_instruction block", () => {
-    expect(SLACK_NOTIFY_GUARD_INSTRUCTION).toContain("<system_instruction>");
-    expect(SLACK_NOTIFY_GUARD_INSTRUCTION).toContain("</system_instruction>");
-    expect(SLACK_NOTIFY_GUARD_INSTRUCTION).toContain("`slack-notify`");
-    expect(SLACK_NOTIFY_GUARD_INSTRUCTION).toContain("Do not use");
+    expect(SLACK_SESSION_INSTRUCTIONS).toContain("<system_instruction>");
+    expect(SLACK_SESSION_INSTRUCTIONS).toContain("</system_instruction>");
+    expect(SLACK_SESSION_INSTRUCTIONS).toContain("`slack-notify`");
+    expect(SLACK_SESSION_INSTRUCTIONS).toContain("Do not use");
   });
 
   it("leads with blank lines so it separates cleanly from the live user instruction", () => {
-    expect(SLACK_NOTIFY_GUARD_INSTRUCTION.startsWith("\n\n")).toBe(true);
+    expect(SLACK_SESSION_INSTRUCTIONS.startsWith("\n\n")).toBe(true);
+  });
+
+  it("includes Slack mrkdwn formatting rules", () => {
+    expect(SLACK_SESSION_INSTRUCTIONS).toContain("mrkdwn");
+    expect(SLACK_SESSION_INSTRUCTIONS).toContain("*text*");
+    expect(SLACK_SESSION_INSTRUCTIONS).toContain("NOT **double**");
+    expect(SLACK_SESSION_INSTRUCTIONS).toContain("No headings");
+    expect(SLACK_SESSION_INSTRUCTIONS).toContain("No tables");
   });
 });
 
