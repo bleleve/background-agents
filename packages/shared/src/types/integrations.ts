@@ -59,6 +59,12 @@ export interface AwsRoleConfig {
   roleArn: string;
 }
 
+/** Default maximum active agent-spawned child sessions per parent session. */
+export const DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS = 5;
+
+/** Default maximum agent-spawned child sessions per parent session. */
+export const DEFAULT_MAX_TOTAL_CHILD_SESSIONS = 15;
+
 /** Sandbox environment settings. Provider-agnostic: describes what the user wants, not how it's done. */
 export interface SandboxSettings {
   /** Extra ports to expose via tunnels (e.g., dev server ports 3000, 5173). */
@@ -70,6 +76,10 @@ export interface SandboxSettings {
    * Credentials are injected into the sandbox via ~/.aws/credentials.
    */
   awsRoles?: AwsRoleConfig[];
+  /** Maximum active agent-spawned child sessions per parent session. */
+  maxConcurrentChildSessions?: number;
+  /** Maximum total agent-spawned child sessions per parent session. */
+  maxTotalChildSessions?: number;
 }
 
 export type SlackMentionsPolicy = "allow" | "escape" | "strip";

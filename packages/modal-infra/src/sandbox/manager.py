@@ -21,7 +21,12 @@ from urllib.parse import urlparse
 
 import modal
 
-from sandbox_runtime.constants import CODE_SERVER_PORT, TTYD_PROXY_PORT
+from sandbox_runtime.constants import (
+    CODE_SERVER_PORT,
+    EXPECTED_TUNNEL_PORTS_ENV_VAR,
+    TTYD_PROXY_PORT,
+    TUNNEL_ENV_FILE_PATH,
+)
 from sandbox_runtime.log_config import get_logger
 from sandbox_runtime.types import SandboxStatus, SessionConfig
 
@@ -33,6 +38,7 @@ from ..images.base import base_image
 log = get_logger("manager")
 
 DEFAULT_SANDBOX_TIMEOUT_SECONDS = 7200  # 2 hours
+SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS = 300
 MAX_TUNNEL_PORTS = 10
 DOCKER_EXPERIMENTAL_OPTIONS = {"enable_docker": True}
 
@@ -208,6 +214,9 @@ class SandboxManager:
         ttyd_url = resolved.pop(TTYD_PROXY_PORT, None)
         extra_urls = resolved if resolved else None
 
+        if extra_urls:
+            await SandboxManager._write_tunnel_env_file(sandbox, sandbox_id, extra_urls)
+
         return code_server_url, ttyd_url, extra_urls
 
     @staticmethod
@@ -300,6 +309,39 @@ class SandboxManager:
 
         env_vars["SESSION_CONFIG"] = json.dumps(session_config)
         log.info("cloudflare.credentials_injected", server_count=len(cf_servers))
+
+    @staticmethod
+    async def _write_tunnel_env_file(
+        sandbox: modal.Sandbox,
+        sandbox_id: str,
+        tunnel_urls: dict[int, str],
+    ) -> None:
+        """Write tunnel URLs to TUNNEL_ENV_FILE_PATH as a dotenv file.
+
+        Failures are logged but do not block sandbox creation; URLs are also
+        returned to the control plane via the SandboxHandle.
+        """
+        lines = [f"TUNNEL_{port}={url}" for port, url in sorted(tunnel_urls.items())]
+        content = "\n".join(lines) + "\n"
+        try:
+            f = await sandbox.open.aio(TUNNEL_ENV_FILE_PATH, "w")
+            try:
+                await f.write.aio(content)
+            finally:
+                await f.close.aio()
+            log.info(
+                "tunnel.urls_written",
+                sandbox_id=sandbox_id,
+                path=TUNNEL_ENV_FILE_PATH,
+                ports=list(tunnel_urls.keys()),
+            )
+        except Exception as e:
+            log.warn(
+                "tunnel.urls_write_failed",
+                sandbox_id=sandbox_id,
+                path=TUNNEL_ENV_FILE_PATH,
+                exc=e,
+            )
 
     @staticmethod
     def _inject_vcs_env_vars(env_vars: dict[str, str], clone_token: str | None) -> None:
@@ -396,8 +438,12 @@ class SandboxManager:
         else:
             image = base_image
 
-        # Create the sandbox
-        # The entrypoint command is passed as positional args
+        exposed_ports, tunnel_ports = self._collect_exposed_ports(
+            config.code_server_enabled, terminal_enabled, config.settings
+        )
+        if tunnel_ports:
+            env_vars[EXPECTED_TUNNEL_PORTS_ENV_VAR] = ",".join(str(p) for p in tunnel_ports)
+
         create_kwargs: dict = {
             "image": image,
             "app": app,
@@ -408,9 +454,6 @@ class SandboxManager:
             # Enable Docker-in-Sandboxes support per Modal docs.
             "experimental_options": DOCKER_EXPERIMENTAL_OPTIONS,
         }
-        exposed_ports, tunnel_ports = self._collect_exposed_ports(
-            config.code_server_enabled, terminal_enabled, config.settings
-        )
         if exposed_ports:
             create_kwargs["encrypted_ports"] = exposed_ports
 
@@ -592,7 +635,9 @@ class SandboxManager:
 
         # Use Modal's native snapshot_filesystem() API
         # This returns an Image directly (not async)
-        image = handle.modal_sandbox.snapshot_filesystem()
+        image = handle.modal_sandbox.snapshot_filesystem(
+            timeout=SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS
+        )
 
         # The image object_id is the unique identifier for this snapshot
         # Modal automatically stores the image and it persists indefinitely
@@ -724,9 +769,14 @@ class SandboxManager:
         if agent_slack_notify_enabled:
             env_vars["AGENT_SLACK_NOTIFY_ENABLED"] = "true"
 
-        # Create the sandbox from the snapshot image
+        exposed_ports, tunnel_ports = self._collect_exposed_ports(
+            code_server_enabled, terminal_enabled, settings
+        )
+        if tunnel_ports:
+            env_vars[EXPECTED_TUNNEL_PORTS_ENV_VAR] = ",".join(str(p) for p in tunnel_ports)
+
         create_kwargs: dict = {
-            "image": image,  # Use the snapshot image directly
+            "image": image,
             "app": app,
             "secrets": [llm_secrets],
             "timeout": timeout_seconds,
@@ -735,9 +785,6 @@ class SandboxManager:
             # Enable Docker-in-Sandboxes support per Modal docs.
             "experimental_options": DOCKER_EXPERIMENTAL_OPTIONS,
         }
-        exposed_ports, tunnel_ports = self._collect_exposed_ports(
-            code_server_enabled, terminal_enabled, settings
-        )
         if exposed_ports:
             create_kwargs["encrypted_ports"] = exposed_ports
 

@@ -1,5 +1,6 @@
-import type { NextAuthOptions } from "next-auth";
+import type { NextAuthOptions, Profile } from "next-auth";
 import GitHubProvider from "next-auth/providers/github";
+import type { GithubEmail, GithubProfile } from "next-auth/providers/github";
 import { checkAccessAllowed, parseAllowlist, parseBooleanEnv } from "./access-control";
 
 const DEFAULT_GITHUB_ISSUER = "https://github.com/login/oauth";
@@ -10,6 +11,24 @@ function resolveGitHubIssuer(rawIssuer: string | undefined): string {
   // Backward-compatible normalization for prior docs/env values.
   if (issuer === "https://github.com") return DEFAULT_GITHUB_ISSUER;
   return issuer;
+}
+
+export async function getVerifiedPrimaryGitHubEmail(
+  accessToken: string | undefined
+): Promise<string | null> {
+  if (!accessToken) return null;
+
+  const response = await fetch("https://api.github.com/user/emails", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/vnd.github+json",
+    },
+  });
+
+  if (!response.ok) return null;
+
+  const emails = (await response.json()) as GithubEmail[];
+  return emails.find((email) => email.primary && email.verified)?.email ?? null;
 }
 
 // Extend NextAuth types to include GitHub-specific user info
@@ -47,13 +66,21 @@ export const authOptions: NextAuthOptions = {
     maxAge: 60 * 60 * 24 * 90, // 90 days
   },
   providers: [
-    GitHubProvider({
+    GitHubProvider<GithubProfile>({
       clientId: process.env.GITHUB_CLIENT_ID!,
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
       issuer: resolveGitHubIssuer(process.env.GITHUB_ISSUER),
       authorization: {
         params: {
           scope: "read:user user:email repo",
+        },
+      },
+      userinfo: {
+        url: "https://api.github.com/user",
+        async request({ client, tokens }) {
+          const profile = (await client.userinfo(tokens.access_token!)) as GithubProfile;
+          profile.email = await getVerifiedPrimaryGitHubEmail(tokens.access_token);
+          return profile as unknown as Profile;
         },
       },
     }),

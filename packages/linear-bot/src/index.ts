@@ -228,9 +228,18 @@ app.post("/webhook", async (c) => {
         return c.json({ error: "Invalid payload" }, 400);
       }
 
-      // Deduplicate by agentSession.id + action. Linear's webhookId is a
-      // subscription ID (same value for every delivery), not a delivery ID.
-      const dedupKey = `${payload.agentSession.id}:${payload.action}`;
+      const deliveryId = c.req.header("linear-delivery");
+      if (!deliveryId) {
+        log.warn("webhook.invalid_payload", {
+          trace_id: traceId,
+          reason: "missing_linear_delivery_header",
+        });
+        return c.json({ error: "Missing Linear-Delivery header" }, 400);
+      }
+
+      // Linear-Delivery uniquely identifies each delivery. The webhookId field
+      // is the registered webhook configuration ID and is constant across deliveries.
+      const dedupKey = deliveryId;
       const isDuplicate = await isDuplicateEvent(c.env, dedupKey);
       if (isDuplicate) {
         log.info("webhook.deduplicated", { trace_id: traceId, event_key: dedupKey });

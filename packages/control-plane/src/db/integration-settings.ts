@@ -316,6 +316,21 @@ export class IntegrationSettingsStore {
       throw new IntegrationSettingsValidationError("terminalEnabled must be a boolean");
     }
 
+    this.validatePositiveIntegerSetting(
+      settings.maxConcurrentChildSessions,
+      "maxConcurrentChildSessions"
+    );
+    this.validatePositiveIntegerSetting(settings.maxTotalChildSessions, "maxTotalChildSessions");
+    if (
+      settings.maxConcurrentChildSessions !== undefined &&
+      settings.maxTotalChildSessions !== undefined &&
+      settings.maxConcurrentChildSessions > settings.maxTotalChildSessions
+    ) {
+      throw new IntegrationSettingsValidationError(
+        "maxConcurrentChildSessions must be less than or equal to maxTotalChildSessions"
+      );
+    }
+
     let normalized: SandboxSettings = { ...settings };
 
     if (settings.tunnelPorts !== undefined) {
@@ -374,6 +389,13 @@ export class IntegrationSettingsStore {
     }
 
     return normalized;
+  }
+
+  private validatePositiveIntegerSetting(value: unknown, name: string): void {
+    if (value === undefined) return;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+      throw new IntegrationSettingsValidationError(`${name} must be a positive integer`);
+    }
   }
 
   private validateSlackSettings(

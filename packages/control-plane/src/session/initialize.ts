@@ -58,6 +58,8 @@ export interface SessionInitInput {
    * unspecified and planMode is true, the DO falls back to DEFAULT_PLAN_MODEL.
    */
   planModel?: string;
+  automationId?: string | null;
+  automationRunId?: string | null;
 }
 
 /**
@@ -89,6 +91,8 @@ export async function initializeSession(
     parentSessionId: input.parentSessionId,
     spawnSource: input.spawnSource,
     spawnDepth: input.spawnDepth,
+    automationId: input.automationId,
+    automationRunId: input.automationRunId,
     scmLogin: input.scmLogin || null,
     userId: input.platformUserId,
     createdAt: now,

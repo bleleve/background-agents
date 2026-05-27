@@ -7,6 +7,7 @@ This image provides a complete development environment with:
 - Python 3.12 with uv
 - OpenCode CLI pre-installed
 - agent-browser CLI with headless Chrome for browser automation
+- ffmpeg for browser video encoding
 - Sandbox entrypoint and bridge code
 """
 
@@ -48,8 +49,8 @@ KUBECTL_VERSION = "v1.35.0"
 DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
-# v70: pin opencode-ai to 1.14.41 to restore SSE event publishing (1.14.42+ broke it)
-CACHE_BUSTER = "v70-pin-opencode-1-14-41"
+# v71: keep opencode-ai pinned and add ffmpeg for MP4 browser recordings
+CACHE_BUSTER = "v71-pin-opencode-add-ffmpeg"
 
 # Base image with all development tools
 base_image = (
@@ -71,6 +72,7 @@ base_image = (
         "iproute2",  # `ip` for /start-dockerd.sh (default route, addresses)
         "wget",  # Runc install and general tooling
         "iptables",  # iptables-legacy for dockerd in gVisor (used by add_local start script)
+        "ffmpeg",
         # Shared libraries required by headless Chromium
         "libnss3",
         "libnspr4",

@@ -11,6 +11,7 @@ import type {
   ServerMessage,
   SessionArtifact,
   SessionState as SharedSessionState,
+  VideoArtifactMetadata,
 } from "@open-inspect/shared";
 
 // WebSocket URL (should come from env in production)
@@ -19,6 +20,13 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8787";
 // WebSocket close codes
 const WS_CLOSE_AUTH_REQUIRED = 4001;
 const WS_CLOSE_SESSION_EXPIRED = 4002;
+
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_DELAY_MS = 1000;
+const MAX_RECONNECT_DELAY_MS = 30000;
+const PROMPT_SUBSCRIPTION_RETRY_DELAY_MS = 500;
+const HISTORY_PAGE_SIZE = 200;
+const PING_INTERVAL_MS = 30000;
 
 interface Message {
   id: string;
@@ -118,14 +126,28 @@ function toUiSandboxEvent(event: SharedSandboxEvent): SandboxEvent {
 
 type PrState = NonNullable<NonNullable<Artifact["metadata"]>["prState"]>;
 const PR_STATES = new Set<string>(["open", "merged", "closed", "draft"]);
-const SCREENSHOT_MIME_TYPES = new Set<ScreenshotArtifactMetadata["mimeType"]>([
+type MediaMimeType = ScreenshotArtifactMetadata["mimeType"] | VideoArtifactMetadata["mimeType"];
+const MEDIA_MIME_TYPES = new Set<MediaMimeType>([
   "image/png",
   "image/jpeg",
   "image/webp",
+  "video/mp4",
 ]);
 
-function isScreenshotMimeType(value: string): value is ScreenshotArtifactMetadata["mimeType"] {
-  return SCREENSHOT_MIME_TYPES.has(value as ScreenshotArtifactMetadata["mimeType"]);
+function isMediaMimeType(value: string): value is MediaMimeType {
+  return MEDIA_MIME_TYPES.has(value as MediaMimeType);
+}
+
+function narrowDimensions(value: unknown): { width: number; height: number } | undefined {
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof (value as { width?: unknown }).width === "number" &&
+    typeof (value as { height?: unknown }).height === "number"
+  ) {
+    return value as { width: number; height: number };
+  }
+  return undefined;
 }
 
 function toUiArtifact(artifact: SessionArtifact): Artifact {
@@ -150,33 +172,24 @@ function toUiArtifact(artifact: SessionArtifact): Artifact {
           filename: typeof meta.filename === "string" ? meta.filename : undefined,
           objectKey: typeof meta.objectKey === "string" ? meta.objectKey : undefined,
           mimeType:
-            typeof meta.mimeType === "string" && isScreenshotMimeType(meta.mimeType)
+            typeof meta.mimeType === "string" && isMediaMimeType(meta.mimeType)
               ? meta.mimeType
               : undefined,
-          sizeBytes:
-            typeof meta.sizeBytes === "number" &&
-            Number.isFinite(meta.sizeBytes) &&
-            meta.sizeBytes >= 0
-              ? meta.sizeBytes
-              : undefined,
-          viewport:
-            meta.viewport &&
-            typeof meta.viewport === "object" &&
-            typeof (meta.viewport as { width?: unknown }).width === "number" &&
-            Number.isFinite((meta.viewport as { width: number }).width) &&
-            (meta.viewport as { width: number }).width > 0 &&
-            typeof (meta.viewport as { height?: unknown }).height === "number" &&
-            Number.isFinite((meta.viewport as { height: number }).height) &&
-            (meta.viewport as { height: number }).height > 0
-              ? {
-                  width: (meta.viewport as { width: number }).width,
-                  height: (meta.viewport as { height: number }).height,
-                }
-              : undefined,
+          sizeBytes: typeof meta.sizeBytes === "number" ? meta.sizeBytes : undefined,
+          viewport: narrowDimensions(meta.viewport),
           sourceUrl: typeof meta.sourceUrl === "string" ? meta.sourceUrl : undefined,
+          endUrl: typeof meta.endUrl === "string" ? meta.endUrl : undefined,
           fullPage: typeof meta.fullPage === "boolean" ? meta.fullPage : undefined,
           annotated: typeof meta.annotated === "boolean" ? meta.annotated : undefined,
           caption: typeof meta.caption === "string" ? meta.caption : undefined,
+          durationMs: typeof meta.durationMs === "number" ? meta.durationMs : undefined,
+          recordingStartedAt:
+            typeof meta.recordingStartedAt === "number" ? meta.recordingStartedAt : undefined,
+          recordingEndedAt:
+            typeof meta.recordingEndedAt === "number" ? meta.recordingEndedAt : undefined,
+          dimensions: narrowDimensions(meta.dimensions),
+          truncated: typeof meta.truncated === "boolean" ? meta.truncated : undefined,
+          hasAudio: meta.hasAudio === false ? false : undefined,
           previewStatus:
             meta.previewStatus === "active" ||
             meta.previewStatus === "outdated" ||
@@ -645,8 +658,11 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
 
       // Only reconnect if mounted and not a clean close
       if (mountedRef.current && !event.wasClean) {
-        if (reconnectAttempts.current < 5) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
+        if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
+          const delay = Math.min(
+            RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttempts.current),
+            MAX_RECONNECT_DELAY_MS
+          );
           reconnectAttempts.current++;
           console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current})`);
 
@@ -657,7 +673,7 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
           }, delay);
         } else {
           // Exhausted reconnection attempts
-          console.error("WebSocket reconnection failed after 5 attempts");
+          console.error(`WebSocket reconnection failed after ${MAX_RECONNECT_ATTEMPTS} attempts`);
           setConnectionError("Connection lost. Please check your network and try reconnecting.");
         }
       }
@@ -678,7 +694,10 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
       if (!subscribedRef.current) {
         console.error("Not subscribed yet, waiting...");
         // Retry after a short delay
-        setTimeout(() => sendPrompt(content, model, reasoningEffort, planMode), 500);
+        setTimeout(
+          () => sendPrompt(content, model, reasoningEffort, planMode),
+          PROMPT_SUBSCRIPTION_RETRY_DELAY_MS
+        );
         return;
       }
 
@@ -747,7 +766,7 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
       JSON.stringify({
         type: "fetch_history",
         cursor: cursorRef.current,
-        limit: 200,
+        limit: HISTORY_PAGE_SIZE,
       })
     );
   }, [hasMoreHistory, loadingHistory]);
@@ -783,13 +802,13 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
     };
   }, [connect]);
 
-  // Ping every 30 seconds to keep connection alive
+  // Ping periodically to keep connection alive.
   useEffect(() => {
     const pingInterval = setInterval(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: "ping" }));
       }
-    }, 30000);
+    }, PING_INTERVAL_MS);
 
     return () => clearInterval(pingInterval);
   }, []);

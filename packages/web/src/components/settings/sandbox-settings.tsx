@@ -8,7 +8,12 @@ import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import useSWR from "swr";
 import type { SandboxSettings, AwsRoleConfig } from "@open-inspect/shared";
-import { MAX_TUNNEL_PORTS, MAX_AWS_ROLES } from "@open-inspect/shared";
+import {
+  DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS,
+  DEFAULT_MAX_TOTAL_CHILD_SESSIONS,
+  MAX_AWS_ROLES,
+  MAX_TUNNEL_PORTS,
+} from "@open-inspect/shared";
 
 const GLOBAL_SCOPE = "__global__";
 
@@ -43,6 +48,10 @@ interface AwsRoleDraft {
   roleArn: string;
 }
 
+function isPositiveInteger(value: string): boolean {
+  return /^\d+$/.test(value) && Number(value) >= 1;
+}
+
 function SandboxSettingsEditor({
   scope,
   owner,
@@ -53,14 +62,24 @@ function SandboxSettingsEditor({
   name?: string;
 }) {
   const isGlobal = scope === "global";
+  const globalApiUrl = "/api/integration-settings/sandbox";
   const apiUrl = isGlobal
-    ? "/api/integration-settings/sandbox"
+    ? globalApiUrl
     : `/api/integration-settings/sandbox/repos/${owner}/${name}`;
 
   const { data, mutate, isLoading } = useSWR<GlobalSettingsResponse | RepoSettingsResponse>(
     apiUrl,
     fetcher
   );
+  const { data: globalData, isLoading: isLoadingGlobal } = useSWR<GlobalSettingsResponse>(
+    isGlobal ? null : globalApiUrl,
+    fetcher
+  );
+
+  const globalDefaults = isGlobal
+    ? (data as GlobalSettingsResponse | undefined)?.settings?.defaults
+    : globalData?.settings?.defaults;
+  const repoSettings = isGlobal ? undefined : (data as RepoSettingsResponse | undefined)?.settings;
 
   const currentPorts: number[] = isGlobal
     ? ((data as GlobalSettingsResponse)?.settings?.defaults?.tunnelPorts ?? [])
@@ -74,9 +93,23 @@ function SandboxSettingsEditor({
     ? ((data as GlobalSettingsResponse)?.settings?.defaults?.awsRoles ?? [])
     : ((data as RepoSettingsResponse)?.settings?.awsRoles ?? []);
 
+  const currentMaxConcurrentChildSessions: number = isGlobal
+    ? (globalDefaults?.maxConcurrentChildSessions ?? DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS)
+    : (repoSettings?.maxConcurrentChildSessions ??
+      globalDefaults?.maxConcurrentChildSessions ??
+      DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS);
+
+  const currentMaxTotalChildSessions: number = isGlobal
+    ? (globalDefaults?.maxTotalChildSessions ?? DEFAULT_MAX_TOTAL_CHILD_SESSIONS)
+    : (repoSettings?.maxTotalChildSessions ??
+      globalDefaults?.maxTotalChildSessions ??
+      DEFAULT_MAX_TOTAL_CHILD_SESSIONS);
+
   const [portRows, setPortRows] = useState<string[] | null>(null);
   const [terminalEnabled, setTerminalEnabled] = useState<boolean | null>(null);
   const [awsRoleDrafts, setAwsRoleDrafts] = useState<AwsRoleDraft[] | null>(null);
+  const [maxConcurrentChildSessions, setMaxConcurrentChildSessions] = useState<string | null>(null);
+  const [maxTotalChildSessions, setMaxTotalChildSessions] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -86,6 +119,10 @@ function SandboxSettingsEditor({
 
   // Use server state unless user is editing
   const rows = portRows ?? currentPorts.map(String);
+  const resolvedMaxConcurrentChildSessions =
+    maxConcurrentChildSessions ?? String(currentMaxConcurrentChildSessions);
+  const resolvedMaxTotalChildSessions =
+    maxTotalChildSessions ?? String(currentMaxTotalChildSessions);
 
   // Use server state for AWS roles unless user is editing
   const roleDrafts: AwsRoleDraft[] =
@@ -157,6 +194,18 @@ function SandboxSettingsEditor({
       .filter((d) => d.profileName.trim() && d.roleArn.trim())
       .map((d) => ({ profileName: d.profileName.trim(), roleArn: d.roleArn.trim() }));
 
+    if (
+      !isPositiveInteger(resolvedMaxConcurrentChildSessions) ||
+      !isPositiveInteger(resolvedMaxTotalChildSessions)
+    ) {
+      setError("Child session limits must be positive whole numbers.");
+      return;
+    }
+    if (Number(resolvedMaxConcurrentChildSessions) > Number(resolvedMaxTotalChildSessions)) {
+      setError("Max concurrent child sessions cannot exceed max total child sessions.");
+      return;
+    }
+
     setSaving(true);
     try {
       const existingEnabledRepos = isGlobal
@@ -167,6 +216,20 @@ function SandboxSettingsEditor({
         terminalEnabled: resolvedTerminalEnabled,
         awsRoles: validRoles.length > 0 ? validRoles : undefined,
       };
+      if (
+        isGlobal ||
+        maxConcurrentChildSessions !== null ||
+        repoSettings?.maxConcurrentChildSessions !== undefined
+      ) {
+        settingsPayload.maxConcurrentChildSessions = Number(resolvedMaxConcurrentChildSessions);
+      }
+      if (
+        isGlobal ||
+        maxTotalChildSessions !== null ||
+        repoSettings?.maxTotalChildSessions !== undefined
+      ) {
+        settingsPayload.maxTotalChildSessions = Number(resolvedMaxTotalChildSessions);
+      }
       const body = isGlobal
         ? { settings: { defaults: settingsPayload, enabledRepos: existingEnabledRepos } }
         : { settings: settingsPayload };
@@ -186,6 +249,8 @@ function SandboxSettingsEditor({
       setPortRows(null);
       setTerminalEnabled(null);
       setAwsRoleDrafts(null);
+      setMaxConcurrentChildSessions(null);
+      setMaxTotalChildSessions(null);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2000);
     } catch (e) {
@@ -193,7 +258,21 @@ function SandboxSettingsEditor({
     } finally {
       setSaving(false);
     }
-  }, [rows, isGlobal, apiUrl, mutate, data, resolvedTerminalEnabled, roleDrafts]);
+  }, [
+    rows,
+    isGlobal,
+    apiUrl,
+    mutate,
+    data,
+    resolvedTerminalEnabled,
+    resolvedMaxConcurrentChildSessions,
+    resolvedMaxTotalChildSessions,
+    maxConcurrentChildSessions,
+    maxTotalChildSessions,
+    repoSettings?.maxConcurrentChildSessions,
+    repoSettings?.maxTotalChildSessions,
+    roleDrafts,
+  ]);
 
   const hasPortChanges =
     portRows !== null &&
@@ -205,9 +284,20 @@ function SandboxSettingsEditor({
       JSON.stringify(
         currentAwsRoles.map((r) => ({ profileName: r.profileName, roleArn: r.roleArn }))
       );
-  const hasChanges = hasPortChanges || hasTerminalChange || hasAwsRolesChange;
+  const hasConcurrentLimitChange =
+    maxConcurrentChildSessions !== null &&
+    maxConcurrentChildSessions !== String(currentMaxConcurrentChildSessions);
+  const hasTotalLimitChange =
+    maxTotalChildSessions !== null &&
+    maxTotalChildSessions !== String(currentMaxTotalChildSessions);
+  const hasChanges =
+    hasPortChanges ||
+    hasTerminalChange ||
+    hasAwsRolesChange ||
+    hasConcurrentLimitChange ||
+    hasTotalLimitChange;
 
-  if (isLoading) {
+  if (isLoading || isLoadingGlobal) {
     return <p className="text-sm text-muted-foreground">Loading...</p>;
   }
 
@@ -342,6 +432,47 @@ function SandboxSettingsEditor({
               </div>
             ))
           )}
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-foreground mb-1.5">Child Sessions</label>
+        <p className="text-xs text-muted-foreground mb-2">
+          Limit agent-spawned child sessions to prevent runaway sandbox usage.
+        </p>
+        <div className="grid gap-3 max-w-sm sm:grid-cols-2">
+          <div>
+            <label
+              htmlFor="max-concurrent-child-sessions"
+              className="block text-xs font-medium text-muted-foreground mb-1"
+            >
+              Max concurrent child sessions
+            </label>
+            <Input
+              id="max-concurrent-child-sessions"
+              type="number"
+              min="1"
+              inputMode="numeric"
+              value={resolvedMaxConcurrentChildSessions}
+              onChange={(e) => setMaxConcurrentChildSessions(e.target.value)}
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="max-total-child-sessions"
+              className="block text-xs font-medium text-muted-foreground mb-1"
+            >
+              Max total child sessions
+            </label>
+            <Input
+              id="max-total-child-sessions"
+              type="number"
+              min="1"
+              inputMode="numeric"
+              value={resolvedMaxTotalChildSessions}
+              onChange={(e) => setMaxTotalChildSessions(e.target.value)}
+            />
+          </div>
         </div>
       </div>
 

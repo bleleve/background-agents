@@ -660,10 +660,22 @@ describe("IntegrationSettingsStore", () => {
     });
 
     it("round-trips global sandbox settings", async () => {
-      await store.setGlobal("sandbox", { defaults: { tunnelPorts: [3000, 3001] } });
+      await store.setGlobal("sandbox", {
+        defaults: {
+          tunnelPorts: [3000, 3001],
+          maxConcurrentChildSessions: 3,
+          maxTotalChildSessions: 8,
+        },
+      });
 
       const result = await store.getGlobal("sandbox");
-      expect(result).toEqual({ defaults: { tunnelPorts: [3000, 3001] } });
+      expect(result).toEqual({
+        defaults: {
+          tunnelPorts: [3000, 3001],
+          maxConcurrentChildSessions: 3,
+          maxTotalChildSessions: 8,
+        },
+      });
     });
 
     it("round-trips per-repo sandbox settings", async () => {
@@ -687,6 +699,19 @@ describe("IntegrationSettingsStore", () => {
 
       const config = await store.getResolvedConfig("sandbox", "acme/other");
       expect(config.settings.tunnelPorts).toEqual([3000, 3001]);
+    });
+
+    it("getResolvedConfig merges child session limit overrides", async () => {
+      await store.setGlobal("sandbox", {
+        defaults: { maxConcurrentChildSessions: 5, maxTotalChildSessions: 15 },
+      });
+      await store.setRepoSettings("sandbox", "acme/app", { maxConcurrentChildSessions: 2 });
+
+      const config = await store.getResolvedConfig("sandbox", "acme/app");
+      expect(config.settings).toEqual({
+        maxConcurrentChildSessions: 2,
+        maxTotalChildSessions: 15,
+      });
     });
 
     it("rejects non-array tunnelPorts", async () => {
@@ -769,6 +794,24 @@ describe("IntegrationSettingsStore", () => {
       await expect(store.setGlobal("sandbox", { defaults: { awsRoles: tooMany } })).rejects.toThrow(
         IntegrationSettingsValidationError
       );
+    });
+
+    it("rejects invalid child session limits", async () => {
+      await expect(
+        store.setGlobal("sandbox", { defaults: { maxConcurrentChildSessions: 1.5 } })
+      ).rejects.toThrow(IntegrationSettingsValidationError);
+
+      await expect(
+        store.setGlobal("sandbox", { defaults: { maxTotalChildSessions: -1 } })
+      ).rejects.toThrow(IntegrationSettingsValidationError);
+    });
+
+    it("rejects concurrent child session limits greater than total limits", async () => {
+      await expect(
+        store.setGlobal("sandbox", {
+          defaults: { maxConcurrentChildSessions: 6, maxTotalChildSessions: 5 },
+        })
+      ).rejects.toThrow(IntegrationSettingsValidationError);
     });
   });
 

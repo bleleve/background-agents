@@ -2,6 +2,8 @@ import { DEFAULT_APP_NAME } from "@open-inspect/shared";
 
 export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME?.trim() || DEFAULT_APP_NAME;
 
+export const DEFAULT_APP_SHORT_NAME = "Inspect";
+
 /**
  * Short brand label shown in the sidebar header next to the logo.
  * Defaults to "Reef". Set NEXT_PUBLIC_APP_SHORT_NAME to override (defaults
@@ -10,6 +12,10 @@ export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME?.trim() || DEFAULT_APP_
  */
 export const APP_SHORT_NAME =
   process.env.NEXT_PUBLIC_APP_SHORT_NAME?.trim() ||
-  (process.env.NEXT_PUBLIC_APP_NAME?.trim() ? APP_NAME : "Reef");
+  (process.env.NEXT_PUBLIC_APP_NAME?.trim()
+    ? APP_NAME === DEFAULT_APP_NAME
+      ? DEFAULT_APP_SHORT_NAME
+      : APP_NAME
+    : "Reef");
 
 export const APP_ICON_URL = process.env.NEXT_PUBLIC_APP_ICON_URL?.trim() || "";
