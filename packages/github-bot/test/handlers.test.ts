@@ -116,6 +116,22 @@ const pullRequestOpenedPayload: PullRequestOpenedPayload = {
   sender: { login: "alice", id: 1001, avatar_url: "https://avatars.githubusercontent.com/u/1001" },
 };
 
+const pullRequestReadyForReviewPayload: PullRequestOpenedPayload = {
+  action: "ready_for_review",
+  pull_request: {
+    number: 42,
+    title: "Add caching",
+    body: "Adds Redis caching",
+    user: { login: "alice" },
+    head: { ref: "feature/cache", sha: "abc123" },
+    base: { ref: "main" },
+    draft: false,
+    labels: [],
+  },
+  repository: { owner: { login: "acme" }, name: "widgets", private: false },
+  sender: { login: "alice", id: 1001, avatar_url: "https://avatars.githubusercontent.com/u/1001" },
+};
+
 const reviewRequestedPayload: ReviewRequestedPayload = {
   action: "review_requested",
   pull_request: {
@@ -345,6 +361,144 @@ describe("handlePullRequestOpened", () => {
     const cpFetch = getControlPlaneFetch(env);
     const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
     expect(sessionBody.reasoningEffort).toBe("high");
+  });
+});
+
+describe("handlePullRequestOpened (ready_for_review action)", () => {
+  it("creates session and sends code review prompt when draft PR becomes ready for review", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handlePullRequestOpened(
+      env,
+      log,
+      pullRequestReadyForReviewPayload,
+      "trace-rfr-1"
+    );
+
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "auto_review",
+    });
+    expect(generateInstallationToken).toHaveBeenCalled();
+    expect(postReaction).toHaveBeenCalledWith(
+      "test-installation-token",
+      "https://api.github.com/repos/acme/widgets/issues/42/reactions",
+      "eyes",
+      "Open-Inspect"
+    );
+
+    const cpFetch = getControlPlaneFetch(env);
+    expect(cpFetch).toHaveBeenCalledTimes(2);
+
+    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(sessionBody.repoOwner).toBe("acme");
+    expect(sessionBody.repoName).toBe("widgets");
+    expect(sessionBody.title).toContain("Review PR #42");
+    expect(sessionBody.scmLogin).toBe("alice");
+    expect(sessionBody.scmUserId).toBe("1001");
+    expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1001");
+
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.source).toBe("github");
+    expect(promptBody.authorId).toBe("github:1001");
+    expect(promptBody.content).toContain("Pull Request #42");
+
+    expect(log.info).toHaveBeenCalledWith(
+      "session.created",
+      expect.objectContaining({ action: "auto_review" })
+    );
+  });
+
+  it("returns early if PR is from the bot (loop prevention)", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: PullRequestOpenedPayload = {
+      ...pullRequestReadyForReviewPayload,
+      pull_request: {
+        ...pullRequestReadyForReviewPayload.pull_request,
+        user: { login: "test-bot[bot]" },
+      },
+    };
+
+    const result = await handlePullRequestOpened(env, log, payload, "trace-rfr-self");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "self_pr" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("returns early when autoReviewOnOpen is false", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      autoReviewOnOpen: false,
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handlePullRequestOpened(
+      env,
+      log,
+      pullRequestReadyForReviewPayload,
+      "trace-rfr-disabled"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "auto_review_disabled" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("returns early when repo not in enabledRepos", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      enabledRepos: ["other/repo"],
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handlePullRequestOpened(
+      env,
+      log,
+      pullRequestReadyForReviewPayload,
+      "trace-rfr-repo"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "repo_not_enabled" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("returns early when sender does not have write permission", async () => {
+    vi.mocked(checkSenderPermission).mockResolvedValue({ hasPermission: false });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handlePullRequestOpened(
+      env,
+      log,
+      pullRequestReadyForReviewPayload,
+      "trace-rfr-perm"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "sender_insufficient_permission" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("uses config.model for session creation", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      model: "anthropic/claude-opus-4-6",
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    await handlePullRequestOpened(env, log, pullRequestReadyForReviewPayload, "trace-rfr-model");
+
+    const cpFetch = getControlPlaneFetch(env);
+    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(sessionBody.model).toBe("anthropic/claude-opus-4-6");
   });
 });
 

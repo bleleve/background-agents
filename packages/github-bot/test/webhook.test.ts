@@ -229,6 +229,45 @@ describe("POST /webhooks/github", () => {
     await flushWaitUntil(ctx);
   });
 
+  it("dispatches ready_for_review pull_request events", async () => {
+    const body = JSON.stringify({
+      action: "ready_for_review",
+      pull_request: {
+        number: 5,
+        title: "Draft done",
+        body: null,
+        user: { login: "alice" },
+        head: { ref: "feature/x", sha: "aaa" },
+        base: { ref: "main" },
+        draft: false,
+        labels: [],
+      },
+      repository: { owner: { login: "test" }, name: "repo", private: false },
+      sender: { login: "alice", id: 1001, avatar_url: "" },
+    });
+    const signature = await sign(SECRET, body);
+    const ctx = makeCtx();
+
+    const res = await app.fetch(
+      new Request("http://localhost/webhooks/github", {
+        method: "POST",
+        body,
+        headers: {
+          "X-Hub-Signature-256": signature,
+          "X-GitHub-Event": "pull_request",
+          "X-GitHub-Delivery": "delivery-rfr",
+        },
+      }),
+      makeEnv(),
+      ctx
+    );
+
+    expect(res.status).toBe(200);
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
+    // Flush — the handler will fail gracefully (no control plane mock) but must not throw at dispatch
+    await flushWaitUntil(ctx);
+  });
+
   it("returns 200 for handled event with non-matching action", async () => {
     const body = JSON.stringify({
       action: "closed",

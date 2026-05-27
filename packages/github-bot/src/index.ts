@@ -235,7 +235,7 @@ function dispatchHandler(
 ): Promise<HandlerResult> {
   switch (event) {
     case "pull_request":
-      if (p.action === "opened") {
+      if (p.action === "opened" || p.action === "ready_for_review") {
         return handlePullRequestOpened(env, log, payload as PullRequestOpenedPayload, traceId);
       }
       if (p.action === "review_requested") {

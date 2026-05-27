@@ -57,7 +57,7 @@ export interface Env {
  */
 
 export interface PullRequestOpenedPayload {
-  action: "opened";
+  action: "opened" | "ready_for_review";
   pull_request: {
     number: number;
     title: string;
