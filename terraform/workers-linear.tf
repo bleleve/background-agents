@@ -18,7 +18,7 @@ resource "null_resource" "linear_bot_build" {
 
 module "linear_bot_worker" {
   count  = var.enable_linear_bot ? 1 : 0
-  source = "../../modules/cloudflare-worker"
+  source = "./modules/cloudflare-worker"
 
   account_id  = var.cloudflare_account_id
   worker_name = "open-inspect-linear-bot-${local.name_suffix}"

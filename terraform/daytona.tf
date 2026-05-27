@@ -25,7 +25,7 @@ data "external" "daytona_source_hash" {
 
 module "daytona_infra" {
   count  = local.use_daytona_backend ? 1 : 0
-  source = "../../modules/daytona-infra"
+  source = "./modules/daytona-infra"
 
   api_key       = var.daytona_api_key
   api_url       = var.daytona_api_url

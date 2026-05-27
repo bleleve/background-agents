@@ -85,9 +85,9 @@ cd packages/modal-infra && uv sync --frozen && cd -
 
 ---
 
-> **Tip**: Before proceeding, copy `terraform/environments/production/terraform.tfvars.example` to
-> `terraform.tfvars` and keep it open. As you collect credentials in the following steps, paste them
-> directly into this file.
+> **Tip**: Before proceeding, copy `terraform/terraform.tfvars.example` to
+> `terraform/terraform.tfvars` and keep it open. As you collect credentials in the following steps,
+> paste them directly into this file.
 
 ---
 
@@ -316,7 +316,7 @@ Save these values somewhere secure—you'll need them in the next step.
 ## Step 6: Configure Terraform
 
 ```bash
-cd terraform/environments/production
+cd terraform
 
 # Copy the example file and fill in values
 cp terraform.tfvars.example terraform.tfvars
@@ -439,13 +439,14 @@ npm run build -w @open-inspect/control-plane -w @open-inspect/slack-bot -w @open
 Then run:
 
 ```bash
-cd terraform/environments/production
+cd terraform
 
 # Initialize Terraform with R2 backend credentials
 terraform init \
   -backend-config="access_key=YOUR_R2_ACCESS_KEY_ID" \
   -backend-config="secret_key=YOUR_R2_SECRET_ACCESS_KEY" \
-  -backend-config='endpoints={s3="https://YOUR_CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com"}'
+  -backend-config='endpoints={s3="https://YOUR_CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com"}' \
+  -backend-config="key=production/terraform.tfstate"
 
 # Deploy (phase 1 - creates workers without bindings)
 terraform apply
@@ -659,8 +660,8 @@ See [PLAN_MODE.md](PLAN_MODE.md) for the full plan-mode workflow these defaults 
 
 Enable automatic deployments by configuring GitHub Environments and secrets:
 
-- **`main` branch** → deploys **staging** (`terraform/environments/staging`)
-- **`stable` branch** → deploys **production** (`terraform/environments/production`)
+- **`main` branch** → deploys **staging** (state key: `staging/terraform.tfstate`)
+- **`stable` branch** → deploys **production** (state key: `production/terraform.tfstate`)
 
 Create `staging` and `production` environments under Settings → Environments. Add secrets to each
 environment (or use repository-level secrets shared by both). Pull requests to `main` run
@@ -752,7 +753,7 @@ git pull upstream main
 npm run build -w @open-inspect/shared
 
 # Re-run Terraform (it only changes what's needed)
-cd terraform/environments/production
+cd terraform
 terraform apply
 ```
 

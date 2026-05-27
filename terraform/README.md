@@ -111,7 +111,7 @@ Create at [Slack API](https://api.slack.com/apps) and note:
 ### 1. Configure Variables
 
 ```bash
-cd terraform/environments/production
+cd terraform
 
 # Copy example file and fill in values
 cp terraform.tfvars.example terraform.tfvars
@@ -123,11 +123,12 @@ vim terraform.tfvars
 ### 2. Initialize Terraform
 
 ```bash
-# Pass backend credentials directly:
+# Pass backend credentials directly (substitute staging or production for ENV):
 terraform init \
   -backend-config="access_key=YOUR_R2_ACCESS_KEY_ID" \
   -backend-config="secret_key=YOUR_R2_SECRET_ACCESS_KEY" \
-  -backend-config='endpoints={s3="https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com"}'
+  -backend-config='endpoints={s3="https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com"}' \
+  -backend-config="key=ENV/terraform.tfstate"
 
 # Or create a backend.tfvars file (gitignored) and pass it:
 terraform init -backend-config=backend.tfvars

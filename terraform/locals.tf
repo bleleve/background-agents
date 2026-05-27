@@ -8,9 +8,14 @@ locals {
   control_plane_url  = "https://${local.control_plane_host}"
   ws_url             = "wss://${local.control_plane_host}"
 
+  cloudflare_web_app_custom_url          = trimsuffix(trimspace(var.cloudflare_web_app_url), "/")
+  has_cloudflare_web_app_custom_domain   = local.cloudflare_web_app_custom_url != ""
+  cloudflare_web_app_custom_host         = trimsuffix(trimprefix(local.cloudflare_web_app_custom_url, "https://"), "/")
+  cloudflare_web_app_default_workers_url = "https://open-inspect-web-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev"
+
   # Web app URL depends on deployment platform
   web_app_url = var.web_platform == "cloudflare" ? (
-    "https://coding-agent-staging.internal.fountain.com"
+    local.has_cloudflare_web_app_custom_domain ? local.cloudflare_web_app_custom_url : local.cloudflare_web_app_default_workers_url
     ) : (
     "https://open-inspect-${local.name_suffix}.vercel.app"
   )

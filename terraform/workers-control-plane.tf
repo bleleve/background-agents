@@ -17,7 +17,7 @@ resource "null_resource" "control_plane_build" {
 }
 
 module "control_plane_worker" {
-  source = "../../modules/cloudflare-worker"
+  source = "./modules/cloudflare-worker"
 
   account_id  = var.cloudflare_account_id
   worker_name = "open-inspect-control-plane-${local.name_suffix}"
@@ -67,12 +67,13 @@ module "control_plane_worker" {
       { name = "WEB_APP_URL", value = local.web_app_url },
       { name = "WORKER_URL", value = local.control_plane_url },
       { name = "DEPLOYMENT_NAME", value = var.deployment_name },
+      { name = "APP_NAME", value = var.app_name },
       { name = "SANDBOX_PROVIDER", value = var.sandbox_provider },
       # Surfaced to the web UI via GET /model-preferences so the dropdown's
       # initial selection matches this deployment instead of the shared
       # library constant. Keep aligned with the bot workers in this env.
-      { name = "DEFAULT_MODEL", value = "claude-sonnet-4-6" },
-      { name = "DEFAULT_PLAN_MODEL", value = "claude-opus-4-6" },
+      { name = "DEFAULT_MODEL", value = "claude-haiku-4-5" },
+      { name = "DEFAULT_PLAN_MODEL", value = "claude-haiku-4-5" },
     ],
     local.use_modal_backend ? [{ name = "MODAL_WORKSPACE", value = var.modal_workspace }] : [],
     local.use_daytona_backend ? [
@@ -102,6 +103,12 @@ module "control_plane_worker" {
     ] : [],
     local.use_daytona_backend ? [
       { name = "DAYTONA_API_KEY", value = var.daytona_api_key },
+    ] : [],
+    # Slack bot token enables the agent-initiated `slack-notify` endpoint.
+    # Shares the variable with the slack-bot worker; bound here so the same
+    # token can authorize chat.postMessage from agent tool calls.
+    length(var.slack_bot_token) > 0 ? [
+      { name = "SLACK_BOT_TOKEN", value = var.slack_bot_token },
     ] : []
   )
 

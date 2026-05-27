@@ -188,7 +188,12 @@ sandbox_provider = "modal"
 # Platform for the web app deployment
 # - "vercel": deploy the Next.js app to Vercel (requires vercel_api_token + vercel_team_id)
 # - "cloudflare": deploy the web app to Cloudflare Workers via OpenNext (no Vercel credentials needed)
-web_platform = "vercel"
+web_platform = "cloudflare"
+
+# Optional custom web app URL when web_platform = "cloudflare".
+# Leave empty to use https://open-inspect-web-{deployment_name}.{cloudflare_worker_subdomain}.workers.dev.
+# e.g. "https://myapp.example.com"
+cloudflare_web_app_url = ""
 
 # Unique deployment name (used in resource names and URLs)
 # IMPORTANT: This must be globally unique for Vercel URLs.
@@ -198,7 +203,7 @@ web_platform = "vercel"
 deployment_name = ""
 
 # Path to project root (relative to this directory)
-project_root = "../../../"
+project_root = "../"
 
 # Display name shown in the web UI, bot messages (Slack, Linear), and PR body footers.
 # Also used as the outbound HTTP User-Agent header. Defaults to "Open-Inspect".

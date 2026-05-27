@@ -65,11 +65,13 @@ resource "local_file" "web_app_wrangler_production" {
     main = ".open-next/worker.js"
     compatibility_date = "2025-08-15"
     compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
-    workers_dev = false
+    workers_dev = ${local.has_cloudflare_web_app_custom_domain ? "false" : "true"}
 
+    %{if local.has_cloudflare_web_app_custom_domain}
     [[routes]]
-    pattern = "reef.internal.fountain.com"
+    pattern = "${local.cloudflare_web_app_custom_host}"
     custom_domain = true
+    %{endif}
 
     [observability]
     enabled = true

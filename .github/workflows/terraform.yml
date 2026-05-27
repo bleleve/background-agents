@@ -76,7 +76,7 @@ jobs:
           fi
 
           echo "deploy_environment=${DEPLOY_ENV}" >> "$GITHUB_OUTPUT"
-          echo "tf_working_dir=terraform/environments/${DEPLOY_ENV}" >> "$GITHUB_OUTPUT"
+          echo "tf_working_dir=terraform" >> "$GITHUB_OUTPUT"
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             SHOULD_APPLY="false"
@@ -218,7 +218,8 @@ jobs:
           terraform init \
             -backend-config="access_key=${{ secrets.R2_ACCESS_KEY_ID }}" \
             -backend-config="secret_key=${{ secrets.R2_SECRET_ACCESS_KEY }}" \
-            -backend-config='endpoints={s3="https://${{ vars.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"}'
+            -backend-config='endpoints={s3="https://${{ vars.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"}' \
+            -backend-config="key=${{ needs.resolve-target.outputs.deploy_environment }}/terraform.tfstate"
         working-directory: ${{ needs.resolve-target.outputs.tf_working_dir }}
 
       - name: Terraform Plan
@@ -267,6 +268,7 @@ jobs:
           TF_VAR_linear_client_secret: ${{ secrets.LINEAR_CLIENT_SECRET }}
           TF_VAR_linear_webhook_secret: ${{ secrets.LINEAR_WEBHOOK_SECRET }}
           TF_VAR_web_platform: "${{ vars.WEB_PLATFORM || 'cloudflare' }}"
+          TF_VAR_cloudflare_web_app_url: ${{ vars.CLOUDFLARE_WEB_APP_URL }}
           TF_VAR_enable_durable_object_bindings: "${{ vars.ENABLE_DURABLE_OBJECT_BINDINGS || 'true' }}"
           TF_VAR_enable_service_bindings: "${{ vars.ENABLE_SERVICE_BINDINGS || 'true' }}"
           TF_VAR_sandbox_provider: "${{ vars.SANDBOX_PROVIDER || 'modal' }}"
@@ -364,7 +366,8 @@ jobs:
           terraform init \
             -backend-config="access_key=${{ secrets.R2_ACCESS_KEY_ID }}" \
             -backend-config="secret_key=${{ secrets.R2_SECRET_ACCESS_KEY }}" \
-            -backend-config='endpoints={s3="https://${{ vars.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"}'
+            -backend-config='endpoints={s3="https://${{ vars.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"}' \
+            -backend-config="key=${{ needs.resolve-target.outputs.deploy_environment }}/terraform.tfstate"
         working-directory: ${{ needs.resolve-target.outputs.tf_working_dir }}
 
       - name: Terraform Apply
@@ -407,6 +410,7 @@ jobs:
           TF_VAR_linear_client_secret: ${{ secrets.LINEAR_CLIENT_SECRET }}
           TF_VAR_linear_webhook_secret: ${{ secrets.LINEAR_WEBHOOK_SECRET }}
           TF_VAR_web_platform: "${{ vars.WEB_PLATFORM || 'cloudflare' }}"
+          TF_VAR_cloudflare_web_app_url: ${{ vars.CLOUDFLARE_WEB_APP_URL }}
           TF_VAR_enable_durable_object_bindings: "${{ vars.ENABLE_DURABLE_OBJECT_BINDINGS || 'true' }}"
           TF_VAR_enable_service_bindings: "${{ vars.ENABLE_SERVICE_BINDINGS || 'true' }}"
           TF_VAR_sandbox_provider: "${{ vars.SANDBOX_PROVIDER || 'modal' }}"

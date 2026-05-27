@@ -22,7 +22,7 @@ data "external" "modal_source_hash" {
 
 module "modal_app" {
   count  = local.use_modal_backend ? 1 : 0
-  source = "../../modules/modal-app"
+  source = "./modules/modal-app"
 
   modal_token_id     = var.modal_token_id
   modal_token_secret = var.modal_token_secret

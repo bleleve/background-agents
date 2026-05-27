@@ -255,9 +255,8 @@ Optional variables:
 - `GITLAB_NAMESPACE` - GitLab group namespace to scope repository listing (optional). When set,
   `GET /repos` lists projects within the group instead of all projects the token has access to.
 
-See
-[terraform/environments/production/terraform.tfvars.example](../../terraform/environments/production/terraform.tfvars.example)
-for the complete list.
+See [terraform/terraform.tfvars.example](../../terraform/terraform.tfvars.example) for the complete
+list.
 
 ### Deployment Recommendations
 

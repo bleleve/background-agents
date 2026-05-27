@@ -18,7 +18,7 @@ resource "null_resource" "github_bot_build" {
 
 module "github_bot_worker" {
   count  = var.enable_github_bot ? 1 : 0
-  source = "../../modules/cloudflare-worker"
+  source = "./modules/cloudflare-worker"
 
   account_id  = var.cloudflare_account_id
   worker_name = "open-inspect-github-bot-${local.name_suffix}"
@@ -42,9 +42,11 @@ module "github_bot_worker" {
 
   plain_text_bindings = [
     { name = "DEPLOYMENT_NAME", value = var.deployment_name },
-    { name = "DEFAULT_MODEL", value = "anthropic/claude-sonnet-4-6" },
-    { name = "DEFAULT_PLAN_MODEL", value = "anthropic/claude-opus-4-6" },
+    { name = "APP_NAME", value = var.app_name },
+    { name = "DEFAULT_MODEL", value = "anthropic/claude-haiku-4-5" },
+    { name = "DEFAULT_PLAN_MODEL", value = "anthropic/claude-haiku-4-5" },
     { name = "GITHUB_BOT_USERNAME", value = var.github_bot_username },
+    { name = "REEF_ALIAS_ENABLED", value = "true" },
   ]
 
   secrets = [

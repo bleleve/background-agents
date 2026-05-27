@@ -20,7 +20,7 @@ resource "null_resource" "slack_bot_build" {
 
 module "slack_bot_worker" {
   count  = var.enable_slack_bot ? 1 : 0
-  source = "../../modules/cloudflare-worker"
+  source = "./modules/cloudflare-worker"
 
   account_id  = var.cloudflare_account_id
   worker_name = "open-inspect-slack-bot-${local.name_suffix}"
@@ -46,6 +46,7 @@ module "slack_bot_worker" {
     { name = "CONTROL_PLANE_URL", value = local.control_plane_url },
     { name = "WEB_APP_URL", value = local.web_app_url },
     { name = "DEPLOYMENT_NAME", value = var.deployment_name },
+    { name = "APP_NAME", value = var.app_name },
     { name = "DEFAULT_MODEL", value = "claude-sonnet-4-6" },
     { name = "DEFAULT_PLAN_MODEL", value = "claude-opus-4-6" },
     { name = "CLASSIFICATION_MODEL", value = "claude-haiku-4-5" },

@@ -167,18 +167,19 @@ echo "github_webhook_secret: $(openssl rand -hex 32)"  # Only if GitHub bot enab
 
 ## Phase 7: Terraform Configuration
 
-Create `terraform/environments/production/backend.tfvars`:
+Create `terraform/backend.tfvars`:
 
 ```hcl
 access_key = "{r2_access_key}"
 secret_key = "{r2_secret_key}"
 bucket     = "open-inspect-{name}-tf-state"
+key        = "production/terraform.tfstate"
 endpoints = {
   s3 = "https://{cloudflare_account_id}.r2.cloudflarestorage.com"
 }
 ```
 
-Create `terraform/environments/production/terraform.tfvars` with all collected values. Set:
+Create `terraform/terraform.tfvars` with all collected values. Set:
 
 ```hcl
 enable_durable_object_bindings = false
@@ -204,7 +205,7 @@ npm run build -w @open-inspect/control-plane -w @open-inspect/slack-bot -w @open
 **Phase 1** (bindings disabled):
 
 ```bash
-cd terraform/environments/production
+cd terraform
 terraform init -backend-config=backend.tfvars
 terraform apply
 ```

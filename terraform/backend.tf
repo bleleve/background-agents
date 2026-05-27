@@ -8,19 +8,23 @@
 #    terraform init \
 #      -backend-config="access_key=<R2_ACCESS_KEY_ID>" \
 #      -backend-config="secret_key=<R2_SECRET_ACCESS_KEY>" \
-#      -backend-config="endpoints={s3=\"https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com\"}"
+#      -backend-config="endpoints={s3=\"https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com\"}" \
+#      -backend-config="key=staging/terraform.tfstate"
 #
 # Or create a backend.tfvars file (gitignored) with:
 #   access_key = "your-r2-access-key-id"
 #   secret_key = "your-r2-secret-access-key"
 #   endpoints  = { s3 = "https://<account-id>.r2.cloudflarestorage.com" }
+#   key        = "staging/terraform.tfstate"
 #
 # Then run: terraform init -backend-config=backend.tfvars
 
 terraform {
   backend "s3" {
     bucket = "fountain-reef-terraform-state"
-    key    = "production/terraform.tfstate"
+    # key is passed via -backend-config at init time, e.g.:
+    #   -backend-config="key=staging/terraform.tfstate"
+    #   -backend-config="key=production/terraform.tfstate"
     region = "auto"
 
     # Required for R2 compatibility

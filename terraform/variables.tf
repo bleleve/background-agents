@@ -388,7 +388,18 @@ variable "enable_service_bindings" {
 variable "project_root" {
   description = "Root path to the project repository"
   type        = string
-  default     = "../../../"
+  default     = "../"
+}
+
+variable "cloudflare_web_app_url" {
+  description = "Optional custom web app URL when web_platform = 'cloudflare' (e.g. 'https://myapp.example.com'). Leave empty to use the workers.dev URL."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = trimspace(var.cloudflare_web_app_url) == "" || can(regex("^https://[^/]+/?$", trimspace(var.cloudflare_web_app_url)))
+    error_message = "cloudflare_web_app_url must be empty or an HTTPS origin without a path, e.g. https://myapp.example.com."
+  }
 }
 
 # =============================================================================
