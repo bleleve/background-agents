@@ -3,6 +3,7 @@
  */
 
 import { MODEL_OPTIONS, normalizeModelId } from "@open-inspect/shared";
+import type { TriggerCondition, JsonPathFilter } from "@open-inspect/shared";
 
 // Build a lookup map once at module level
 const MODEL_DISPLAY_NAMES = new Map<string, string>(
@@ -84,6 +85,32 @@ export function formatFilePath(
     display: basename.slice(0, maxLength - 3) + "...",
     full: filePath,
   };
+}
+
+/**
+ * Format a single JsonPathFilter as a human-readable string.
+ * e.g., { path: "$.status", comparison: "eq", value: "open" } → '$.status eq "open"'
+ */
+export function formatJsonPathFilter(filter: JsonPathFilter): string {
+  if (filter.comparison === "exists") {
+    return `${filter.path} exists`;
+  }
+  const val = filter.value !== undefined ? JSON.stringify(filter.value) : "";
+  return `${filter.path} ${filter.comparison} ${val}`.trim();
+}
+
+/**
+ * Format the value part of a TriggerCondition for human-readable display.
+ * Handles jsonpath (JsonPathFilter[]), string arrays, and scalar values.
+ */
+export function formatConditionValue(condition: TriggerCondition): string {
+  if (condition.type === "jsonpath") {
+    return condition.value.map(formatJsonPathFilter).join(", ");
+  }
+  if (Array.isArray(condition.value)) {
+    return condition.value.join(", ");
+  }
+  return String(condition.value);
 }
 
 /**

@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { SidebarIcon, BackIcon, PencilIcon } from "@/components/ui/icons";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
-import { formatModelNameLower } from "@/lib/format";
+import { formatModelNameLower, formatConditionValue } from "@/lib/format";
 
 const RUNS_PAGE_SIZE = 20;
 
@@ -254,8 +254,7 @@ export default function AutomationDetailPage({ params }: { params: Promise<{ id:
                           key={i}
                           className="inline-block mr-2 mb-1 px-2 py-0.5 bg-muted rounded text-xs"
                         >
-                          {c.type}: {c.operator}{" "}
-                          {Array.isArray(c.value) ? c.value.join(", ") : String(c.value)}
+                          {c.type}: {c.operator} {formatConditionValue(c)}
                         </span>
                       ))}
                     </dd>
