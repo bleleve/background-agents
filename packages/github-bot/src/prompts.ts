@@ -134,6 +134,9 @@ export function buildCodeReviewPrompt(params: {
     content: body ?? "_No description provided._",
   });
 
+  const noFindingsInstruction = `gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" \\
+     -f body="I reviewed this PR and found no findings."`;
+
   const reviewInstruction = autoApproveOnOpen
     ? `4. When your review is complete, submit it via:
 
@@ -176,7 +179,9 @@ ${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
-7. If you do not find any actionable file-specific feedback, do not submit a review or a general PR comment.
+7. If you do not find any actionable file-specific feedback, post a comment on the PR to indicate no findings were found:
+
+   ${noFindingsInstruction}
 ${buildCustomInstructionsSection(codeReviewInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
 }

@@ -139,6 +139,22 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).not.toContain("APPROVE|REQUEST_CHANGES");
   });
 
+  it("instructs agent to post a no-findings comment when no actionable feedback is found", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    // Old silent behavior must be gone
+    expect(prompt).not.toContain("do not submit a review or a general PR comment");
+    // New behavior: post an issue comment indicating no findings
+    expect(prompt).toContain("repos/acme/widgets/issues/42/comments");
+    expect(prompt).toContain("no findings");
+  });
+
+  it("no-findings comment instruction is present when autoApproveOnOpen is true", () => {
+    const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
+    expect(prompt).not.toContain("do not submit a review or a general PR comment");
+    expect(prompt).toContain("repos/acme/widgets/issues/42/comments");
+    expect(prompt).toContain("no findings");
+  });
+
   it("includes APPROVE/REQUEST_CHANGES/COMMENT submit instruction when autoApproveOnOpen is true", () => {
     const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
     expect(prompt).toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
