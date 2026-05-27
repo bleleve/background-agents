@@ -18,12 +18,15 @@ import {
   type TriggerConfig,
 } from "@open-inspect/shared";
 import { AutomationStore, toAutomationRun, type AutomationRow } from "../db/automation-store";
+import { IntegrationSettingsStore } from "../db/integration-settings";
+import { SessionIndexStore } from "../db/session-index";
 import { UserStore } from "../db/user-store";
 import { createRequestMetrics } from "../db/instrumented-d1";
 import { generateId } from "../auth/crypto";
 import { createLogger, parseLogLevel } from "../logger";
 import type { Logger } from "../logger";
 import type { Env } from "../types";
+import type { SandboxSettings } from "@open-inspect/shared";
 import { initializeSession } from "../session/initialize";
 import {
   resolveCodeServerEnabled,
@@ -41,6 +44,27 @@ const DEFAULT_EXECUTION_TIMEOUT_MS = 90 * 60 * 1000;
 
 /** Consecutive failure threshold for auto-pause. */
 const AUTO_PAUSE_THRESHOLD = 3;
+
+/**
+ * Resolve sandbox settings (e.g. awsRoles) for a repo from integration_settings.
+ * Mirrors the same helper in router.ts so automation sessions get identical
+ * sandbox configuration to user-created sessions for the same repo.
+ */
+async function resolveSandboxSettings(
+  db: D1Database,
+  repoOwner: string,
+  repoName: string
+): Promise<SandboxSettings> {
+  const repo = `${repoOwner}/${repoName}`;
+  try {
+    const store = new IntegrationSettingsStore(db);
+    const { enabledRepos, settings } = await store.getResolvedConfig("sandbox", repo);
+    if (enabledRepos !== null && !enabledRepos.includes(repo)) return {};
+    return settings as SandboxSettings;
+  } catch {
+    return {};
+  }
+}
 
 export class SchedulerDO extends DurableObject<Env> {
   private readonly log: Logger;
@@ -547,6 +571,40 @@ export class SchedulerDO extends DurableObject<Env> {
     runId: string
   ): Promise<{ sessionId: string }> {
     const sessionId = generateId();
+    const doId = this.env.SESSION.idFromName(sessionId);
+    const stub = this.env.SESSION.get(doId);
+
+    // Resolve sandbox settings (e.g. awsRoles for kubectl/kubeconfig) for this
+    // repo so automation sessions receive the same sandbox configuration as
+    // user-created sessions for the same repo.
+    const sandboxSettings = await resolveSandboxSettings(
+      this.env.DB,
+      automation.repo_owner,
+      automation.repo_name
+    );
+
+    // Initialize the session DO
+    const initResponse = await stub.fetch("http://internal/internal/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionName: sessionId,
+        repoOwner: automation.repo_owner,
+        repoName: automation.repo_name,
+        repoId: automation.repo_id,
+        defaultBranch: automation.base_branch,
+        model: automation.model,
+        reasoningEffort: automation.reasoning_effort,
+        title: `[Auto] ${automation.name}`,
+        userId: automation.created_by,
+        spawnSource: "automation",
+        sandboxSettings,
+      }),
+    });
+
+    if (!initResponse.ok) {
+      throw new Error(`Session init failed with status ${initResponse.status}`);
+    }
 
     // Resolve the canonical user_id for the session index.
     // New automations (post-Phase 5) have user_id populated at creation time, so this

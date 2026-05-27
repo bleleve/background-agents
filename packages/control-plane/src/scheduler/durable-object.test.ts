@@ -72,6 +72,15 @@ vi.mock("../auth/crypto", () => ({
   generateId: vi.fn(() => `id-${Math.random().toString(36).slice(2, 8)}`),
 }));
 
+// Mock IntegrationSettingsStore so we can simulate sandbox settings (e.g. awsRoles)
+// being returned for a repo.
+let mockGetResolvedConfig = vi.fn().mockResolvedValue({ enabledRepos: null, settings: {} });
+vi.mock("../db/integration-settings", () => ({
+  IntegrationSettingsStore: vi.fn().mockImplementation(() => ({
+    getResolvedConfig: mockGetResolvedConfig,
+  })),
+}));
+
 function createMockSessionStub(): DurableObjectStub {
   return {
     fetch: vi.fn(async (input: RequestInfo, _init?: RequestInit) => {
@@ -197,6 +206,7 @@ describe("SchedulerDO", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockStore = createMockStore();
+    mockGetResolvedConfig = vi.fn().mockResolvedValue({ enabledRepos: null, settings: {} });
   });
 
   describe("/internal/health", () => {
@@ -449,6 +459,93 @@ describe("SchedulerDO", () => {
         failure_reason: "execution_timeout",
         completed_at: expect.any(Number),
       });
+    });
+  });
+
+  describe("sandboxSettings forwarding in automation sessions", () => {
+    it("passes resolved sandboxSettings into the DO init body", async () => {
+      const awsRoles = [
+        { profileName: "default", roleArn: "arn:aws:iam::123456789012:role/SandboxRole" },
+      ];
+      mockGetResolvedConfig.mockResolvedValue({ enabledRepos: null, settings: { awsRoles } });
+      mockStore.getOverdueAutomations.mockResolvedValue([sampleAutomation]);
+
+      const env = createEnv();
+      const stub = env.SESSION.get(env.SESSION.idFromName("any"));
+      const fetchMock = vi.mocked(stub.fetch);
+
+      const scheduler = createSchedulerDO(env);
+      const res = await scheduler.fetch(
+        new Request("http://internal/internal/tick", { method: "POST" })
+      );
+
+      expect(res.status).toBe(200);
+
+      const initCall = fetchMock.mock.calls.find((call) => {
+        const input = call[0];
+        const url =
+          typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+        return new URL(url).pathname === "/internal/init";
+      });
+
+      expect(initCall).toBeDefined();
+      const initBody = JSON.parse(String(initCall?.[1]?.body ?? initCall?.[0]));
+      expect(initBody.sandboxSettings).toEqual({ awsRoles });
+    });
+
+    it("omits sandboxSettings from DO init when no settings are configured", async () => {
+      mockGetResolvedConfig.mockResolvedValue({ enabledRepos: null, settings: {} });
+      mockStore.getOverdueAutomations.mockResolvedValue([sampleAutomation]);
+
+      const env = createEnv();
+      const stub = env.SESSION.get(env.SESSION.idFromName("any"));
+      const fetchMock = vi.mocked(stub.fetch);
+
+      const scheduler = createSchedulerDO(env);
+      await scheduler.fetch(new Request("http://internal/internal/tick", { method: "POST" }));
+
+      const initCall = fetchMock.mock.calls.find((call) => {
+        const input = call[0];
+        const url =
+          typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+        return new URL(url).pathname === "/internal/init";
+      });
+
+      expect(initCall).toBeDefined();
+      const initBody = JSON.parse(String(initCall?.[1]?.body ?? initCall?.[0]));
+      // Empty settings should not inject a sandboxSettings key (or inject undefined/empty)
+      expect(
+        initBody.sandboxSettings == null || Object.keys(initBody.sandboxSettings).length === 0
+      ).toBe(true);
+    });
+
+    it("skips repo when enabledRepos list does not include it", async () => {
+      // enabledRepos allowlist excludes acme/web-app → sandboxSettings should be empty
+      mockGetResolvedConfig.mockResolvedValue({
+        enabledRepos: ["other/repo"],
+        settings: { awsRoles: [{ profileName: "default", roleArn: "arn:aws:iam::123:role/X" }] },
+      });
+      mockStore.getOverdueAutomations.mockResolvedValue([sampleAutomation]);
+
+      const env = createEnv();
+      const stub = env.SESSION.get(env.SESSION.idFromName("any"));
+      const fetchMock = vi.mocked(stub.fetch);
+
+      const scheduler = createSchedulerDO(env);
+      await scheduler.fetch(new Request("http://internal/internal/tick", { method: "POST" }));
+
+      const initCall = fetchMock.mock.calls.find((call) => {
+        const input = call[0];
+        const url =
+          typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+        return new URL(url).pathname === "/internal/init";
+      });
+
+      expect(initCall).toBeDefined();
+      const initBody = JSON.parse(String(initCall?.[1]?.body ?? initCall?.[0]));
+      expect(
+        initBody.sandboxSettings == null || Object.keys(initBody.sandboxSettings).length === 0
+      ).toBe(true);
     });
   });
 
