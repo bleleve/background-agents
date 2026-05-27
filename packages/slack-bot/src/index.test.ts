@@ -2,14 +2,27 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { Env } from "./types";
 import type * as SharedModule from "@open-inspect/shared";
 
-const { mockVerifySlackSignature, mockPublishView, mockOpenView, mockGetUserInfo } = vi.hoisted(
-  () => ({
-    mockVerifySlackSignature: vi.fn(),
-    mockPublishView: vi.fn(),
-    mockOpenView: vi.fn(),
-    mockGetUserInfo: vi.fn(),
-  })
-);
+const {
+  mockVerifySlackSignature,
+  mockPublishView,
+  mockOpenView,
+  mockGetUserInfo,
+  mockMessagesCreate,
+} = vi.hoisted(() => ({
+  mockVerifySlackSignature: vi.fn(),
+  mockPublishView: vi.fn(),
+  mockOpenView: vi.fn(),
+  mockGetUserInfo: vi.fn(),
+  mockMessagesCreate: vi.fn(),
+}));
+
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: vi.fn().mockImplementation(() => ({
+    messages: {
+      create: mockMessagesCreate,
+    },
+  })),
+}));
 
 vi.mock("@open-inspect/shared", async () => {
   const actual = await vi.importActual<typeof SharedModule>("@open-inspect/shared");
@@ -376,6 +389,16 @@ describe("POST /events", () => {
     clearLocalCache();
     mockVerifySlackSignature.mockResolvedValue(true);
     mockGetUserInfo.mockResolvedValue({ ok: true, user: undefined });
+    mockMessagesCreate.mockResolvedValue({
+      content: [
+        {
+          type: "tool_use",
+          id: "toolu_plan",
+          name: "classify_plan_intent",
+          input: { shouldPlan: false, planReasoning: "Small, well-scoped fix." },
+        },
+      ],
+    });
   });
 
   it("sets Starting status for a new app mention before session creation", async () => {
@@ -533,9 +556,11 @@ describe("POST /events", () => {
     );
     expect(promptBodies).toHaveLength(1);
     expect(promptBodies[0].content).toContain("now add coverage");
-    expect(promptBodies[0].content).toContain("Slack channel context");
+    expect(promptBodies[0].content).toContain('<user_content source="slack_channel"');
+    expect(promptBodies[0].content).toContain("Channel: #eng");
+    expect(promptBodies[0].content).toContain('<user_content source="slack_thread"');
     expect(promptBodies[0].content).not.toContain("Context from the Slack thread");
-    expect(promptBodies[0].content).not.toContain("The latest commit is");
+    expect(promptBodies[0].content).toContain("The latest commit is");
 
     slackFetch.mockRestore();
   });
