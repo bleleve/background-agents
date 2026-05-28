@@ -148,11 +148,14 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("no findings");
   });
 
-  it("no-findings comment instruction is present when autoApproveOnOpen is true", () => {
+  it("no-findings comment instruction is conditional when autoApproveOnOpen is true", () => {
     const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
     expect(prompt).not.toContain("do not submit a review or a general PR comment");
     expect(prompt).toContain("repos/acme/widgets/issues/42/comments");
     expect(prompt).toContain("no findings");
+    expect(prompt).toContain(
+      "did not submit an APPROVE review because the PR is not clearly low-risk"
+    );
   });
 
   it("includes APPROVE/REQUEST_CHANGES/COMMENT submit instruction when autoApproveOnOpen is true", () => {

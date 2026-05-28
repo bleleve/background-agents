@@ -149,6 +149,13 @@ export function buildCodeReviewPrompt(params: {
    REQUEST_CHANGES if you found real issues. Use COMMENT for general feedback that does not block merging.
    If you found no issues and the changes are not clearly low-risk, do not submit a review at all.`
     : `4. Do not submit a pull request review.`;
+  const noFindingsCommentInstruction = autoApproveOnOpen
+    ? `7. If you found no actionable file-specific feedback and did not submit an APPROVE review because the PR is not clearly low-risk, post a comment on the PR to indicate no findings were found:
+
+   ${noFindingsInstruction}`
+    : `7. If you do not find any actionable file-specific feedback, post a comment on the PR to indicate no findings were found:
+
+   ${noFindingsInstruction}`;
 
   return `You are reviewing Pull Request #${number} in ${owner}/${repo}.
 The repository has been cloned and you are on the PR head branch.
@@ -179,9 +186,7 @@ ${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
-7. If you do not find any actionable file-specific feedback, post a comment on the PR to indicate no findings were found:
-
-   ${noFindingsInstruction}
+${noFindingsCommentInstruction}
 ${buildCustomInstructionsSection(codeReviewInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
 }
