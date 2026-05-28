@@ -59,25 +59,28 @@ def get_cf_authorization_jwt() -> str | None:
     # Use streaming so we can read response headers (where Cloudflare sets the
     # CF_Authorization cookie) without waiting for the body. The /mcp endpoint
     # is an SSE stream that never closes, so httpx.get() would always time out.
-    with httpx.stream(
-        "GET",
-        token_url,
-        headers={
-            "CF-Access-Client-Id": client_id,
-            "CF-Access-Client-Secret": client_secret,
-        },
-        follow_redirects=True,
-        timeout=10.0,
-    ) as response:
-        log.info(
-            "cloudflare.response",
-            status=response.status_code,
-            redirected=len(response.history) > 0,
-            redirect_count=len(response.history),
-            cookie_names=list(response.cookies.keys()),
-        )
+    try:
+        with httpx.stream(
+            "GET",
+            token_url,
+            headers={
+                "CF-Access-Client-Id": client_id,
+                "CF-Access-Client-Secret": client_secret,
+            },
+            follow_redirects=True,
+            timeout=10.0,
+        ) as response:
+            log.info(
+                "cloudflare.response",
+                status=response.status_code,
+                redirected=len(response.history) > 0,
+                redirect_count=len(response.history),
+                cookie_names=list(response.cookies.keys()),
+            )
 
-        jwt = response.cookies.get("CF_Authorization")
+            jwt = response.cookies.get("CF_Authorization")
+    except httpx.HTTPError as e:
+        raise RuntimeError(f"Cloudflare Access token exchange failed: {e}") from e
 
     if not jwt:
         raise RuntimeError(

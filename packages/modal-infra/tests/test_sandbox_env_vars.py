@@ -329,6 +329,94 @@ def _fake_sandbox_create(captured):
     return fake_create_aio
 
 
+# ---------------------------------------------------------------------------
+# Cloudflare Access MCP credential injection tests
+# ---------------------------------------------------------------------------
+
+
+def test_cloudflare_credentials_skipped_without_complete_config(monkeypatch):
+    """Missing Cloudflare env vars must not trigger a token exchange."""
+    monkeypatch.delenv("CF_ACCESS_CLIENT_ID", raising=False)
+    monkeypatch.delenv("CF_ACCESS_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("CF_ACCESS_TOKEN_URL", "https://mcp.example.com/mcp")
+
+    def fail_get_jwt():
+        raise AssertionError("Cloudflare token exchange should not run")
+
+    monkeypatch.setattr("src.sandbox.manager.get_cf_authorization_jwt", fail_get_jwt)
+
+    session_config = {
+        "mcp_servers": [
+            {
+                "type": "remote",
+                "url": "https://mcp.example.com/mcp",
+                "cloudflare_access": True,
+            }
+        ]
+    }
+    env_vars = {"SESSION_CONFIG": json.dumps(session_config)}
+
+    SandboxManager._inject_cloudflare_credentials(env_vars)
+
+    assert json.loads(env_vars["SESSION_CONFIG"]) == session_config
+
+
+def test_cloudflare_credentials_skipped_without_server_opt_in(monkeypatch):
+    """Remote MCP servers need cloudflare_access=True to receive CF headers."""
+    monkeypatch.setenv("CF_ACCESS_CLIENT_ID", "client-id")
+    monkeypatch.setenv("CF_ACCESS_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("CF_ACCESS_TOKEN_URL", "https://mcp.example.com/mcp")
+
+    def fail_get_jwt():
+        raise AssertionError("Cloudflare token exchange should not run")
+
+    monkeypatch.setattr("src.sandbox.manager.get_cf_authorization_jwt", fail_get_jwt)
+
+    session_config = {
+        "mcp_servers": [
+            {
+                "type": "remote",
+                "url": "https://mcp.example.com/mcp",
+            }
+        ]
+    }
+    env_vars = {"SESSION_CONFIG": json.dumps(session_config)}
+
+    SandboxManager._inject_cloudflare_credentials(env_vars)
+
+    assert json.loads(env_vars["SESSION_CONFIG"]) == session_config
+
+
+def test_cloudflare_credentials_injected_for_matching_opted_in_server(monkeypatch):
+    """Cloudflare JWT is injected only after explicit server opt-in."""
+    monkeypatch.setenv("CF_ACCESS_CLIENT_ID", "client-id")
+    monkeypatch.setenv("CF_ACCESS_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("CF_ACCESS_TOKEN_URL", "https://mcp.example.com/mcp")
+    monkeypatch.setattr("src.sandbox.manager.get_cf_authorization_jwt", lambda: "jwt-123")
+
+    session_config = {
+        "mcp_servers": [
+            {
+                "type": "remote",
+                "url": "https://mcp.example.com/mcp",
+                "cloudflare_access": True,
+            },
+            {
+                "type": "remote",
+                "url": "https://other.example.com/mcp",
+                "cloudflare_access": True,
+            },
+        ]
+    }
+    env_vars = {"SESSION_CONFIG": json.dumps(session_config)}
+
+    SandboxManager._inject_cloudflare_credentials(env_vars)
+
+    updated_config = json.loads(env_vars["SESSION_CONFIG"])
+    assert updated_config["mcp_servers"][0]["headers"]["CF-Access-Jwt-Assertion"] == "jwt-123"
+    assert "headers" not in updated_config["mcp_servers"][1]
+
+
 @pytest.mark.asyncio
 async def test_vcs_env_vars_default_github(monkeypatch):
     """SCM_PROVIDER unset → github.com defaults."""

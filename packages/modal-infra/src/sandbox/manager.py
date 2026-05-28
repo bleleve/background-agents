@@ -277,17 +277,20 @@ class SandboxManager:
             log.warn("cloudflare.session_config_parse_error")
             return
 
-        token_url = os.environ.get("CF_ACCESS_TOKEN_URL", "")
-        cf_host = urlparse(token_url).netloc if token_url else ""
-        cf_servers = (
-            [
-                s
-                for s in (session_config.get("mcp_servers") or [])
-                if s.get("type") == "remote" and urlparse(s.get("url", "")).netloc == cf_host
-            ]
-            if cf_host
-            else []
-        )
+        client_id = os.environ.get("CF_ACCESS_CLIENT_ID")
+        client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET")
+        token_url = os.environ.get("CF_ACCESS_TOKEN_URL")
+        if not client_id or not client_secret or not token_url:
+            return
+
+        cf_host = urlparse(token_url).netloc
+        cf_servers = [
+            s
+            for s in (session_config.get("mcp_servers") or [])
+            if s.get("type") == "remote"
+            and s.get("cloudflare_access") is True
+            and urlparse(s.get("url", "")).netloc == cf_host
+        ]
         if not cf_servers:
             return
 
