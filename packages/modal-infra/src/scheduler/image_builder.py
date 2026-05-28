@@ -29,6 +29,7 @@ from collections.abc import Iterable
 
 import httpx
 import modal
+from httpx import HTTPStatusError
 
 from ..app import (
     app,
@@ -555,7 +556,22 @@ async def rebuild_repo_images():
 
     try:
         # 1. Get enabled repos
-        enabled_data = await _api_get(f"{control_plane_url}/repo-images/enabled-repos")
+        try:
+            enabled_data = await _api_get(f"{control_plane_url}/repo-images/enabled-repos")
+        except HTTPStatusError as e:
+            if e.response.status_code == 404:
+                # The /repo-images/enabled-repos endpoint is not available on this
+                # control-plane deployment (e.g. an environment where the route has
+                # not yet been deployed, or SANDBOX_PROVIDER is not "modal").
+                # Treat as a no-op rather than an error so we don't produce noisy
+                # scheduler.error events every 30 minutes.
+                log.info(
+                    "scheduler.enabled_repos_unavailable",
+                    control_plane_url=control_plane_url,
+                    status_code=e.response.status_code,
+                )
+                return
+            raise
         enabled_repos: list[dict] = enabled_data.get("repos", [])
 
         if not enabled_repos:
