@@ -148,6 +148,10 @@ class AgentBridge:
     GIT_CONFIG_TIMEOUT_SECONDS = 10.0
     MAX_PENDING_PART_EVENTS = 2000
     MAX_EVENT_BUFFER_SIZE = 1000
+    OPENCODE_DEFAULT_TITLE_RE = re.compile(
+        r"^(new session|child session) - " r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$",
+        re.IGNORECASE,
+    )
     CRITICAL_EVENT_TYPES: ClassVar[set[str]] = {
         "execution_complete",
         "error",
@@ -211,6 +215,8 @@ class AgentBridge:
         # Tracks whether at least one prompt has already been sent in this
         # OpenCode session. None means unknown (for loaded sessions).
         self._has_sent_prompt_in_session: bool | None = None
+
+        self._last_forwarded_session_title: str | None = None
 
     @property
     def ws_url(self) -> str:
@@ -894,6 +900,41 @@ class AgentBridge:
                 )
                 await asyncio.sleep(retry_delay_seconds)
 
+    def _normalize_forwardable_session_title(self, title: object) -> str | None:
+        if not isinstance(title, str):
+            return None
+
+        trimmed = title.strip()
+        if not trimmed or self.OPENCODE_DEFAULT_TITLE_RE.match(trimmed):
+            return None
+        return trimmed
+
+    def _session_title_event_once(self, title: object) -> dict[str, str] | None:
+        trimmed = self._normalize_forwardable_session_title(title)
+        if trimmed is None:
+            return None
+        if trimmed == self._last_forwarded_session_title:
+            return None
+
+        self._last_forwarded_session_title = trimmed
+        return {"type": "session_title", "title": trimmed}
+
+    def _session_title_event_from_sse(
+        self, event_type: object, props: dict[str, Any]
+    ) -> dict[str, str] | None:
+        if event_type != "session.updated":
+            return None
+
+        info = props.get("info")
+        if not isinstance(info, dict):
+            return None
+
+        session_id = props.get("sessionID") or info.get("id")
+        if session_id != self.opencode_session_id:
+            return None
+
+        return self._session_title_event_once(info.get("title"))
+
     @staticmethod
     def _extract_error_message(error: object) -> str | None:
         """Extract message from OpenCode NamedError: { "name": "...", "data": { "message": "..." } }."""
@@ -1131,7 +1172,6 @@ class AgentBridge:
         pending_parts: dict[str, list[tuple[dict[str, Any], Any]]] = {}
         pending_parts_total = 0
         pending_drop_logged = False
-
         # Child session tracking (sub-tasks)
         tracked_child_session_ids: set[str] = set()
 
@@ -1292,10 +1332,9 @@ class AgentBridge:
                     async for event in self._parse_sse_stream(sse_response, timeout_ctx):
                         event_type = event.get("type")
                         props = event.get("properties", {})
+                        if not isinstance(props, dict):
+                            props = {}
                         event_type_name = event_type if isinstance(event_type, str) else "unknown"
-                        event_session_id = props.get("sessionID") or props.get("part", {}).get(
-                            "sessionID"
-                        )
                         now_loop = loop.time()
                         since_last_chunk_ms = int((now_loop - last_event_at) * 1000)
                         last_event_at = now_loop
@@ -1308,11 +1347,14 @@ class AgentBridge:
                             heartbeat_count += 1
 
                         if event_count % self.SSE_EVENT_LOG_SAMPLE_EVERY == 0:
+                            event_session_id_log = props.get("sessionID") or props.get(
+                                "part", {}
+                            ).get("sessionID")
                             self.log.info(
                                 "bridge.sse_event_received",
                                 message_id=message_id,
                                 event_type=event_type_name,
-                                event_session_id=event_session_id,
+                                event_session_id=event_session_id_log,
                                 raw_event_bytes=len(
                                     json.dumps(event, separators=(",", ":"), ensure_ascii=False)
                                 ),
@@ -1336,6 +1378,12 @@ class AgentBridge:
                                     )
                                 # Always continue: no downstream handler processes session.created,
                                 # and non-matching events would just fall through to no-op.
+                                continue
+
+                            title_event = self._session_title_event_from_sse(event_type, props)
+                            if title_event:
+                                yield title_event
+                            if event_type == "session.updated":
                                 continue
 
                             event_session_id = props.get("sessionID") or props.get("part", {}).get(

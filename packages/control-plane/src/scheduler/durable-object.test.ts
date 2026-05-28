@@ -104,40 +104,6 @@ function createEmptyDbMock(): D1Database {
   } as unknown as D1Database;
 }
 
-function createIntegrationSettingsDbMock(): D1Database {
-  return {
-    prepare: vi.fn((query: string) => ({
-      bind: vi.fn((integrationId: string, repo?: string) => ({
-        first: vi.fn(async () => {
-          if (query.includes("integration_settings")) {
-            if (integrationId === "code-server") {
-              return {
-                settings: JSON.stringify({ enabledRepos: null, defaults: { enabled: true } }),
-              };
-            }
-            if (integrationId === "sandbox") {
-              return {
-                settings: JSON.stringify({
-                  enabledRepos: null,
-                  defaults: { tunnelPorts: [3000], terminalEnabled: true },
-                }),
-              };
-            }
-          }
-
-          if (query.includes("integration_repo_settings") && repo === "acme/web-app") {
-            if (integrationId === "sandbox") {
-              return { settings: JSON.stringify({ tunnelPorts: [5173] }) };
-            }
-          }
-
-          return null;
-        }),
-      })),
-    })),
-  } as unknown as D1Database;
-}
-
 async function getInitBody(fetchMock: ReturnType<typeof vi.fn>): Promise<Record<string, unknown>> {
   const initCall = fetchMock.mock.calls.find((call) => {
     const input = call[0];
@@ -279,7 +245,21 @@ describe("SchedulerDO", () => {
     it("passes resolved code-server and sandbox settings into automation sessions", async () => {
       mockStore.getOverdueAutomations.mockResolvedValue([sampleAutomation]);
 
-      const env = createEnv({ DB: createIntegrationSettingsDbMock() });
+      // Configure mockGetResolvedConfig to return the right values per integration
+      mockGetResolvedConfig.mockImplementation(async (integrationId: string, _repo: string) => {
+        if (integrationId === "code-server") {
+          return { enabledRepos: null, settings: { enabled: true } };
+        }
+        if (integrationId === "sandbox") {
+          return {
+            enabledRepos: null,
+            settings: { tunnelPorts: [5173], terminalEnabled: true },
+          };
+        }
+        return { enabledRepos: null, settings: {} };
+      });
+
+      const env = createEnv();
       const stub = env.SESSION.get(env.SESSION.idFromName("any"));
       const fetchMock = vi.mocked(stub.fetch);
 

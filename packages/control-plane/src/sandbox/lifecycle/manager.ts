@@ -175,6 +175,8 @@ export interface SandboxLifecycleConfig {
   mcpServerLookup?: McpServerLookup;
   /** Resolves the spawn-time agent-slack-notify gate. */
   slackAgentNotifyLookup?: SlackAgentNotifyLookup;
+  /** Builds a provider dashboard URL for a persisted provider object ID. */
+  sandboxDashboardUrlBuilder?: (providerObjectId: string) => string | null;
 }
 
 /**
@@ -467,7 +469,7 @@ export class SandboxLifecycleManager {
       });
 
       if (result.providerObjectId) {
-        this.storage.updateSandboxModalObjectId(result.providerObjectId);
+        this.storeAndBroadcastProviderObjectId(result.providerObjectId);
       }
       if (result.codeServerUrl && result.codeServerPassword) {
         await this.storeAndBroadcastCodeServer(result.codeServerUrl, result.codeServerPassword);
@@ -590,9 +592,6 @@ export class SandboxLifecycleManager {
 
       this.storage.setLastSpawnError(null, null);
 
-      this.storage.updateSandboxStatus("spawning");
-      this.broadcaster.broadcast({ type: "sandbox_status", status: "spawning" });
-
       const now = Date.now();
       const sandboxAuthToken = this.idGenerator.generateId();
       const sandboxAuthTokenHash = await hashToken(sandboxAuthToken);
@@ -605,6 +604,7 @@ export class SandboxLifecycleManager {
         authTokenHash: sandboxAuthTokenHash,
         modalSandboxId: expectedSandboxId,
       });
+      this.broadcaster.broadcast({ type: "sandbox_status", status: "spawning" });
 
       this.log.info("Restoring from snapshot", {
         event: "sandbox.restore",
@@ -651,7 +651,7 @@ export class SandboxLifecycleManager {
         });
 
         if (result.providerObjectId) {
-          this.storage.updateSandboxModalObjectId(result.providerObjectId);
+          this.storeAndBroadcastProviderObjectId(result.providerObjectId);
         }
         if (result.codeServerUrl && result.codeServerPassword) {
           await this.storeAndBroadcastCodeServer(result.codeServerUrl, result.codeServerPassword);
@@ -765,9 +765,11 @@ export class SandboxLifecycleManager {
         throw new Error(result.error || "Failed to resume sandbox");
       }
 
+      const finalProviderObjectId = result.providerObjectId ?? providerObjectId;
       if (result.providerObjectId && result.providerObjectId !== providerObjectId) {
-        this.storage.updateSandboxModalObjectId(result.providerObjectId);
+        this.storeProviderObjectId(result.providerObjectId);
       }
+      this.broadcastSandboxDashboardUrl(finalProviderObjectId);
 
       if (result.codeServerUrl && result.codeServerPassword) {
         await this.storeAndBroadcastCodeServer(result.codeServerUrl, result.codeServerPassword);
@@ -1160,6 +1162,25 @@ export class SandboxLifecycleManager {
    */
   private getConnectedClientCount(): number {
     return this.wsManager.getConnectedClientCount();
+  }
+
+  private storeAndBroadcastProviderObjectId(providerObjectId: string): void {
+    this.storeProviderObjectId(providerObjectId);
+    this.broadcastSandboxDashboardUrl(providerObjectId);
+  }
+
+  private storeProviderObjectId(providerObjectId: string): void {
+    this.storage.updateSandboxModalObjectId(providerObjectId);
+  }
+
+  private broadcastSandboxDashboardUrl(providerObjectId: string): void {
+    const url = this.config.sandboxDashboardUrlBuilder?.(providerObjectId);
+    if (url) {
+      this.log.debug("Broadcasting sandbox dashboard URL", {
+        provider_object_id: providerObjectId,
+      });
+      this.broadcaster.broadcast({ type: "sandbox_dashboard_url", url });
+    }
   }
 
   /**
