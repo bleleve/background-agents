@@ -88,7 +88,7 @@ describe("POST /internal/create-pr", () => {
     const body = await res.json<{ error: string }>();
     expect(body.error).toBe("User not found. Please re-authenticate.");
   });
-  it("falls back to app auth when expired OAuth token cannot be refreshed", async () => {
+  it("creates PR with app auth regardless of the participant's stored OAuth token", async () => {
     const { stub } = await initSession({ userId: "user-1" });
 
     const participants = await queryDO<{ id: string }>(
@@ -120,7 +120,7 @@ describe("POST /internal/create-pr", () => {
         ownerParticipantId
       );
 
-      // Set up mock provider so the app-token fallback path can complete
+      // Set up mock provider so PR creation with the app token can complete
       const mockProvider = {
         name: "github",
         generatePushAuth: async () => ({ authType: "app", token: "push-token" as const }),
@@ -170,7 +170,7 @@ describe("POST /internal/create-pr", () => {
       }),
     });
 
-    // Should succeed via app token fallback, not fail with 401
+    // Should succeed via the app token (the stale OAuth token is never used)
     expect(res.status).toBe(200);
     const body = await res.json<{ prNumber: number; prUrl: string; state: string }>();
     expect(body.prNumber).toBe(99);

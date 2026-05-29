@@ -164,6 +164,8 @@ export interface CreatePullRequestConfig {
   labels?: string[];
   /** Reviewers to request (if supported) */
   reviewers?: string[];
+  /** Usernames to assign to the pull request (if supported) */
+  assignees?: string[];
 }
 
 /**

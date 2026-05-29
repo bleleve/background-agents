@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "../logger";
 import type { SourceControlProvider } from "../source-control";
 import * as branchResolution from "../source-control/branch-resolution";
-import type { ArtifactRow, SessionRow } from "./types";
+import type { ArtifactRow, ParticipantRow, SessionRow } from "./types";
 import {
   SessionPullRequestService,
   type CreatePullRequestInput,
@@ -93,8 +93,26 @@ function createInput(overrides: Partial<CreatePullRequestInput> = {}): CreatePul
     title: "Test PR",
     body: "Body text",
     promptingUserId: "user-1",
-    promptingAuth: null,
     sessionUrl: "https://app.example.com/session/session-name-1",
+    ...overrides,
+  };
+}
+
+function createParticipant(overrides: Partial<ParticipantRow> = {}): ParticipantRow {
+  return {
+    id: "participant-1",
+    user_id: "user-1",
+    scm_user_id: null,
+    scm_login: "octocat",
+    scm_email: null,
+    scm_name: null,
+    role: "owner",
+    scm_access_token_encrypted: null,
+    scm_refresh_token_encrypted: null,
+    scm_token_expires_at: null,
+    ws_auth_token: null,
+    ws_token_created_at: null,
+    joined_at: 1,
     ...overrides,
   };
 }
@@ -104,6 +122,7 @@ function createTestHarness() {
   const provider = createMockProvider();
   const artifacts: ArtifactRow[] = [];
   let session: SessionRow | null = createSession();
+  let participants: ParticipantRow[] = [createParticipant()];
 
   const repository: PullRequestRepository = {
     getSession: () => session,
@@ -112,6 +131,7 @@ function createTestHarness() {
         session = { ...session, branch_name: branchName };
       }
     }),
+    listParticipants: () => [...participants],
     listArtifacts: () => [...artifacts],
     createArtifact: (data) => {
       artifacts.unshift({
@@ -145,6 +165,9 @@ function createTestHarness() {
     artifacts,
     setSession: (next: SessionRow | null) => {
       session = next;
+    },
+    setParticipants: (next: ParticipantRow[]) => {
+      participants = next;
     },
   };
 }
@@ -194,9 +217,7 @@ describe("SessionPullRequestService", () => {
     }));
     harness.service = new SessionPullRequestService(harness.deps);
 
-    const result = await harness.service.createPullRequest(
-      createInput({ promptingAuth: { authType: "oauth", token: "user-token" } })
-    );
+    const result = await harness.service.createPullRequest(createInput());
 
     expect(result).toEqual({
       kind: "error",
@@ -206,8 +227,8 @@ describe("SessionPullRequestService", () => {
     expect(harness.deps.broadcastSessionBranch).not.toHaveBeenCalled();
   });
 
-  it("creates PR with app auth when prompting auth is unavailable", async () => {
-    const result = await harness.service.createPullRequest(createInput({ promptingAuth: null }));
+  it("always creates the PR with the GitHub App (bot) token", async () => {
+    const result = await harness.service.createPullRequest(createInput());
 
     expect(result).toEqual({
       kind: "created",
@@ -262,10 +283,8 @@ describe("SessionPullRequestService", () => {
     expect(harness.deps.broadcastSessionBranch).toHaveBeenCalledWith("feature/test");
   });
 
-  it("creates PR with OAuth token and stores PR artifact", async () => {
-    const result = await harness.service.createPullRequest(
-      createInput({ promptingAuth: { authType: "oauth", token: "user-token" } })
-    );
+  it("creates PR with the app token and stores PR artifact", async () => {
+    const result = await harness.service.createPullRequest(createInput());
 
     expect(result).toEqual({
       kind: "created",
@@ -276,7 +295,7 @@ describe("SessionPullRequestService", () => {
     expect(harness.provider.createPullRequest).toHaveBeenCalledTimes(1);
     const createPrCall = (harness.provider.createPullRequest as ReturnType<typeof vi.fn>).mock
       .calls[0];
-    expect(createPrCall[0]).toEqual({ authType: "oauth", token: "user-token" });
+    expect(createPrCall[0]).toEqual({ authType: "app", token: "app-token" });
     expect(createPrCall[1].body).toContain(
       "*Created with [Open-Inspect](https://app.example.com/session/session-name-1)*"
     );
@@ -295,12 +314,7 @@ describe("SessionPullRequestService", () => {
   });
 
   it("pushes mixed-case head branches using lowercase names", async () => {
-    await harness.service.createPullRequest(
-      createInput({
-        promptingAuth: { authType: "oauth", token: "user-token" },
-        headBranch: "Feature/Mixed-Case",
-      })
-    );
+    await harness.service.createPullRequest(createInput({ headBranch: "Feature/Mixed-Case" }));
 
     expect(harness.deps.pushBranchToRemote).toHaveBeenCalledWith(
       "feature/mixed-case",
@@ -310,7 +324,7 @@ describe("SessionPullRequestService", () => {
       })
     );
     expect(harness.provider.createPullRequest).toHaveBeenCalledWith(
-      { authType: "oauth", token: "user-token" },
+      { authType: "app", token: "app-token" },
       expect.objectContaining({
         sourceBranch: "feature/mixed-case",
       })
@@ -321,9 +335,7 @@ describe("SessionPullRequestService", () => {
     const customDeps = { ...harness.deps, appName: "Acme Bot" };
     const customService = new SessionPullRequestService(customDeps);
 
-    await customService.createPullRequest(
-      createInput({ promptingAuth: { authType: "oauth", token: "user-token" } })
-    );
+    await customService.createPullRequest(createInput());
 
     const createPrCall = (harness.provider.createPullRequest as ReturnType<typeof vi.fn>).mock
       .calls[0];
@@ -395,6 +407,67 @@ describe("SessionPullRequestService", () => {
     expect(harness.deps.broadcastSessionBranch).toHaveBeenCalledWith("feature/test");
   });
 
+  it("assigns and requests review from all session participants (by SCM login)", async () => {
+    harness.setParticipants([
+      createParticipant({ id: "p1", user_id: "user-1", scm_login: "alice", role: "owner" }),
+      createParticipant({ id: "p2", user_id: "user-2", scm_login: "bob", role: "member" }),
+    ]);
+
+    await harness.service.createPullRequest(createInput());
+
+    expect(harness.provider.createPullRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ assignees: ["alice", "bob"], reviewers: ["alice", "bob"] })
+    );
+  });
+
+  it("includes the prompting user as reviewer since the PR author is the bot", async () => {
+    harness.setParticipants([
+      createParticipant({ id: "p1", user_id: "user-1", scm_login: "alice", role: "owner" }),
+      createParticipant({ id: "p2", user_id: "user-2", scm_login: "bob", role: "member" }),
+    ]);
+
+    // user-1 (alice) triggered the PR, but the bot authors it, so alice can review.
+    await harness.service.createPullRequest(createInput({ promptingUserId: "user-1" }));
+
+    expect(harness.provider.createPullRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ assignees: ["alice", "bob"], reviewers: ["alice", "bob"] })
+    );
+  });
+
+  it("skips participants without an SCM login and dedupes logins", async () => {
+    harness.setParticipants([
+      createParticipant({ id: "p1", user_id: "user-1", scm_login: "alice" }),
+      createParticipant({ id: "p2", user_id: "user-2", scm_login: null }),
+      createParticipant({ id: "p3", user_id: "user-3", scm_login: "  " }),
+      createParticipant({ id: "p4", user_id: "user-4", scm_login: "alice" }),
+    ]);
+
+    await harness.service.createPullRequest(createInput());
+
+    expect(harness.provider.createPullRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ assignees: ["alice"], reviewers: ["alice"] })
+    );
+  });
+
+  it("caps assignees and reviewers at 10 participants", async () => {
+    harness.setParticipants(
+      Array.from({ length: 15 }, (_, i) =>
+        createParticipant({ id: `p${i}`, user_id: `user-${i}`, scm_login: `dev-${i}` })
+      )
+    );
+
+    await harness.service.createPullRequest(createInput());
+
+    const createPrCall = (harness.provider.createPullRequest as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    expect(createPrCall[1].assignees).toHaveLength(10);
+    expect(createPrCall[1].reviewers).toHaveLength(10);
+    expect(createPrCall[1].assignees[0]).toBe("dev-0");
+  });
+
   it("ignores prior manual branch artifact and creates PR", async () => {
     harness.artifacts.push({
       id: "branch-artifact-1",
@@ -408,7 +481,7 @@ describe("SessionPullRequestService", () => {
       created_at: Date.now(),
     });
 
-    const result = await harness.service.createPullRequest(createInput({ promptingAuth: null }));
+    const result = await harness.service.createPullRequest(createInput());
 
     expect(result).toEqual({
       kind: "created",

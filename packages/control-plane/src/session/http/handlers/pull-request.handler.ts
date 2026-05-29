@@ -1,4 +1,3 @@
-import type { SourceControlAuthContext } from "../../../source-control";
 import type { CreatePullRequestInput, CreatePullRequestResult } from "../../pull-request-service";
 import type { ParticipantRow, SessionRow } from "../../types";
 
@@ -13,14 +12,9 @@ type PromptingParticipantResult =
   | { participant: ParticipantRow; error?: never; status?: never }
   | { participant?: never; error: string; status: number };
 
-type ResolveAuthForPrResult =
-  | { auth: SourceControlAuthContext | null; error?: never; status?: never }
-  | { auth?: never; error: string; status: number };
-
 export interface PullRequestHandlerDeps {
   getSession: () => SessionRow | null;
   getPromptingParticipantForPR: () => Promise<PromptingParticipantResult>;
-  resolveAuthForPR: (participant: ParticipantRow) => Promise<ResolveAuthForPrResult>;
   getSessionUrl: (session: SessionRow) => string;
   createPullRequest: (input: CreatePullRequestInput) => Promise<CreatePullRequestResult>;
 }
@@ -48,16 +42,11 @@ export function createPullRequestHandler(deps: PullRequestHandlerDeps): PullRequ
       }
 
       const promptingParticipant = promptingParticipantResult.participant;
-      const authResolution = await deps.resolveAuthForPR(promptingParticipant);
-      if ("error" in authResolution) {
-        return Response.json({ error: authResolution.error }, { status: authResolution.status });
-      }
 
       const result = await deps.createPullRequest({
         ...body,
         baseBranch: body.baseBranch || session.base_branch,
         promptingUserId: promptingParticipant.user_id,
-        promptingAuth: authResolution.auth,
         sessionUrl: deps.getSessionUrl(session),
       });
 

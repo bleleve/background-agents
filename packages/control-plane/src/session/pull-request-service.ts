@@ -8,7 +8,7 @@ import {
   type GitPushAuthContext,
   type GitPushSpec,
 } from "../source-control";
-import type { ArtifactRow, SessionRow } from "./types";
+import type { ArtifactRow, ParticipantRow, SessionRow } from "./types";
 
 /**
  * Inputs required to create a PR once caller identity/auth are already resolved.
@@ -18,8 +18,8 @@ export interface CreatePullRequestInput {
   body: string;
   baseBranch?: string;
   headBranch?: string;
+  /** User who triggered PR creation. Used for logging only — see authorship note below. */
   promptingUserId: string;
-  promptingAuth: SourceControlAuthContext | null;
   sessionUrl: string;
 }
 
@@ -40,6 +40,7 @@ export type PushBranchResult = { success: true } | { success: false; error: stri
 export interface PullRequestRepository {
   getSession(): SessionRow | null;
   updateSessionBranch(sessionId: string, branchName: string): void;
+  listParticipants(): ParticipantRow[];
   listArtifacts(): ArtifactRow[];
   createArtifact(data: {
     id: string;
@@ -181,19 +182,26 @@ export class SessionPullRequestService {
         };
       }
 
-      // Use user OAuth if available, otherwise fall back to GitHub App token
-      // (e.g. sessions triggered from Linear or other integrations without user GitHub OAuth)
-      const prAuth = input.promptingAuth ?? appAuth;
-
       const fullBody =
         input.body + `\n\n---\n*Created with [${this.deps.appName}](${input.sessionUrl})*`;
 
-      const prResult = await this.deps.sourceControlProvider.createPullRequest(prAuth, {
+      // The PR is always authored by the GitHub App (bot) so authorship is uniform
+      // regardless of the session's origin (web, Slack, Linear). The human engineers
+      // who took part in the session are attributed via assignees and reviewers
+      // instead. Because the author is the bot, the prompting user can also be a
+      // reviewer without GitHub rejecting a self-review request.
+      const participantLogins = this.resolveParticipantLogins(
+        this.deps.repository.listParticipants()
+      );
+
+      const prResult = await this.deps.sourceControlProvider.createPullRequest(appAuth, {
         repository: repoInfo,
         title: input.title,
         body: fullBody,
         sourceBranch: sanitizedHeadBranch,
         targetBranch: baseBranch,
+        assignees: participantLogins,
+        reviewers: participantLogins,
       });
 
       const artifactId = this.deps.generateId();
@@ -245,5 +253,23 @@ export class SessionPullRequestService {
         error: error instanceof Error ? error.message : "Failed to create PR",
       };
     }
+  }
+
+  /**
+   * Collects the SCM usernames of the human engineers who took part in the session,
+   * used to assign them and request their review on the created PR. Participants
+   * without an SCM login (e.g. bot integrations) are skipped, and duplicates are
+   * removed. GitHub caps assignees at 10, so the list is truncated to that limit.
+   */
+  private resolveParticipantLogins(participants: ParticipantRow[]): string[] {
+    const MAX_PARTICIPANTS = 10;
+    const logins = new Set<string>();
+    for (const participant of participants) {
+      const login = participant.scm_login?.trim();
+      if (login) {
+        logins.add(login);
+      }
+    }
+    return [...logins].slice(0, MAX_PARTICIPANTS);
   }
 }
