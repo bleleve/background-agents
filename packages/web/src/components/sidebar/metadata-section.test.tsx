@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { MetadataSection } from "./metadata-section";
+import { formatSessionDate } from "@/lib/time";
 
 expect.extend(matchers);
 
@@ -21,6 +22,20 @@ vi.mock("next/link", () => ({
 }));
 
 describe("MetadataSection", () => {
+  it("shows both a relative timestamp and the full date for the session", () => {
+    // Use a fixed timestamp 2 hours in the past so formatRelativeTime returns "2h"
+    const createdAt = Date.now() - 2 * 60 * 60 * 1000;
+    render(<MetadataSection createdAt={createdAt} baseBranch="main" />);
+
+    // The relative time should be present
+    expect(screen.getByText(/2h/)).toBeInTheDocument();
+    // The formatted date (e.g. "May 28") should also be present
+    const expectedDate = formatSessionDate(createdAt);
+    expect(
+      screen.getByText(new RegExp(expectedDate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+    ).toBeInTheDocument();
+  });
+
   it("renders PR badge data from artifact metadata keys", () => {
     render(
       <MetadataSection

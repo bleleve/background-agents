@@ -835,6 +835,24 @@ describe("evaluateWarmDecision", () => {
     }
   });
 
+  it.each(["stale", "stopped", "failed"] as const)(
+    'returns "skip" when sandbox status is %s',
+    (status) => {
+      const state: WarmState = {
+        hasActiveWebSocket: false,
+        status,
+        isSpawningInMemory: false,
+      };
+
+      const decision = evaluateWarmDecision(state);
+
+      expect(decision.action).toBe("skip");
+      if (decision.action === "skip") {
+        expect(decision.reason).toContain(status);
+      }
+    }
+  );
+
   it('returns "spawn" when conditions pass', () => {
     const state: WarmState = {
       hasActiveWebSocket: false,

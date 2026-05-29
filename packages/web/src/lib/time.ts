@@ -7,6 +7,18 @@ const SESSION_EVENT_TIME_FORMAT: Intl.DateTimeFormatOptions = {
   minute: "2-digit",
 };
 
+const SESSION_DATE_FORMAT: Intl.DateTimeFormatOptions = {
+  month: "short",
+  day: "numeric",
+};
+
+/**
+ * Format a millisecond timestamp as a short local date string (e.g. "May 28").
+ */
+export function formatSessionDate(timestamp: number): string {
+  return new Date(timestamp).toLocaleDateString([], SESSION_DATE_FORMAT);
+}
+
 /**
  * Format a session event timestamp, stored in seconds, as a compact local time.
  */

@@ -553,7 +553,13 @@ export function evaluateWarmDecision(state: WarmState): WarmAction {
     return { action: "skip", reason: "already spawning" };
   }
 
-  if (state.status === "spawning" || state.status === "connecting") {
+  if (
+    state.status === "spawning" ||
+    state.status === "connecting" ||
+    state.status === "stale" ||
+    state.status === "stopped" ||
+    state.status === "failed"
+  ) {
     return { action: "skip", reason: `sandbox status is ${state.status}` };
   }
 

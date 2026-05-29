@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { formatModelName, truncateBranch, copyToClipboard } from "@/lib/format";
 import { formatSessionCost } from "@/lib/session-cost";
-import { formatRelativeTime } from "@/lib/time";
+import { formatRelativeTime, formatSessionDate } from "@/lib/time";
 import { getSafeExternalUrl } from "@/lib/urls";
 import { getScmBranchUrl, getScmRepoUrl } from "@/lib/scm";
 import type { Artifact } from "@/types/session";
@@ -85,7 +85,9 @@ export function MetadataSection({
       {/* Timestamp */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <ClockIcon className="w-4 h-4" />
-        <span>{formatRelativeTime(createdAt)}</span>
+        <span>
+          {formatSessionDate(createdAt)} · {formatRelativeTime(createdAt)}
+        </span>
       </div>
 
       {/* Parent session */}
