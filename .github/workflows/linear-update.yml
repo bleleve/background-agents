@@ -1,0 +1,44 @@
+name: Linear Team Repos
+
+on:
+  push:
+    branches: [main, stable]
+    paths:
+      - "scripts/linear-update.sh"
+      - "scripts/linear-team-repos.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linear-update-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update Team Repos
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ${{ github.ref == 'refs/heads/stable' && 'production' || 'staging' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check secrets
+        id: check
+        run: |
+          if [ -n "${{ secrets.INTERNAL_CALLBACK_SECRET }}" ] && [ -n "${{ vars.DEPLOYMENT_NAME }}" ] && [ -n "${{ vars.CLOUDFLARE_WORKER_SUBDOMAIN }}" ]; then
+            echo "has-secrets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-secrets=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Linear team repos update skipped - secrets not configured for this environment."
+          fi
+
+      - name: Update Linear team repos
+        if: steps.check.outputs.has-secrets == 'true'
+        env:
+          INTERNAL_CALLBACK_SECRET: ${{ secrets.INTERNAL_CALLBACK_SECRET }}
+          DEPLOYMENT_NAME: ${{ vars.DEPLOYMENT_NAME }}
+          CLOUDFLARE_WORKER_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKER_SUBDOMAIN }}
+        run: bash scripts/linear-update.sh
