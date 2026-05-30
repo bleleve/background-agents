@@ -135,6 +135,12 @@ variable "github_bot_username" {
   default     = ""
 }
 
+variable "reef_alias_enabled" {
+  description = "Enable the @reef mention alias in the GitHub bot. Should be true only for the production environment to prevent multiple environments from responding to the same mention."
+  type        = bool
+  default     = false
+}
+
 # =============================================================================
 # Slack App Credentials
 # =============================================================================

@@ -2,7 +2,7 @@ name: Terraform
 
 on:
   push:
-    branches: [main, stable]
+    branches: [main, stable, martin, benoit, charlie]
     paths:
       - "terraform/**"
       - "scripts/**"
@@ -41,6 +41,9 @@ on:
         options:
           - staging
           - production
+          - martin
+          - benoit
+          - charlie
 
 permissions:
   contents: read
@@ -71,6 +74,12 @@ jobs:
             DEPLOY_ENV="${{ inputs.environment }}"
           elif [ "${{ github.ref }}" = "refs/heads/stable" ]; then
             DEPLOY_ENV="production"
+          elif [ "${{ github.ref }}" = "refs/heads/martin" ]; then
+            DEPLOY_ENV="martin"
+          elif [ "${{ github.ref }}" = "refs/heads/benoit" ]; then
+            DEPLOY_ENV="benoit"
+          elif [ "${{ github.ref }}" = "refs/heads/charlie" ]; then
+            DEPLOY_ENV="charlie"
           else
             DEPLOY_ENV="staging"
           fi
@@ -82,7 +91,9 @@ jobs:
             SHOULD_APPLY="false"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             SHOULD_APPLY="true"
-          elif [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.ref }}" = "refs/heads/stable" ]; then
+          elif [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.ref }}" = "refs/heads/stable" ] || \
+               [ "${{ github.ref }}" = "refs/heads/martin" ] || [ "${{ github.ref }}" = "refs/heads/benoit" ] || \
+               [ "${{ github.ref }}" = "refs/heads/charlie" ]; then
             SHOULD_APPLY="true"
           else
             SHOULD_APPLY="false"
@@ -282,6 +293,7 @@ jobs:
           TF_VAR_cf_access_client_id: ${{ vars.CF_ACCESS_CLIENT_ID }}
           TF_VAR_cf_access_client_secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           TF_VAR_cf_access_token_url: ${{ vars.CF_ACCESS_TOKEN_URL }}
+          TF_VAR_reef_alias_enabled: "${{ needs.resolve-target.outputs.deploy_environment == 'production' && 'true' || 'false' }}"
 
       - name: Post Plan Results
         uses: actions/github-script@v8
@@ -424,6 +436,7 @@ jobs:
           TF_VAR_cf_access_client_id: ${{ vars.CF_ACCESS_CLIENT_ID }}
           TF_VAR_cf_access_client_secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           TF_VAR_cf_access_token_url: ${{ vars.CF_ACCESS_TOKEN_URL }}
+          TF_VAR_reef_alias_enabled: "${{ needs.resolve-target.outputs.deploy_environment == 'production' && 'true' || 'false' }}"
 
       - name: Post Apply Results
         if: always()
