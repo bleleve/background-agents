@@ -50,7 +50,7 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
 # v71: keep opencode-ai pinned and add ffmpeg for MP4 browser recordings
-CACHE_BUSTER = "v72-add-mcp-proxy-for-aws"
+CACHE_BUSTER = "v73-fix-mcp-proxy-for-aws-install"
 
 # Base image with all development tools
 base_image = (
@@ -203,7 +203,7 @@ base_image = (
     #     "asdf global spacectl latest",
     #     "spacectl --version",
     # )
-    .run_commands("uvx mcp-proxy-for-aws@1.5.0")
+    .run_commands("uvx mcp-proxy-for-aws@1.5.0 --help")
     # Install kubectl (pinned binary from dl.k8s.io)
     .run_commands(
         f'curl -fsSL "https://dl.k8s.io/release/{KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl',
