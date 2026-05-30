@@ -72,6 +72,12 @@ variable "modal_workspace" {
   }
 }
 
+variable "modal_environment" {
+  description = "Modal environment name. Derived from the GitHub environment in CI: production → 'main', all others use the environment name directly (e.g. staging, dev01)."
+  type        = string
+  default     = ""
+}
+
 # =============================================================================
 # GitHub OAuth App Credentials
 # =============================================================================

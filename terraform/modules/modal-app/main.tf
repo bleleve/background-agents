@@ -23,6 +23,7 @@ resource "null_resource" "modal_secrets" {
     environment = {
       MODAL_TOKEN_ID     = var.modal_token_id
       MODAL_TOKEN_SECRET = var.modal_token_secret
+      MODAL_ENVIRONMENT  = var.environment
       DEPLOY_PATH        = var.deploy_path
       SECRETS_JSON       = local.secrets_json
     }
@@ -47,6 +48,7 @@ resource "null_resource" "modal_deploy" {
     environment = {
       MODAL_TOKEN_ID     = var.modal_token_id
       MODAL_TOKEN_SECRET = var.modal_token_secret
+      MODAL_ENVIRONMENT  = var.environment
       APP_NAME           = var.app_name
       DEPLOY_PATH        = var.deploy_path
       DEPLOY_MODULE      = var.deploy_module

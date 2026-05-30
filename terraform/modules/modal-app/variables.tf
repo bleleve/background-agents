@@ -48,6 +48,12 @@ variable "secrets" {
   sensitive = true
 }
 
+variable "environment" {
+  description = "Modal environment name (e.g., 'dev01'). Empty string uses the default environment."
+  type        = string
+  default     = ""
+}
+
 variable "fetch_app_info" {
   description = "Whether to fetch app info after deployment"
   type        = bool

@@ -12,6 +12,9 @@ set -euo pipefail
 echo "Deploying Modal app: ${APP_NAME}"
 echo "Deploy path: ${DEPLOY_PATH}"
 echo "Deploy module: ${DEPLOY_MODULE}"
+if [[ -n "${MODAL_ENVIRONMENT:-}" ]]; then
+    echo "Modal environment: ${MODAL_ENVIRONMENT}"
+fi
 
 # Verify required environment variables
 if [[ -z "${MODAL_TOKEN_ID:-}" ]]; then

@@ -29,6 +29,7 @@ module "modal_app" {
 
   app_name      = "open-inspect"
   workspace     = var.modal_workspace
+  environment   = var.modal_environment
   deploy_path   = "${var.project_root}/packages/modal-infra"
   deploy_module = "deploy"
   source_hash   = data.external.modal_source_hash[0].result.hash

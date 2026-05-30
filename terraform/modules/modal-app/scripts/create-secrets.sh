@@ -10,6 +10,9 @@
 set -euo pipefail
 
 echo "Creating/updating Modal secrets..."
+if [[ -n "${MODAL_ENVIRONMENT:-}" ]]; then
+    echo "Modal environment: ${MODAL_ENVIRONMENT}"
+fi
 
 # Validate SECRETS_JSON is valid JSON
 if ! echo "${SECRETS_JSON}" | jq empty 2>/dev/null; then
