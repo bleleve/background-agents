@@ -31,6 +31,26 @@ export async function getVerifiedPrimaryGitHubEmail(
   return emails.find((email) => email.primary && email.verified)?.email ?? null;
 }
 
+/**
+ * Fetch the GitHub user profile and enrich it with the verified primary email.
+ *
+ * If the GitHub email API call fails or returns no verified email, the original
+ * OAuth profile email is preserved so that domain-based access control continues
+ * to work and users are not silently rejected.
+ */
+export async function buildGitHubProfile(
+  baseProfile: { id: number; login: string; email: string | null | undefined },
+  accessToken: string | undefined
+): Promise<{ id: number; login: string; email: string | null | undefined }> {
+  const verifiedEmail = await getVerifiedPrimaryGitHubEmail(accessToken);
+  return {
+    ...baseProfile,
+    // Only override when we successfully resolved a verified email;
+    // keep the original value otherwise so sign-in does not break.
+    email: verifiedEmail !== null ? verifiedEmail : baseProfile.email,
+  };
+}
+
 // Extend NextAuth types to include GitHub-specific user info
 declare module "next-auth" {
   interface Session {
@@ -79,7 +99,11 @@ export const authOptions: NextAuthOptions = {
         url: "https://api.github.com/user",
         async request({ client, tokens }) {
           const profile = (await client.userinfo(tokens.access_token!)) as GithubProfile;
-          profile.email = await getVerifiedPrimaryGitHubEmail(tokens.access_token);
+          const enriched = await buildGitHubProfile(
+            { id: profile.id, login: profile.login, email: profile.email ?? null },
+            tokens.access_token
+          );
+          profile.email = enriched.email ?? null;
           return profile as unknown as Profile;
         },
       },
