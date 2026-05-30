@@ -270,6 +270,25 @@ base_image = (
         "mkdir -p /tmp/opencode",
         "echo 'Image rebuilt at: v21-force-rebuild' > /app/image-version.txt",
     )
+    # Install the git credential helper shim.
+    #
+    # Each `git` invocation in the sandbox runs this shim, which delegates to
+    # the sandbox-runtime helper module. The helper talks to the control plane
+    # to mint fresh per-request credentials, so git operations no longer rely
+    # on a 1h-TTL token captured at sandbox creation time. Configured at the
+    # system level so it applies before entrypoint.py has a chance to run
+    # (e.g. when restoring a snapshot whose first action is a `git fetch`).
+    .run_commands(
+        "printf '%s\\n'"
+        " '#!/bin/sh'"
+        " 'exec python3 -m sandbox_runtime.credentials.git_credential_helper \"$@\"'"
+        " > /usr/local/bin/oi-git-credentials",
+        "chmod 0755 /usr/local/bin/oi-git-credentials",
+        "git config --system credential.helper /usr/local/bin/oi-git-credentials",
+        # Pass the repo path to the helper so it can scope credentials to the
+        # session repo, not just the host.
+        "git config --system credential.useHttpPath true",
+    )
     # Set environment variables (including cache buster to force rebuild)
     .env(
         {

@@ -935,6 +935,41 @@ class AgentBridge:
 
         return self._session_title_event_once(info.get("title"))
 
+    def _normalize_forwardable_session_title(self, title: object) -> str | None:
+        if not isinstance(title, str):
+            return None
+
+        trimmed = title.strip()
+        if not trimmed or self.OPENCODE_DEFAULT_TITLE_RE.match(trimmed):
+            return None
+        return trimmed
+
+    def _session_title_event_once(self, title: object) -> dict[str, str] | None:
+        trimmed = self._normalize_forwardable_session_title(title)
+        if trimmed is None:
+            return None
+        if trimmed == self._last_forwarded_session_title:
+            return None
+
+        self._last_forwarded_session_title = trimmed
+        return {"type": "session_title", "title": trimmed}
+
+    def _session_title_event_from_sse(
+        self, event_type: object, props: dict[str, Any]
+    ) -> dict[str, str] | None:
+        if event_type != "session.updated":
+            return None
+
+        info = props.get("info")
+        if not isinstance(info, dict):
+            return None
+
+        session_id = props.get("sessionID") or info.get("id")
+        if session_id != self.opencode_session_id:
+            return None
+
+        return self._session_title_event_once(info.get("title"))
+
     @staticmethod
     def _extract_error_message(error: object) -> str | None:
         """Extract message from OpenCode NamedError: { "name": "...", "data": { "message": "..." } }."""
