@@ -45,12 +45,17 @@ npm test
 
 ## Project Structure
 
-| Package                  | Description                          |
-| ------------------------ | ------------------------------------ |
-| `packages/control-plane` | Cloudflare Workers + Durable Objects |
-| `packages/web`           | Next.js web application              |
-| `packages/modal-infra`   | Modal sandbox infrastructure         |
-| `packages/shared`        | Shared types and utilities           |
+| Package                    | Description                                       |
+| -------------------------- | ------------------------------------------------- |
+| `packages/shared`          | Shared types and utilities (build this first)     |
+| `packages/control-plane`   | Cloudflare Workers + Durable Objects              |
+| `packages/web`             | Next.js web application                           |
+| `packages/slack-bot`       | Slack event handler                               |
+| `packages/github-bot`      | GitHub PR review and @mention webhook handler     |
+| `packages/linear-bot`      | Linear agent webhook handler                      |
+| `packages/modal-infra`     | Modal sandbox infrastructure                      |
+| `packages/sandbox-runtime` | Provider-agnostic sandbox runtime (bridge, agent) |
+| `packages/daytona-infra`   | Daytona base-snapshot seeding scripts             |
 
 ## Making Changes
 

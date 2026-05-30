@@ -92,7 +92,7 @@ built for internal use where all employees are trusted and have access to compan
                                  │
                                  ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│                      Data Plane (Modal)                            │
+│               Data Plane (Modal or Daytona)                        │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │                     Session Sandbox                          │  │
 │  │  ┌───────────┐  ┌───────────┐  ┌───────────┐                 │  │
@@ -107,15 +107,17 @@ built for internal use where all employees are trusted and have access to compan
 
 ## Packages
 
-| Package                                 | Description                                 |
-| --------------------------------------- | ------------------------------------------- |
-| [modal-infra](packages/modal-infra)     | Modal sandbox infrastructure                |
-| [control-plane](packages/control-plane) | Cloudflare Workers + Durable Objects        |
-| [web](packages/web)                     | Next.js web client                          |
-| [slack-bot](packages/slack-bot)         | Slack integration (sessions from messages)  |
-| [github-bot](packages/github-bot)       | GitHub integration (auto-review, @mention)  |
-| [linear-bot](packages/linear-bot)       | Linear integration (issue → coding session) |
-| [shared](packages/shared)               | Shared types and utilities                  |
+| Package                                     | Description                                       |
+| ------------------------------------------- | ------------------------------------------------- |
+| [control-plane](packages/control-plane)     | Cloudflare Workers + Durable Objects              |
+| [web](packages/web)                         | Next.js web client                                |
+| [slack-bot](packages/slack-bot)             | Slack integration (sessions from messages)        |
+| [github-bot](packages/github-bot)           | GitHub integration (auto-review, @mention)        |
+| [linear-bot](packages/linear-bot)           | Linear integration (issue → coding session)       |
+| [shared](packages/shared)                   | Shared types and utilities (build first)          |
+| [modal-infra](packages/modal-infra)         | Modal sandbox infrastructure and lifecycle        |
+| [sandbox-runtime](packages/sandbox-runtime) | Provider-agnostic sandbox runtime (bridge, agent) |
+| [daytona-infra](packages/daytona-infra)     | Daytona base-snapshot seeding scripts             |
 
 ## Getting Started
 

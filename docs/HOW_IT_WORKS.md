@@ -154,6 +154,11 @@ Modal is still the only backend with repo-image builds and live filesystem snaps
 uses persistent sandboxes instead: the control plane stops the sandbox on inactivity or stale
 heartbeat, then resumes that same sandbox later with the same logical sandbox ID and auth token.
 
+Both backends run the same in-sandbox logic from `packages/sandbox-runtime` — a provider-agnostic
+Python library that contains the bridge (WebSocket connection back to the control plane),
+supervisor, agent integration, and plugins. `modal-infra` and `daytona-infra` each bundle it into
+their respective images.
+
 ### Clients
 
 Clients are how users interact with sessions. The architecture is client-agnostic—any client that

@@ -13,8 +13,8 @@ Three tiers connected by WebSockets:
 2. **Control Plane** (Cloudflare Workers + Durable Objects) — session lifecycle, WebSocket hub,
    GitHub/auth integration. Each session is a Durable Object with SQLite storage. Uses D1 for
    session index, repo metadata, and encrypted repo secrets.
-3. **Data Plane** (Modal, Python) — sandboxed environments running coding agents. Manages sandbox
-   creation, warm pools, snapshots.
+3. **Data Plane** (Modal or Daytona, Python) — sandboxed environments running coding agents. Manages
+   sandbox creation, warm pools, and snapshots (Modal) or persistent stop/start sandboxes (Daytona).
 
 **Bot integrations** — all Cloudflare Workers using Hono:
 
@@ -22,29 +22,37 @@ Three tiers connected by WebSockets:
 - `github-bot` — PR review assignments and @mention commands
 - `linear-bot` — Linear agent webhooks → coding sessions
 
-**Data flow**: User prompt → web client → control plane DO (WebSocket) → Modal sandbox → streaming
-events back through the same WebSocket chain.
+**Data flow**: User prompt → web client → control plane DO (WebSocket) → sandbox (Modal or Daytona)
+→ streaming events back through the same WebSocket chain.
 
 ### Package Dependency Graph
 
 ```
 @open-inspect/shared  ←  control-plane, web, slack-bot, github-bot, linear-bot
+
+sandbox-runtime  ←  modal-infra, daytona-infra
 ```
 
 **Build `@open-inspect/shared` first** whenever you change shared types. Other packages import from
 it at build time.
 
+**`sandbox-runtime` is a provider-agnostic Python library** bundled into both Modal and Daytona
+sandbox images. Changes to it require rebuilding the image (`CACHE_BUSTER` bump for Modal,
+re-running `daytona-infra/src/bootstrap.py` for Daytona).
+
 ## Package Overview
 
-| Package         | Lang / Framework                   | Purpose                                                     |
-| --------------- | ---------------------------------- | ----------------------------------------------------------- |
-| `shared`        | TypeScript                         | Shared types, auth utilities, model definitions             |
-| `control-plane` | TypeScript / CF Workers + DO       | Session management, WebSocket streaming, GitHub integration |
-| `web`           | TypeScript / Next.js 16 + React 19 | User-facing dashboard, OAuth, real-time UI                  |
-| `slack-bot`     | TypeScript / CF Workers + Hono     | Slack event handler, session creation                       |
-| `github-bot`    | TypeScript / CF Workers + Hono     | PR review and @mention webhook handler                      |
-| `linear-bot`    | TypeScript / CF Workers + Hono     | Linear agent webhook handler                                |
-| `modal-infra`   | Python 3.12 / Modal + FastAPI      | Sandbox lifecycle, WebSocket bridge to control plane        |
+| Package           | Lang / Framework                   | Purpose                                                       |
+| ----------------- | ---------------------------------- | ------------------------------------------------------------- |
+| `shared`          | TypeScript                         | Shared types, auth utilities, model definitions               |
+| `control-plane`   | TypeScript / CF Workers + DO       | Session management, WebSocket streaming, GitHub integration   |
+| `web`             | TypeScript / Next.js 16 + React 19 | User-facing dashboard, OAuth, real-time UI                    |
+| `slack-bot`       | TypeScript / CF Workers + Hono     | Slack event handler, session creation                         |
+| `github-bot`      | TypeScript / CF Workers + Hono     | PR review and @mention webhook handler                        |
+| `linear-bot`      | TypeScript / CF Workers + Hono     | Linear agent webhook handler                                  |
+| `modal-infra`     | Python 3.12 / Modal + FastAPI      | Modal sandbox lifecycle, WebSocket bridge to control plane    |
+| `sandbox-runtime` | Python 3.12                        | Provider-agnostic sandbox runtime (bridge, supervisor, agent) |
+| `daytona-infra`   | Python 3.12                        | Daytona base-snapshot seeding scripts (one-time setup)        |
 
 ## Common Commands
 
@@ -69,9 +77,11 @@ npm test -w @open-inspect/linear-bot
 
 # Tests — Python (pytest)
 cd packages/modal-infra && pytest tests/ -v
+cd packages/sandbox-runtime && pytest tests/ -v
 
 # Python linting
 cd packages/modal-infra && ruff check --fix && ruff format
+cd packages/sandbox-runtime && ruff check --fix && ruff format
 ```
 
 ## Testing
@@ -86,6 +96,8 @@ All TypeScript packages use **Vitest**; Python uses **pytest** + pytest-asyncio.
 - **web, slack-bot, linear-bot**: co-located `src/**/*.test.ts`
 - **github-bot**: separate `test/*.test.ts`
 - **modal-infra**: `tests/test_*.py`
+- **sandbox-runtime**: `tests/test_*.py` (25+ tests covering bridge, supervisor, plugins,
+  entrypoint)
 
 ### Control-plane integration tests
 
@@ -131,6 +143,9 @@ under 72 characters. Use the PR body for details, not the commit message.
 - **Modal deployment**: never deploy `src/app.py` directly — use `modal deploy deploy.py` or
   `modal deploy -m src`. The `app.py` file doesn't import function modules.
 - **Modal image rebuild**: update `CACHE_BUSTER` in `src/images/base.py` to force a rebuild.
+- **sandbox-runtime changes**: both `modal-infra` and `daytona-infra` bundle `sandbox-runtime` into
+  their images. Changes to `sandbox-runtime` require a Modal image rebuild (CACHE_BUSTER) and a
+  Daytona snapshot re-seed (`python -m src.bootstrap --force` in `packages/daytona-infra`).
 - **Web platform choice**: set `web_platform = "cloudflare"` in Terraform variables to deploy the
   web app to Cloudflare Workers via OpenNext instead of Vercel. When using Cloudflare, Vercel
   credentials are not required (dummy defaults are used). `NEXT_PUBLIC_WS_URL` must be available at
@@ -145,7 +160,10 @@ auto-deploy when path filters match:
   (triggers: `terraform/`, `packages/*/`)
 - **Vercel** → web app when `web_platform = "vercel"` (triggers: `packages/web/`,
   `packages/shared/`)
-- **Modal** → data plane (triggers: `packages/modal-infra/`, deployed via Terraform apply)
+- **Modal** → data plane (triggers: `packages/modal-infra/`, `packages/sandbox-runtime/`, deployed
+  via Terraform apply)
+- **Daytona** → snapshot rebuild (triggers: `packages/sandbox-runtime/`, `packages/daytona-infra/`,
+  via Terraform apply)
 
 CI runs lint, typecheck, and tests for all TypeScript and Python packages on every push and PR.
 
