@@ -401,8 +401,10 @@ export class SandboxLifecycleManager {
         repo_name: session.repo_name,
       });
 
-      const userEnvVars = await this.storage.getUserEnvVars();
-      const opencodeUserConfig = await this.storage.getOpencodeUserConfig();
+      const [userEnvVars, opencodeUserConfig] = await Promise.all([
+        this.storage.getUserEnvVars(),
+        this.storage.getOpencodeUserConfig(),
+      ]);
       const { provider, model: modelId } = this.resolveProviderAndModel(session);
 
       // Look up pre-built repo image (graceful fallback on failure)
@@ -611,8 +613,10 @@ export class SandboxLifecycleManager {
         snapshot_image_id: snapshotImageId,
       });
 
-      const userEnvVars = await this.storage.getUserEnvVars();
-      const opencodeUserConfig = await this.storage.getOpencodeUserConfig();
+      const [userEnvVars, opencodeUserConfig] = await Promise.all([
+        this.storage.getUserEnvVars(),
+        this.storage.getOpencodeUserConfig(),
+      ]);
       const { provider, model: modelId } = this.resolveProviderAndModel(session);
 
       // Child sessions get a shorter timeout (same logic as doSpawn)

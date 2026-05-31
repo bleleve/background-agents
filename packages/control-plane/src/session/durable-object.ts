@@ -1931,9 +1931,10 @@ export class SessionDO extends DurableObject<Env> {
 
     // Fail hard on secret loading — sandboxes must not silently lose secrets
     const globalStore = new GlobalSecretsStore(this.env.DB, this.env.REPO_SECRETS_ENCRYPTION_KEY);
-    const globalSecrets = await globalStore.getDecryptedSecrets();
-
-    const repoId = await this.ensureRepoId(session);
+    const [globalSecrets, repoId] = await Promise.all([
+      globalStore.getDecryptedSecrets(),
+      this.ensureRepoId(session),
+    ]);
     const repoStore = new RepoSecretsStore(this.env.DB, this.env.REPO_SECRETS_ENCRYPTION_KEY);
     const repoSecrets = await repoStore.getDecryptedSecrets(repoId);
 
