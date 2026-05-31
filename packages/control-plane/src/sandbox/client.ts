@@ -305,6 +305,7 @@ export class ModalClient {
       log.info("modal.request", {
         event: "modal.request",
         endpoint,
+        url: this.createSandboxUrl,
         session_id: request.sessionId,
         sandbox_id: request.sandboxId,
         trace_id: correlation?.trace_id,

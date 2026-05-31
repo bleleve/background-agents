@@ -7,6 +7,9 @@
 
 import { ModalApiError } from "../client";
 import type { ModalClient } from "../client";
+import { createLogger } from "../../logger";
+
+const log = createLogger("modal-provider");
 import {
   DEFAULT_SANDBOX_TIMEOUT_SECONDS,
   SandboxProviderError,
@@ -95,6 +98,14 @@ export class ModalSandboxProvider implements SandboxProvider {
       };
     } catch (error) {
       if (error instanceof ModalApiError) {
+        log.error("modal-provider.createSandbox.error", {
+          event: "modal-provider.createSandbox.error",
+          http_status: error.status,
+          error_message: error.message,
+          session_id: config.sessionId,
+          sandbox_id: config.sandboxId,
+          trace_id: config.correlation?.trace_id,
+        });
         throw this.classifyErrorWithStatus(
           `Create sandbox failed with HTTP ${error.status}`,
           error.status
@@ -103,6 +114,13 @@ export class ModalSandboxProvider implements SandboxProvider {
       if (error instanceof SandboxProviderError) {
         throw error;
       }
+      log.error("modal-provider.createSandbox.error", {
+        event: "modal-provider.createSandbox.error",
+        error_message: error instanceof Error ? error.message : String(error),
+        session_id: config.sessionId,
+        sandbox_id: config.sandboxId,
+        trace_id: config.correlation?.trace_id,
+      });
       throw this.classifyError("Failed to create sandbox", error);
     }
   }
