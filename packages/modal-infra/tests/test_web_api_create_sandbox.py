@@ -33,7 +33,7 @@ def _patch_manager(monkeypatch: pytest.MonkeyPatch, captured: dict) -> None:
 
 
 async def _call_create_sandbox(request: dict) -> dict:
-    return await web_api.api_create_sandbox.get_raw_f()(
+    return await web_api.api_create.get_raw_f()(
         request,
         authorization="Bearer test",
         x_trace_id=None,

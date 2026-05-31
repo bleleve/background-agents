@@ -149,7 +149,7 @@ def require_valid_control_plane_url(url: str | None) -> None:
     secrets=[github_app_secrets, internal_api_secret, cloudflare_access_secrets],
 )
 @fastapi_endpoint(method="POST")
-async def api_create_sandbox(
+async def api_create(
     request: dict,
     authorization: str | None = Header(None),
     x_trace_id: str | None = Header(None),
@@ -268,7 +268,7 @@ async def api_create_sandbox(
     secrets=[internal_api_secret],
 )
 @fastapi_endpoint(method="POST")
-async def api_warm_sandbox(
+async def api_warm(
     request: dict,
     authorization: str | None = Header(None),
     x_trace_id: str | None = Header(None),
@@ -345,7 +345,7 @@ def api_health() -> dict:
 
 @app.function(image=function_image, secrets=[internal_api_secret])
 @fastapi_endpoint(method="POST")
-async def api_snapshot_sandbox(
+async def api_snapshot(
     request: dict,
     authorization: str | None = Header(None),
     x_trace_id: str | None = Header(None),
@@ -446,7 +446,7 @@ async def api_snapshot_sandbox(
     secrets=[github_app_secrets, internal_api_secret, cloudflare_access_secrets],
 )
 @fastapi_endpoint(method="POST")
-async def api_restore_sandbox(
+async def api_restore(
     request: dict,
     authorization: str | None = Header(None),
     x_trace_id: str | None = Header(None),
@@ -577,7 +577,7 @@ async def api_restore_sandbox(
     secrets=[internal_api_secret, github_app_secrets],
 )
 @fastapi_endpoint(method="POST")
-async def api_build_repo_image(
+async def api_build_img(
     request: dict,
     authorization: str | None = Header(None),
     x_trace_id: str | None = Header(None),
@@ -669,7 +669,7 @@ async def api_build_repo_image(
     secrets=[internal_api_secret],
 )
 @fastapi_endpoint(method="POST")
-async def api_delete_provider_image(
+async def api_del_image(
     request: dict,
     authorization: str | None = Header(None),
     x_trace_id: str | None = Header(None),

@@ -202,13 +202,13 @@ export class ModalClient {
     }
     this.secret = secret;
     const baseUrl = getModalBaseUrl(workspace, environmentWebSuffix);
-    this.createSandboxUrl = `${baseUrl}-api-create-sandbox.modal.run`;
-    this.warmSandboxUrl = `${baseUrl}-api-warm-sandbox.modal.run`;
+    this.createSandboxUrl = `${baseUrl}-api-create.modal.run`;
+    this.warmSandboxUrl = `${baseUrl}-api-warm.modal.run`;
     this.healthUrl = `${baseUrl}-api-health.modal.run`;
-    this.snapshotSandboxUrl = `${baseUrl}-api-snapshot-sandbox.modal.run`;
-    this.restoreSandboxUrl = `${baseUrl}-api-restore-sandbox.modal.run`;
-    this.buildRepoImageUrl = `${baseUrl}-api-build-repo-image.modal.run`;
-    this.deleteProviderImageUrl = `${baseUrl}-api-delete-provider-image.modal.run`;
+    this.snapshotSandboxUrl = `${baseUrl}-api-snapshot.modal.run`;
+    this.restoreSandboxUrl = `${baseUrl}-api-restore.modal.run`;
+    this.buildRepoImageUrl = `${baseUrl}-api-build-img.modal.run`;
+    this.deleteProviderImageUrl = `${baseUrl}-api-del-image.modal.run`;
   }
 
   /**
