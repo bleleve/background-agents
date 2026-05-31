@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildModalSandboxDashboardUrl, ModalClient } from "./client";
+import {
+  buildModalSandboxDashboardUrl,
+  buildModalWorkspaceSlug,
+  createModalClient,
+  ModalClient,
+} from "./client";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -7,6 +12,17 @@ function jsonResponse(body: unknown, status = 200): Response {
     headers: { "content-type": "application/json" },
   });
 }
+
+describe("buildModalWorkspaceSlug", () => {
+  it("uses the raw workspace when the Modal environment has no web suffix", () => {
+    expect(buildModalWorkspaceSlug("acme")).toBe("acme");
+    expect(buildModalWorkspaceSlug("acme", "")).toBe("acme");
+  });
+
+  it("appends the Modal environment web suffix for endpoint URLs", () => {
+    expect(buildModalWorkspaceSlug("acme", "prod-web")).toBe("acme-prod-web");
+  });
+});
 
 describe("ModalClient OpenCode config payload", () => {
   let fetchSpy: ReturnType<typeof vi.fn>;
@@ -132,5 +148,27 @@ describe("buildModalSandboxDashboardUrl", () => {
         providerObjectId: null,
       })
     ).toBeNull();
+  });
+});
+
+describe("ModalClient", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("uses the Modal environment web suffix in endpoint URLs", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: { status: "ok", service: "modal" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const client = createModalClient("secret", "acme", "prod-web");
+    await client.health();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://acme-prod-web--open-inspect-api-health.modal.run"
+    );
   });
 });

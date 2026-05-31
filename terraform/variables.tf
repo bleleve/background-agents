@@ -62,7 +62,7 @@ variable "modal_token_secret" {
 }
 
 variable "modal_workspace" {
-  description = "Modal workspace name (used in endpoint URLs)"
+  description = "Modal workspace name"
   type        = string
   default     = ""
 
@@ -76,6 +76,17 @@ variable "modal_environment" {
   description = "Modal environment name. Derived from the GitHub environment in CI: production → 'main', all others use the environment name directly (e.g. staging, dev01)."
   type        = string
   default     = ""
+}
+
+variable "modal_environment_web_suffix" {
+  description = "Modal environment web suffix used in endpoint URLs. Use lowercase letters, digits, and dashes, or leave empty for the environment with no web suffix."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "modal" || can(regex("^$|^[a-z0-9-]+$", var.modal_environment_web_suffix))
+    error_message = "modal_environment_web_suffix must be empty or contain only lowercase letters, digits, and dashes when sandbox_provider = 'modal'."
+  }
 }
 
 # =============================================================================

@@ -2,60 +2,54 @@
  * API router for Open-Inspect Control Plane.
  */
 
-import type {
-  ArtifactResponse,
-  Env,
-  CreateSessionRequest,
-  CreateSessionResponse,
-  SpawnSource,
-} from "./types";
-import { generateId, encryptTokenPair } from "./auth/crypto";
+import type { ArtifactResponse, Env } from "./types";
 import { verifyInternalToken } from "./auth/internal";
-import {
-  buildMediaObjectKey,
-  detectScreenshotFileType,
-  detectVideoFileType,
-  isMultipartFile,
-  isSupportedScreenshotMimeType,
-  isSupportedVideoMimeType,
-  type MultipartFieldValue,
-  parseDimensions,
-  parseOptionalBoolean,
-  parseVideoUploadMetadata,
-  SCREENSHOT_MAX_BYTES,
-  SCREENSHOT_UPLOAD_LIMIT_PER_SESSION,
-  VIDEO_MAX_BYTES,
-  VIDEO_UPLOAD_LIMIT_PER_SESSION,
-} from "./media";
+import { encryptTokenPair, generateId } from "./auth/crypto";
 import {
   resolveScmProviderFromEnv,
   SourceControlProviderError,
   type SourceControlProviderName,
 } from "./source-control";
+import { SessionInternalPaths, buildSessionInternalUrl } from "./session/contracts";
+import { createSessionRuntimeClient } from "./session/runtime-client";
 import { SessionIndexStore } from "./db/session-index";
+import { UserStore } from "./db/user-store";
+import type { ProviderIdentity } from "./db/user-store";
 import { UserScmTokenStore, DEFAULT_TOKEN_LIFETIME_MS } from "./db/user-scm-tokens";
-import { UserStore, type ProviderIdentity } from "./db/user-store";
-import { buildSessionInternalUrl, SessionInternalPaths } from "./session/contracts";
-import { initializeSession, type SessionInitInput } from "./session/initialize";
 import {
   resolveCodeServerEnabled,
   resolveSandboxSettings,
 } from "./session/integration-settings-resolution";
+import { initializeSession, type SessionInitInput } from "./session/initialize";
+import type { CreateSessionResponse } from "./types";
+import {
+  SCREENSHOT_MAX_BYTES,
+  SCREENSHOT_UPLOAD_LIMIT_PER_SESSION,
+  VIDEO_MAX_BYTES,
+  VIDEO_UPLOAD_LIMIT_PER_SESSION,
+  type MultipartFieldValue,
+  isSupportedScreenshotMimeType,
+  isSupportedVideoMimeType,
+  detectScreenshotFileType,
+  detectVideoFileType,
+  buildMediaObjectKey,
+  isMultipartFile,
+  parseOptionalBoolean,
+  parseDimensions,
+  parseVideoUploadMetadata,
+} from "./media";
 
 import {
   getValidModelOrDefault,
   isCanonicalUserId,
   isValidModel,
   isValidReasoningEffort,
-  VALID_MODELS,
-  DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS,
-  DEFAULT_MAX_TOTAL_CHILD_SESSIONS,
   type ScreenshotArtifactMetadata,
   type VideoArtifactMetadata,
   type SessionStatus,
   type CallbackContext,
-  type SpawnChildSessionRequest,
-  type SpawnContext,
+  type SpawnSource,
+  type CreateSessionRequest,
 } from "@open-inspect/shared";
 import { createRequestMetrics, instrumentD1 } from "./db/instrumented-d1";
 import { createLogger } from "./logger";
@@ -78,12 +72,22 @@ import { mcpServerRoutes } from "./routes/mcp-servers";
 import { analyticsRoutes } from "./routes/analytics";
 import { providerIdentityRoutes } from "./routes/provider-identities";
 import { handleSlackNotify } from "./routes/slack-notify";
+import { sessionChildSpawnRoutes } from "./routes/session-child-spawn";
+import { sessionChildRoutes } from "./routes/session-children";
 import { webhookRoutes } from "./webhooks";
 
 const logger = createLogger("router");
 
-// Guardrail constants for agent-spawned child sessions
-const MAX_SPAWN_DEPTH = 2;
+/**
+ * Helper to get a Durable Object stub for a session from a route match.
+ * Returns null if the session ID is missing from the match.
+ */
+function getSessionStub(env: Env, match: RegExpMatchArray): DurableObjectStub | null {
+  const sessionId = match.groups?.id;
+  if (!sessionId) return null;
+  const doId = env.SESSION.idFromName(sessionId);
+  return env.SESSION.get(doId);
+}
 
 const SESSION_STATUSES: SessionStatus[] = [
   "created",
@@ -139,18 +143,6 @@ function withCorsAndTraceHeaders(response: Response, ctx: RequestContext): Respo
     statusText: response.statusText,
     headers,
   });
-}
-
-/**
- * Get Durable Object stub for a session.
- * Returns the stub or null if session ID is missing.
- */
-function getSessionStub(env: Env, match: RegExpMatchArray): DurableObjectStub | null {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return null;
-
-  const doId = env.SESSION.idFromName(sessionId);
-  return env.SESSION.get(doId);
 }
 
 /**
@@ -314,20 +306,15 @@ async function verifySandboxAuth(
 
   const token = authHeader.slice(7); // Remove "Bearer " prefix
 
-  // Ask the Durable Object to validate this sandbox token
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-
-  const verifyResponse = await stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.verifySandboxToken),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      },
-      ctx
-    )
+  // Ask the Session runtime to validate this sandbox token.
+  const verifyResponse = await createSessionRuntimeClient(env, ctx).fetch(
+    sessionId,
+    SessionInternalPaths.verifySandboxToken,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    }
   );
 
   if (!verifyResponse.ok) {
@@ -539,28 +526,6 @@ const routes: Route[] = [
     handler: handleSlackNotify,
   },
 
-  // Child session management (sandbox-authenticated)
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/children"),
-    handler: handleSpawnChild,
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions/:id/children"),
-    handler: handleListChildren,
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions/:id/children/:childId"),
-    handler: handleGetChild,
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/children/:childId/cancel"),
-    handler: handleCancelChild,
-  },
-
   // Repository management
   ...reposRoutes,
 
@@ -590,6 +555,12 @@ const routes: Route[] = [
 
   // Provider identities
   ...providerIdentityRoutes,
+
+  // Child session spawning (agent-initiated)
+  ...sessionChildSpawnRoutes,
+
+  // Child session operations (list, get, cancel)
+  ...sessionChildRoutes,
 
   // Webhooks (public routes — auth handled per-route)
   ...webhookRoutes,
@@ -914,7 +885,18 @@ async function handleCreateSession(
   _match: RegExpMatchArray,
   ctx: RequestContext
 ): Promise<Response> {
-  const body = (await request.json()) as CreateSessionRequest & {
+  let parsed: unknown;
+  try {
+    parsed = await request.json();
+  } catch {
+    return error("Invalid JSON body", 400);
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return error("JSON body must be an object", 400);
+  }
+
+  const body = parsed as CreateSessionRequest & {
     scmToken?: string;
     scmRefreshToken?: string;
     scmTokenExpiresAt?: number;
@@ -2310,283 +2292,4 @@ async function forwardPlanApproval(
       ctx
     )
   );
-}
-
-// Child session handlers
-
-async function handleSpawnChild(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const parentId = match.groups?.id;
-  if (!parentId) return error("Parent session ID required");
-
-  const body = (await request.json()) as SpawnChildSessionRequest;
-
-  if (!body.title || !body.prompt) {
-    return error("title and prompt are required");
-  }
-
-  const sessionStore = new SessionIndexStore(env.DB);
-
-  // Read parent's canonical session row before guardrails so repo-scoped sandbox settings can
-  // configure child-session limits without waiting on the parent Durable Object.
-  const parentSession = await sessionStore.get(parentId);
-  const parentUserId = parentSession?.userId ?? null;
-  const childSandboxSettings = parentSession
-    ? await resolveSandboxSettings(env.DB, parentSession.repoOwner, parentSession.repoName)
-    : {};
-  const maxConcurrentChildren =
-    childSandboxSettings.maxConcurrentChildSessions ?? DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS;
-  const maxTotalChildren =
-    childSandboxSettings.maxTotalChildSessions ?? DEFAULT_MAX_TOTAL_CHILD_SESSIONS;
-
-  // Guardrail: depth
-  const parentDepth = await sessionStore.getSpawnDepth(parentId);
-  if (parentDepth >= MAX_SPAWN_DEPTH) {
-    return error(`Maximum spawn depth (${MAX_SPAWN_DEPTH}) exceeded`, 403);
-  }
-
-  // Guardrail: concurrent children
-  const activeCount = await sessionStore.countActiveChildren(parentId);
-  if (activeCount >= maxConcurrentChildren) {
-    return error(`Maximum concurrent children (${maxConcurrentChildren}) reached`, 429);
-  }
-
-  // Guardrail: total children
-  const totalCount = await sessionStore.countTotalChildren(parentId);
-  if (totalCount >= maxTotalChildren) {
-    return error(`Maximum total children (${maxTotalChildren}) reached`, 429);
-  }
-
-  // Get parent context from parent DO
-  const parentDoId = env.SESSION.idFromName(parentId);
-  const parentStub = env.SESSION.get(parentDoId);
-
-  const spawnContextRes = await parentStub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.spawnContext), undefined, ctx)
-  );
-
-  if (!spawnContextRes.ok) {
-    return error("Failed to get parent session context", 500);
-  }
-
-  const spawnContext = (await spawnContextRes.json()) as SpawnContext;
-
-  // Guardrail: same-repo — reject if either field doesn't match parent
-  if (
-    (body.repoOwner && body.repoOwner.toLowerCase() !== spawnContext.repoOwner.toLowerCase()) ||
-    (body.repoName && body.repoName.toLowerCase() !== spawnContext.repoName.toLowerCase())
-  ) {
-    return error("Child sessions must use the same repository as the parent", 403);
-  }
-
-  // Validate explicit model from the agent; reject invalid names so the agent
-  // can self-correct instead of silently falling back to the default model.
-  const rawModel = body.model ?? spawnContext.model;
-  if (body.model !== undefined && !isValidModel(body.model)) {
-    return error(`Invalid model "${body.model}". Valid models: ${VALID_MODELS.join(", ")}`, 400);
-  }
-  const model = getValidModelOrDefault(rawModel);
-  const reasoningEffort =
-    body.reasoningEffort && isValidReasoningEffort(model, body.reasoningEffort)
-      ? body.reasoningEffort
-      : spawnContext.reasoningEffort;
-
-  const childDepth = parentDepth + 1;
-  const childId = generateId();
-
-  logger.info("Spawning child session", {
-    event: "session.spawn_child",
-    parent_id: parentId,
-    child_id: childId,
-    child_depth: childDepth,
-    model,
-  });
-
-  // Resolve code-server integration setting for child (same repo as parent)
-  const childCodeServerEnabled = await resolveCodeServerEnabled(
-    env.DB,
-    spawnContext.repoOwner,
-    spawnContext.repoName
-  );
-
-  const input: SessionInitInput = {
-    sessionId: childId,
-    repoOwner: spawnContext.repoOwner,
-    repoName: spawnContext.repoName,
-    repoId: spawnContext.repoId,
-    branch: spawnContext.baseBranch ?? "main",
-    title: body.title,
-    model,
-    reasoningEffort,
-    participantUserId: spawnContext.owner.userId,
-    platformUserId: parentUserId,
-    scmLogin: spawnContext.owner.scmLogin,
-    scmName: spawnContext.owner.scmName,
-    scmEmail: spawnContext.owner.scmEmail,
-    scmUserId: spawnContext.owner.scmUserId,
-    scmTokenEncrypted: spawnContext.owner.scmAccessTokenEncrypted,
-    scmRefreshTokenEncrypted: spawnContext.owner.scmRefreshTokenEncrypted,
-    scmTokenExpiresAt: spawnContext.owner.scmTokenExpiresAt,
-    codeServerEnabled: childCodeServerEnabled,
-    sandboxSettings: childSandboxSettings,
-    parentSessionId: parentId,
-    spawnSource: "agent",
-    spawnDepth: childDepth,
-  };
-
-  try {
-    await initializeSession(env, input, ctx);
-  } catch (e) {
-    logger.error("Failed to initialize child session", {
-      error: e instanceof Error ? e.message : String(e),
-      parent_id: parentId,
-      child_id: childId,
-      trace_id: ctx.trace_id,
-    });
-    return error("Failed to create child session", 500);
-  }
-
-  // Enqueue the prompt on the child DO
-  const childDoId = env.SESSION.idFromName(childId);
-  const childStub = env.SESSION.get(childDoId);
-  let promptResponse: Response;
-  try {
-    promptResponse = await childStub.fetch(
-      internalRequest(
-        buildSessionInternalUrl(SessionInternalPaths.prompt),
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: body.prompt,
-            authorId: spawnContext.owner.userId,
-            source: "agent",
-          }),
-        },
-        ctx
-      )
-    );
-  } catch (enqueueError) {
-    logger.error("Failed to enqueue initial prompt for child session", {
-      event: "session.spawn_child_prompt_enqueue_failed",
-      parent_id: parentId,
-      child_id: childId,
-      trace_id: ctx.trace_id,
-      request_id: ctx.request_id,
-      error: enqueueError instanceof Error ? enqueueError.message : String(enqueueError),
-    });
-    await sessionStore.updateStatus(childId, "failed");
-    return error("Failed to enqueue child session prompt", 500);
-  }
-
-  if (!promptResponse.ok) {
-    logger.error("Failed to enqueue initial prompt for child session", {
-      event: "session.spawn_child_prompt_enqueue_failed",
-      parent_id: parentId,
-      child_id: childId,
-      prompt_status: promptResponse.status,
-      trace_id: ctx.trace_id,
-      request_id: ctx.request_id,
-    });
-    await sessionStore.updateStatus(childId, "failed");
-    return error("Failed to enqueue child session prompt", 500);
-  }
-
-  // Notify parent session so connected clients can refresh child list
-  ctx.executionCtx?.waitUntil(
-    parentStub
-      .fetch(
-        internalRequest(
-          buildSessionInternalUrl(SessionInternalPaths.childSessionUpdate),
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              childSessionId: childId,
-              status: "created",
-              title: body.title,
-            }),
-          },
-          ctx
-        )
-      )
-      .catch((err) => {
-        logger.error("session.notify_parent_spawn.failed", { error: err });
-      })
-  );
-
-  return json({ sessionId: childId, status: "created" }, 201);
-}
-
-async function handleListChildren(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  _ctx: RequestContext
-): Promise<Response> {
-  const parentId = match.groups?.id;
-  if (!parentId) return error("Parent session ID required");
-
-  const sessionStore = new SessionIndexStore(env.DB);
-  const children = await sessionStore.listByParent(parentId);
-
-  return json({ children });
-}
-
-async function handleGetChild(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const parentId = match.groups?.id;
-  const childId = match.groups?.childId;
-  if (!parentId || !childId) return error("Parent and child session IDs required");
-
-  const sessionStore = new SessionIndexStore(env.DB);
-  const isChild = await sessionStore.isChildOf(childId, parentId);
-  if (!isChild) {
-    return error("Child session not found", 404);
-  }
-
-  // Fetch child summary from child DO
-  const childDoId = env.SESSION.idFromName(childId);
-  const childStub = env.SESSION.get(childDoId);
-
-  const response = await childStub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.childSummary), undefined, ctx)
-  );
-
-  return response;
-}
-
-async function handleCancelChild(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const parentId = match.groups?.id;
-  const childId = match.groups?.childId;
-  if (!parentId || !childId) return error("Parent and child session IDs required");
-
-  const sessionStore = new SessionIndexStore(env.DB);
-  const isChild = await sessionStore.isChildOf(childId, parentId);
-  if (!isChild) {
-    return error("Child session not found", 404);
-  }
-
-  // Cancel via child DO
-  const childDoId = env.SESSION.idFromName(childId);
-  const childStub = env.SESSION.get(childDoId);
-
-  const response = await childStub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.cancel), { method: "POST" }, ctx)
-  );
-
-  return response;
 }

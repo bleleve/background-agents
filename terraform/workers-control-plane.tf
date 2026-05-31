@@ -75,7 +75,11 @@ module "control_plane_worker" {
       { name = "DEFAULT_MODEL", value = "claude-haiku-4-5" },
       { name = "DEFAULT_PLAN_MODEL", value = "claude-haiku-4-5" },
     ],
-    local.use_modal_backend ? [{ name = "MODAL_WORKSPACE", value = var.modal_workspace }] : [],
+    local.use_modal_backend ? [
+      { name = "MODAL_WORKSPACE", value = var.modal_workspace },
+      { name = "MODAL_ENVIRONMENT", value = var.modal_environment },
+      { name = "MODAL_ENVIRONMENT_WEB_SUFFIX", value = var.modal_environment_web_suffix },
+    ] : [],
     local.use_daytona_backend ? [
       { name = "DAYTONA_API_URL", value = var.daytona_api_url },
       { name = "DAYTONA_BASE_SNAPSHOT", value = var.daytona_base_snapshot },
