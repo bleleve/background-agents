@@ -502,12 +502,32 @@ class SandboxManager:
         if exposed_ports:
             create_kwargs["encrypted_ports"] = exposed_ports
 
-        sandbox = await modal.Sandbox.create.aio(
-            "python",
-            "-m",
-            "sandbox_runtime.entrypoint",  # Run the supervisor entrypoint
-            **create_kwargs,
-        )
+        try:
+            sandbox = await modal.Sandbox.create.aio(
+                "python",
+                "-m",
+                "sandbox_runtime.entrypoint",
+                **create_kwargs,
+            )
+        except modal.exception.PermissionDeniedError:
+            if not config.repo_image_id:
+                raise
+            # The repo image was built in a different Modal environment/workspace.
+            # Fall back to the base image so the session can still start.
+            log.warn(
+                "sandbox.repo_image_inaccessible",
+                repo_image_id=config.repo_image_id,
+                sandbox_id=sandbox_id,
+            )
+            create_kwargs["image"] = base_image
+            env_vars.pop("FROM_REPO_IMAGE", None)
+            env_vars.pop("REPO_IMAGE_SHA", None)
+            sandbox = await modal.Sandbox.create.aio(
+                "python",
+                "-m",
+                "sandbox_runtime.entrypoint",
+                **create_kwargs,
+            )
 
         modal_object_id = sandbox.object_id
         code_server_url, ttyd_url, extra_tunnel_urls = await self._resolve_and_setup_tunnels(
