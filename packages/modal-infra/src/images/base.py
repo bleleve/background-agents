@@ -50,7 +50,7 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
 # v71: keep opencode-ai pinned and add ffmpeg for MP4 browser recordings
-CACHE_BUSTER = "v73-fix-mcp-proxy-for-aws-install"
+CACHE_BUSTER = "v74-add-kafka-native-build-deps"
 
 # Base image with all development tools
 base_image = (
@@ -89,6 +89,11 @@ base_image = (
         "libasound2",
         "libpango-1.0-0",
         "libcairo2",
+        # Native module build dependencies (e.g. @confluentinc/kafka-javascript)
+        "libsasl2-dev",
+        "libssl-dev",
+        "libzstd-dev",
+        "librdkafka-dev",
     )
     # OpenTofu
     .run_commands(
