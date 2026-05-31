@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from src.scheduler.image_builder import (
@@ -186,6 +187,44 @@ class TestRebuildRepoImages:
             # Call the .local() version which bypasses Modal decorator
             await rebuild_repo_images.local()
             # No exception means it returned gracefully
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status_code", [404, 501])
+    async def test_skips_gracefully_when_endpoint_unavailable(self, status_code):
+        """Should log info and return (not error) when enabled-repos returns 404 or 501.
+
+        404 means the route isn't deployed yet on the target control-plane.
+        501 means the route exists but SANDBOX_PROVIDER is not 'modal'.
+        Both should be treated as a no-op — no scheduler.error should be raised.
+        """
+        env = {
+            "CONTROL_PLANE_URL": "https://cp.test",
+            "MODAL_API_SECRET": "test-secret",
+        }
+
+        # Build a fake httpx response for the given status code.
+        request = httpx.Request("GET", "https://cp.test/repo-images/enabled-repos")
+        response = httpx.Response(status_code, request=request)
+        http_error = httpx.HTTPStatusError(
+            f"{status_code}",
+            request=request,
+            response=response,
+        )
+
+        with (
+            patch.dict("os.environ", env, clear=False),
+            patch(
+                "src.scheduler.image_builder._api_get",
+                new_callable=AsyncMock,
+                side_effect=http_error,
+            ) as mock_get,
+        ):
+            from src.scheduler.image_builder import rebuild_repo_images
+
+            # Should return gracefully without raising or calling the outer error handler.
+            await rebuild_repo_images.local()
+
+        mock_get.assert_called_once_with("https://cp.test/repo-images/enabled-repos")
 
     @pytest.mark.asyncio
     async def test_skips_when_no_enabled_repos(self):

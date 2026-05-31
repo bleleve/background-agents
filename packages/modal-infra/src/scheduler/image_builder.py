@@ -559,12 +559,14 @@ async def rebuild_repo_images():
         try:
             enabled_data = await _api_get(f"{control_plane_url}/repo-images/enabled-repos")
         except HTTPStatusError as e:
-            if e.response.status_code == 404:
+            if e.response.status_code in (404, 501):
                 # The /repo-images/enabled-repos endpoint is not available on this
-                # control-plane deployment (e.g. an environment where the route has
-                # not yet been deployed, or SANDBOX_PROVIDER is not "modal").
-                # Treat as a no-op rather than an error so we don't produce noisy
-                # scheduler.error events every 30 minutes.
+                # control-plane deployment. Two expected cases:
+                #   404 — the route doesn't exist yet (outdated deployment).
+                #   501 — the route exists but SANDBOX_PROVIDER is not "modal"
+                #         (requireModalRepoImages returns 501 in that case).
+                # Treat both as a no-op rather than an error so we don't produce
+                # noisy scheduler.error events every 30 minutes.
                 log.info(
                     "scheduler.enabled_repos_unavailable",
                     control_plane_url=control_plane_url,
