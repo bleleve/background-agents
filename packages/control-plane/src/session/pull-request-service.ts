@@ -68,14 +68,15 @@ export interface PullRequestServiceDeps {
 
 /**
  * Orchestrates branch push and PR creation for a session.
- * Participant lookup and token resolution are handled by SessionDO.
+ * Participant lookup is handled by SessionDO.
  */
 export class SessionPullRequestService {
   constructor(private readonly deps: PullRequestServiceDeps) {}
 
   /**
-   * Creates a pull request when OAuth auth is available, or falls back
-   * to a manual PR URL artifact when user OAuth cannot be used.
+   * Pushes the session branch and opens a pull request, always authored by the
+   * GitHub App (bot). The session's human participants are attributed as
+   * assignees and reviewers.
    */
   async createPullRequest(input: CreatePullRequestInput): Promise<CreatePullRequestResult> {
     const session = this.deps.repository.getSession();
