@@ -34,6 +34,8 @@ function buildCommentGuidelines(isPublicRepo: boolean): string {
 const SUGGESTION_QUALITY_BAR = `
 **Quality bar — verify before posting an inline suggestion.**
 A confidently-wrong inline comment costs reviewer time and erodes trust over many PRs.
+- **Disprove it before posting (most important).** For each finding, write one sentence on how an experienced engineer would refute it — a guard you overlooked, a caller that already handles the case, or intended behavior. If that refutation holds up, drop the finding. Post only what survives this step.
+- **Don't flag what the repo's own tooling already catches.** If lint, type-check, or the formatter would report it, skip it (run the repo's own checks when in doubt). Focus on behavioral risk, not style the build already enforces.
 - **Verify shell/regex/pattern claims empirically.** Test against representative input in the sandbox (e.g. \`printf 'pod/sidekiq-x\\npod/sourcery-sidekiq-y\\n' | grep -E '/sidekiq-'\`) rather than reasoning from analogous code you've seen elsewhere.
 - **Verify symbol-existence claims with grep.** Deprecated names, missing methods, env vars — confirm against the installed dependency in \`vendor/bundle/\` / \`node_modules/\` / etc., not from a newer library version's changelog.
 - **Verify language/framework behavior claims, not just existence.** If you're asserting how a method or construct *behaves* (Ruby default-argument evaluation timing, ActiveRecord \`with_lock\` reload semantics, JS hoisting, Python GIL, etc.), read the source in \`vendor/bundle/\` / \`node_modules/\` or run a small \`ruby -e\` / \`node -e\` script. Don't pattern-match from analogous-looking code in other languages or older versions of the same framework.
@@ -177,6 +179,9 @@ ${prDescriptionBlock}
    - Security concerns
    - Performance implications
    - Code clarity and maintainability
+   - Deletions: a removed field, flag, or branch that silently changes behavior
+   - Cross-boundary drift: callers, siblings, or other implementations of the same interface not updated alongside this change (many bugs live outside the diff)
+   - Silent behavior changes: same signature, different behavior (defaults, ordering, empty/missing-value handling)
 3. You may read individual files in the repo for additional context beyond the diff
 ${reviewInstruction}
 5. Leave feedback only as inline suggestion comments on specific changed files/lines when you find an issue worth calling out.

@@ -131,6 +131,15 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("Verify language/framework behavior claims");
     expect(prompt).toContain("materially different");
     expect(prompt).toContain("When uncertain whether the issue is real, do not post");
+    expect(prompt).toContain("Disprove it before posting");
+    expect(prompt).toContain("Don't flag what the repo's own tooling already catches");
+  });
+
+  it("focuses the review on blind-spot axes beyond the diff", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).toContain("Deletions: a removed field, flag, or branch");
+    expect(prompt).toContain("Cross-boundary drift");
+    expect(prompt).toContain("Silent behavior changes");
   });
 
   it("forbids submitting a review when autoApproveOnOpen is false (default)", () => {
@@ -332,6 +341,9 @@ describe("buildCommentActionPrompt", () => {
     expect(qualityIdx).toBeGreaterThan(-1);
     expect(workflowIdx).toBeGreaterThan(-1);
     expect(qualityIdx).toBeLessThan(workflowIdx);
+    // Shared quality bar carries the disprove-it / CI-filter additions
+    expect(prompt).toContain("Disprove it before posting");
+    expect(prompt).toContain("Don't flag what the repo's own tooling already catches");
   });
 });
 
@@ -387,5 +399,8 @@ describe("buildFailedChecksPrompt", () => {
     expect(qualityIdx).toBeGreaterThan(-1);
     expect(workflowIdx).toBeGreaterThan(-1);
     expect(qualityIdx).toBeLessThan(workflowIdx);
+    // Shared quality bar carries the disprove-it / CI-filter additions
+    expect(prompt).toContain("Disprove it before posting");
+    expect(prompt).toContain("Don't flag what the repo's own tooling already catches");
   });
 });
