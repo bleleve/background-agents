@@ -191,6 +191,7 @@ export interface PlanStatusCallback {
   plan: PlanArtifact;
   verdict: "approved" | "rejected";
   approverAuthorId: string | null;
+  approverDisplayName?: string;
   implementationModel?: string;
   reason?: string;
   timestamp: number;
@@ -210,6 +211,7 @@ export interface SessionLifecycleCallback {
   sessionId: string;
   event: "archived" | "unarchived";
   actorAuthorId: string | null;
+  actorDisplayName?: string;
   timestamp: number;
   signature: string;
   context: SlackCallbackContext;
