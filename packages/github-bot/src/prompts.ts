@@ -88,6 +88,41 @@ function buildInlineSuggestionWorkflow(params: {
 - Confirm the API response \`html_url\` is a diff comment with an **Apply suggestion** button.`;
 }
 
+// Hidden HTML marker that prefixes the review-verdict comment body. Invisible when
+// rendered as markdown, it lets the agent find and edit its own prior verdict on a
+// re-review instead of posting a new comment each time (single re-review anchor).
+export const REEF_VERDICT_MARKER = "<!-- reef-verdict -->";
+
+function buildVerdictWorkflow(params: { owner: string; repo: string; number: number }): string {
+  const { owner, repo, number } = params;
+  return `7. Post a single **review verdict** comment — one editable top-level PR comment that serves as the re-review anchor. On a re-review, update it in place instead of posting a new one.
+- The body MUST begin with this exact marker line (invisible when rendered; it lets you find the comment again):
+
+   ${REEF_VERDICT_MARKER}
+
+- Structure the body as a risk map so a human knows where to start:
+   - **Overall risk**: low | medium | high — one sentence why.
+   - **By area** (highest-risk first): one line per changed area/file with notable risk, as \`path\` — <risk> — <where to start>.
+   - If nothing survived the quality bar above, say so plainly and set the overall risk accordingly. Do not invent findings to justify a verdict.
+- Find any prior verdict comment, then create or update in place:
+
+   EXISTING="$(gh api "repos/${owner}/${repo}/issues/${number}/comments" --jq '[.[] | select(.body | startswith("${REEF_VERDICT_MARKER}"))][0].id // empty')"
+   cat >/tmp/pr-verdict.md <<'EOF'
+   ${REEF_VERDICT_MARKER}
+   ## Review verdict
+   **Overall risk:** <low|medium|high> — <one sentence>
+
+   **By area:**
+   - \`<path>\` — <risk> — <where to start>
+   EOF
+   if [ -n "$EXISTING" ]; then
+     gh api -X PATCH "repos/${owner}/${repo}/issues/comments/$EXISTING" -F body=@/tmp/pr-verdict.md
+   else
+     gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" -F body=@/tmp/pr-verdict.md
+   fi
+- The verdict prioritizes; it does not reopen the door to speculative findings. Do not list anything here that did not survive the quality bar above.`;
+}
+
 export function buildCodeReviewPrompt(params: {
   owner: string;
   repo: string;
@@ -136,9 +171,6 @@ export function buildCodeReviewPrompt(params: {
     content: body ?? "_No description provided._",
   });
 
-  const noFindingsInstruction = `gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" \\
-     -f body="I reviewed this PR and found no findings."`;
-
   const reviewInstruction = autoApproveOnOpen
     ? `4. When your review is complete, submit it via:
 
@@ -151,13 +183,6 @@ export function buildCodeReviewPrompt(params: {
    REQUEST_CHANGES if you found real issues. Use COMMENT for general feedback that does not block merging.
    If you found no issues and the changes are not clearly low-risk, do not submit a review at all.`
     : `4. Do not submit a pull request review.`;
-  const noFindingsCommentInstruction = autoApproveOnOpen
-    ? `7. If you found no actionable file-specific feedback and did not submit an APPROVE review because the PR is not clearly low-risk, post a comment on the PR to indicate no findings were found:
-
-   ${noFindingsInstruction}`
-    : `7. If you do not find any actionable file-specific feedback, post a comment on the PR to indicate no findings were found:
-
-   ${noFindingsInstruction}`;
 
   return `You are reviewing Pull Request #${number} in ${owner}/${repo}.
 The repository has been cloned and you are on the PR head branch.
@@ -191,7 +216,7 @@ ${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
-${noFindingsCommentInstruction}
+${buildVerdictWorkflow({ owner, repo, number })}
 ${buildCustomInstructionsSection(codeReviewInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
 }

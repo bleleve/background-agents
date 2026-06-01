@@ -3,6 +3,7 @@ import {
   buildCodeReviewPrompt,
   buildCommentActionPrompt,
   buildFailedChecksPrompt,
+  REEF_VERDICT_MARKER,
 } from "../src/prompts";
 
 describe("buildCodeReviewPrompt", () => {
@@ -148,23 +149,24 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).not.toContain("APPROVE|REQUEST_CHANGES");
   });
 
-  it("instructs agent to post a no-findings comment when no actionable feedback is found", () => {
+  it("instructs the agent to post an editable risk-map verdict anchored by a hidden marker", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
     // Old silent behavior must be gone
     expect(prompt).not.toContain("do not submit a review or a general PR comment");
-    // New behavior: post an issue comment indicating no findings
-    expect(prompt).toContain("repos/acme/widgets/issues/42/comments");
-    expect(prompt).toContain("no findings");
+    expect(prompt).toContain("review verdict");
+    expect(prompt).toContain(REEF_VERDICT_MARKER);
+    expect(prompt).toContain("Overall risk");
+    expect(prompt).toContain("By area");
+    // Re-review anchor: find prior verdict, then create OR update in place
+    expect(prompt).toContain(`select(.body | startswith("${REEF_VERDICT_MARKER}"))`);
+    expect(prompt).toContain('gh api -X PATCH "repos/acme/widgets/issues/comments/$EXISTING"');
+    expect(prompt).toContain('gh api -X POST "repos/acme/widgets/issues/42/comments"');
   });
 
-  it("no-findings comment instruction is conditional when autoApproveOnOpen is true", () => {
+  it("keeps the verdict regardless of autoApproveOnOpen", () => {
     const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
-    expect(prompt).not.toContain("do not submit a review or a general PR comment");
-    expect(prompt).toContain("repos/acme/widgets/issues/42/comments");
-    expect(prompt).toContain("no findings");
-    expect(prompt).toContain(
-      "did not submit an APPROVE review because the PR is not clearly low-risk"
-    );
+    expect(prompt).toContain(REEF_VERDICT_MARKER);
+    expect(prompt).toContain("review verdict");
   });
 
   it("includes APPROVE/REQUEST_CHANGES/COMMENT submit instruction when autoApproveOnOpen is true", () => {
