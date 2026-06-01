@@ -1,0 +1,20 @@
+{
+  "name": "missing-await-on-async-write",
+  "description": "A refactor drops `await` on an async DB write, so errors are swallowed and writes can race. Classic correctness bug that lives entirely inside the diff.",
+  "pr": {
+    "owner": "acme",
+    "repo": "widgets",
+    "number": 101,
+    "title": "Simplify cache write path",
+    "body": "Tidy up the write path in the cache layer.",
+    "author": "alice",
+    "base": "main",
+    "head": "refactor/cache-write",
+    "isPublic": false
+  },
+  "diff": "diff --git a/src/cache.ts b/src/cache.ts\n@@ -18,7 +18,7 @@ export class Cache {\n   async set(key: string, value: string): Promise<void> {\n-    await this.db.write(key, value);\n+    this.db.write(key, value);\n     this.metrics.increment(\"cache.set\");\n   }",
+  "expectedFinding": {
+    "file": "src/cache.ts",
+    "summary": "Dropped `await` on `this.db.write(...)`: write errors are no longer surfaced and the method resolves before the write completes, so callers can observe stale reads."
+  }
+}
