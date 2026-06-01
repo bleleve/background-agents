@@ -75,6 +75,7 @@ import { providerIdentityRoutes } from "./routes/provider-identities";
 import { handleSlackNotify } from "./routes/slack-notify";
 import { sessionChildSpawnRoutes } from "./routes/session-child-spawn";
 import { sessionChildRoutes } from "./routes/session-children";
+import { reviewSuggestionRoutes } from "./routes/review-suggestions";
 import { webhookRoutes } from "./webhooks";
 
 const logger = createLogger("router");
@@ -562,6 +563,9 @@ const routes: Route[] = [
 
   // Child session operations (list, get, cancel)
   ...sessionChildRoutes,
+
+  // PR review suggestion tracking (github-bot, HMAC-authenticated)
+  ...reviewSuggestionRoutes,
 
   // Webhooks (public routes — auth handled per-route)
   ...webhookRoutes,
