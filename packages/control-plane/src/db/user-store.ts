@@ -396,7 +396,7 @@ export class UserStore {
   }
 }
 
-function isUniqueConstraintError(err: unknown): boolean {
+export function isUniqueConstraintError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return msg.toLowerCase().includes("unique constraint failed");
 }

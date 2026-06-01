@@ -573,7 +573,6 @@ export class SessionDO extends DurableObject<Env> {
       this._pullRequestHandler = createPullRequestHandler({
         getSession: () => this.getSession(),
         getPromptingParticipantForPR: () => this.participantService.getPromptingParticipantForPR(),
-        resolveAuthForPR: (participant) => this.participantService.resolveAuthForPR(participant),
         getSessionUrl: (session) => {
           const sessionId = session.session_name || session.id;
           const webAppUrl = this.env.WEB_APP_URL || this.env.WORKER_URL || "";

@@ -201,6 +201,17 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
       );
     }
 
+    // Assign users if requested
+    if (config.assignees && config.assignees.length > 0) {
+      await this.addAssignees(
+        auth.token,
+        config.repository.owner,
+        config.repository.name,
+        data.number,
+        config.assignees
+      );
+    }
+
     return result;
   }
 
@@ -436,6 +447,42 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
       }
     } catch (error) {
       console.warn(`Failed to request reviewers for PR #${prNumber}:`, error);
+    }
+  }
+
+  /**
+   * Assign users to a pull request.
+   * This is a best-effort operation - failures are logged but don't fail the PR creation.
+   * GitHub silently ignores assignees without repository access and caps the list at 10.
+   */
+  private async addAssignees(
+    accessToken: string,
+    owner: string,
+    repo: string,
+    prNumber: number,
+    assignees: string[]
+  ): Promise<void> {
+    try {
+      const response = await fetchWithTimeout(
+        `${GITHUB_API_BASE}/repos/${owner}/${repo}/issues/${prNumber}/assignees`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/vnd.github.v3+json",
+            Authorization: `Bearer ${accessToken}`,
+            "User-Agent": this.userAgent,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ assignees }),
+        }
+      );
+
+      if (!response.ok) {
+        // Log but don't throw - assignees are best-effort
+        console.warn(`Failed to add assignees to PR #${prNumber}: ${response.status}`);
+      }
+    } catch (error) {
+      console.warn(`Failed to add assignees to PR #${prNumber}:`, error);
     }
   }
 }

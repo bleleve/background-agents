@@ -149,6 +149,15 @@ export class GitLabSourceControlProvider implements SourceControlProvider {
       );
     }
 
+    if (config.assignees && config.assignees.length > 0) {
+      // GitLab requires numeric assignee_ids; resolving usernames → IDs would need
+      // an extra API call per assignee. Log a warning so operators are aware.
+      console.warn(
+        "[gitlab] assignee assignment is not supported (username→ID resolution not implemented); ignoring assignees:",
+        config.assignees
+      );
+    }
+
     if (config.labels && config.labels.length > 0) {
       requestBody.labels = config.labels.join(",");
     }

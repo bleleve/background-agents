@@ -56,14 +56,12 @@ function createParticipant(overrides: Partial<ParticipantRow> = {}): Participant
 function createHandler() {
   const getSession = vi.fn<() => SessionRow | null>();
   const getPromptingParticipantForPR = vi.fn();
-  const resolveAuthForPR = vi.fn();
   const getSessionUrl = vi.fn();
   const createPullRequest = vi.fn();
 
   const handler = createPullRequestHandler({
     getSession,
     getPromptingParticipantForPR,
-    resolveAuthForPR,
     getSessionUrl,
     createPullRequest,
   });
@@ -72,7 +70,6 @@ function createHandler() {
     handler,
     getSession,
     getPromptingParticipantForPR,
-    resolveAuthForPR,
     getSessionUrl,
     createPullRequest,
   };
@@ -115,42 +112,13 @@ describe("createPullRequestHandler", () => {
     expect(await response.json()).toEqual({ error: "No active prompt found" });
   });
 
-  it("returns auth resolution error payload", async () => {
-    const { handler, getSession, getPromptingParticipantForPR, resolveAuthForPR } = createHandler();
-    const participant = createParticipant();
-    getSession.mockReturnValue(createSession());
-    getPromptingParticipantForPR.mockResolvedValue({ participant });
-    resolveAuthForPR.mockResolvedValue({
-      error: "Token expired",
-      status: 401,
-    });
-
-    const response = await handler.createPr(
-      new Request("http://internal/internal/create-pr", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: "PR", body: "desc" }),
-      })
-    );
-
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({ error: "Token expired" });
-  });
-
   it("forwards service error and uses session base branch fallback", async () => {
-    const {
-      handler,
-      getSession,
-      getPromptingParticipantForPR,
-      resolveAuthForPR,
-      getSessionUrl,
-      createPullRequest,
-    } = createHandler();
+    const { handler, getSession, getPromptingParticipantForPR, getSessionUrl, createPullRequest } =
+      createHandler();
     const session = createSession({ base_branch: "develop" });
     const participant = createParticipant({ user_id: "user-123" });
     getSession.mockReturnValue(session);
     getPromptingParticipantForPR.mockResolvedValue({ participant });
-    resolveAuthForPR.mockResolvedValue({ auth: { authType: "oauth", token: "token" } });
     getSessionUrl.mockReturnValue("https://app.example.com/session/public-session-1");
     createPullRequest.mockResolvedValue({
       kind: "error",
@@ -174,25 +142,17 @@ describe("createPullRequestHandler", () => {
       headBranch: "feature/pr",
       baseBranch: "develop",
       promptingUserId: "user-123",
-      promptingAuth: { authType: "oauth", token: "token" },
       sessionUrl: "https://app.example.com/session/public-session-1",
     });
   });
 
   it("returns mapped success payload", async () => {
-    const {
-      handler,
-      getSession,
-      getPromptingParticipantForPR,
-      resolveAuthForPR,
-      getSessionUrl,
-      createPullRequest,
-    } = createHandler();
+    const { handler, getSession, getPromptingParticipantForPR, getSessionUrl, createPullRequest } =
+      createHandler();
     const session = createSession();
     const participant = createParticipant();
     getSession.mockReturnValue(session);
     getPromptingParticipantForPR.mockResolvedValue({ participant });
-    resolveAuthForPR.mockResolvedValue({ auth: null });
     getSessionUrl.mockReturnValue("https://app.example.com/session/public-session-1");
     createPullRequest.mockResolvedValue({
       kind: "created",
@@ -226,7 +186,6 @@ describe("createPullRequestHandler", () => {
       baseBranch: "release",
       headBranch: "feature/pr",
       promptingUserId: "user-1",
-      promptingAuth: null,
       sessionUrl: "https://app.example.com/session/public-session-1",
     });
   });
