@@ -326,6 +326,32 @@ interface GitHubPullRequestDetails {
   base: { ref: string };
   draft: boolean;
   state: string;
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
+}
+
+/**
+ * Above this many changed lines (additions + deletions), the review prompt
+ * switches the agent into a Lookout-then-Dive strategy (delegating focused
+ * investigations via spawn-task) so attention does not dilute across a big diff.
+ */
+const LARGE_DIFF_THRESHOLD_LINES = 600;
+
+/**
+ * Best-effort check of whether a PR is large enough to warrant the
+ * Lookout/Diver review strategy. Returns false if PR details can't be fetched.
+ */
+async function isLargeDiff(
+  token: string,
+  owner: string,
+  repo: string,
+  pullNumber: number
+): Promise<boolean> {
+  const details = await fetchPullRequestDetails(token, owner, repo, pullNumber);
+  if (!details) return false;
+  const changedLines = (details.additions ?? 0) + (details.deletions ?? 0);
+  return changedLines >= LARGE_DIFF_THRESHOLD_LINES;
 }
 
 function getFailedCheckAttemptKey(repoFullName: string, pullNumber: number): string {
@@ -504,6 +530,8 @@ export async function handleReviewRequested(
     review_model: reviewModel,
   });
 
+  const largeDiff = await isLargeDiff(ghToken, owner, repoName, pr.number);
+
   const prompt = buildCodeReviewPrompt({
     owner,
     repo: repoName,
@@ -516,6 +544,7 @@ export async function handleReviewRequested(
     isPublic: !repo.private,
     codeReviewInstructions: config.codeReviewInstructions,
     autoApproveOnOpen: config.autoApproveOnOpen,
+    largeDiff,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
@@ -615,6 +644,8 @@ export async function handlePullRequestOpened(
     review_model: autoReviewModel,
   });
 
+  const largeDiff = await isLargeDiff(ghToken, owner, repoName, pr.number);
+
   const prompt = buildCodeReviewPrompt({
     owner,
     repo: repoName,
@@ -627,6 +658,7 @@ export async function handlePullRequestOpened(
     isPublic: !repo.private,
     codeReviewInstructions: config.codeReviewInstructions,
     autoApproveOnOpen: config.autoApproveOnOpen,
+    largeDiff,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {

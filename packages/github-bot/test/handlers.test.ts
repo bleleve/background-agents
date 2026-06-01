@@ -209,6 +209,20 @@ beforeEach(() => {
   vi.mocked(postReaction).mockResolvedValue(true);
   vi.mocked(checkSenderPermission).mockResolvedValue({ hasPermission: true });
   vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig });
+  // Default PR-details fetch: small diff, so review handlers see largeDiff=false.
+  // Tests that need a large diff (or check-suite details) override this per test.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ number: 42, additions: 1, deletions: 1, changed_files: 1 }), {
+        status: 200,
+      })
+    )
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("handlePullRequestOpened", () => {
@@ -1185,6 +1199,40 @@ describe("review suggestion tracking (C2)", () => {
       "https://internal/review-suggestions",
       expect.anything()
     );
+  });
+});
+
+describe("size-gated lookout/diver review (D)", () => {
+  it("injects the lookout/dive guidance for a large diff", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ number: 42, additions: 700, deletions: 50 }), {
+          status: 200,
+        })
+      )
+    );
+
+    await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-d");
+
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain("Large diff — survey, then dive");
+    expect(promptBody.content).toContain("spawn-task");
+  });
+
+  it("omits the lookout/dive guidance for a small diff", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    // default beforeEach fetch stub returns a small diff
+
+    await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-d");
+
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).not.toContain("Large diff — survey, then dive");
   });
 });
 

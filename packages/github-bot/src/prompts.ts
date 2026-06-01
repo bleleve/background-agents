@@ -123,6 +123,18 @@ function buildVerdictWorkflow(params: { owner: string; repo: string; number: num
 - The verdict prioritizes; it does not reopen the door to speculative findings. Do not list anything here that did not survive the quality bar above.`;
 }
 
+// For large diffs, attention dilutes if you try to review everything at full
+// depth in one pass. This guidance turns the primary agent into a Lookout that
+// triages risk, then delegates focused Dives via the `spawn-task` tool.
+function buildLookoutDiverGuidance(): string {
+  return `## Large diff — survey, then dive
+This PR is large. Don't review every line at full depth in one pass.
+1. **Lookout (survey):** skim the whole diff and list the highest-risk areas — the ones most likely to hide a real behavioral bug.
+2. **Dive:** for each high-risk area, delegate a focused investigation with the \`spawn-task\` tool. Give the diver a tight prompt naming the file(s) and the specific risk to verify, and have it report back its verified findings rather than post. A diver should use **Sonar** — running the code or tests in its sandbox — to confirm a suspected bug instead of reasoning from the diff alone. Collect results with \`get-task-status\`; abort a runaway diver with \`cancel-task\`.
+3. **Consolidate:** fold the divers' verified findings into your own review. You remain responsible for posting inline suggestions and the single verdict comment, and the quality bar above applies equally to delegated findings.
+Keep delegation proportional to risk — a handful of focused dives beats one diver per file.`;
+}
+
 export function buildCodeReviewPrompt(params: {
   owner: string;
   repo: string;
@@ -135,6 +147,7 @@ export function buildCodeReviewPrompt(params: {
   isPublic: boolean;
   codeReviewInstructions?: string | null;
   autoApproveOnOpen?: boolean;
+  largeDiff?: boolean;
 }): string {
   const {
     owner,
@@ -148,6 +161,7 @@ export function buildCodeReviewPrompt(params: {
     isPublic,
     codeReviewInstructions,
     autoApproveOnOpen,
+    largeDiff,
   } = params;
 
   const prTitleBlock = buildUntrustedUserContentBlock({
@@ -184,6 +198,8 @@ export function buildCodeReviewPrompt(params: {
    If you found no issues and the changes are not clearly low-risk, do not submit a review at all.`
     : `4. Do not submit a pull request review.`;
 
+  const largeDiffSection = largeDiff ? `\n${buildLookoutDiverGuidance()}\n` : "";
+
   return `You are reviewing Pull Request #${number} in ${owner}/${repo}.
 The repository has been cloned and you are on the PR head branch.
 
@@ -196,7 +212,7 @@ ${prAuthorBlock}
 ${prBranchesBlock}
 - **Description**:
 ${prDescriptionBlock}
-
+${largeDiffSection}
 ## Instructions
 1. Run \`gh pr diff ${number}\` to see the full diff
 2. Review the changes thoroughly, focusing on:

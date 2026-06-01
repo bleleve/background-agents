@@ -169,6 +169,20 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("review verdict");
   });
 
+  it("omits the lookout/dive guidance by default", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).not.toContain("Large diff — survey, then dive");
+  });
+
+  it("injects lookout/dive guidance when largeDiff is true", () => {
+    const prompt = buildCodeReviewPrompt({ ...baseParams, largeDiff: true });
+    expect(prompt).toContain("Large diff — survey, then dive");
+    expect(prompt).toContain("Lookout (survey)");
+    expect(prompt).toContain("spawn-task");
+    expect(prompt).toContain("get-task-status");
+    expect(prompt).toContain("Sonar");
+  });
+
   it("includes APPROVE/REQUEST_CHANGES/COMMENT submit instruction when autoApproveOnOpen is true", () => {
     const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
     expect(prompt).toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
