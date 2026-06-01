@@ -1,21 +1,33 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./github-app", () => ({
   fetchWithTimeout: vi.fn(),
+  getGitHubAppConfig: vi.fn(),
+  getInstallationAccountLogin: vi.fn(),
+  getCachedInstallationToken: vi.fn(),
+  isGitHubAppConfigured: vi.fn(),
 }));
 
-import { fetchWithTimeout } from "./github-app";
+import {
+  fetchWithTimeout,
+  getGitHubAppConfig,
+  getInstallationAccountLogin,
+  getCachedInstallationToken,
+  isGitHubAppConfigured,
+} from "./github-app";
 import { isGithubSamlConfigured, resolveGithubLoginFromSaml } from "./github-saml";
 import type { Env } from "../types";
 
 const mockFetch = vi.mocked(fetchWithTimeout);
+const mockGetConfig = vi.mocked(getGitHubAppConfig);
+const mockGetOrg = vi.mocked(getInstallationAccountLogin);
+const mockGetToken = vi.mocked(getCachedInstallationToken);
+const mockIsConfigured = vi.mocked(isGitHubAppConfigured);
+
+const fakeConfig = { appId: "1", privateKey: "key", installationId: "2" };
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
-  return {
-    GITHUB_ORG: "acme",
-    GITHUB_ADMIN_ORG_TOKEN: "admin-token",
-    ...overrides,
-  } as Env;
+  return { APP_NAME: "open-inspect", ...overrides } as Env;
 }
 
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
@@ -34,17 +46,25 @@ function externalIdentities(
 }
 
 describe("isGithubSamlConfigured", () => {
-  it("is true only when both org and token are set", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("delegates to the GitHub App configuration check", () => {
+    mockIsConfigured.mockReturnValue(true);
     expect(isGithubSamlConfigured(makeEnv())).toBe(true);
-    expect(isGithubSamlConfigured(makeEnv({ GITHUB_ORG: "" }))).toBe(false);
-    expect(isGithubSamlConfigured(makeEnv({ GITHUB_ADMIN_ORG_TOKEN: undefined }))).toBe(false);
+    mockIsConfigured.mockReturnValue(false);
+    expect(isGithubSamlConfigured(makeEnv())).toBe(false);
   });
 });
 
 describe("resolveGithubLoginFromSaml", () => {
+  beforeEach(() => {
+    mockGetConfig.mockReturnValue(fakeConfig);
+    mockGetOrg.mockResolvedValue("acme");
+    mockGetToken.mockResolvedValue("app-token");
+  });
   afterEach(() => vi.clearAllMocks());
 
-  it("returns login and user id on a match", async () => {
+  it("resolves login and user id using the App token and derived org", async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse(
         externalIdentities([
@@ -56,17 +76,17 @@ describe("resolveGithubLoginFromSaml", () => {
     const result = await resolveGithubLoginFromSaml(makeEnv(), "alice@acme.com");
 
     expect(result).toEqual({ login: "alice", userId: "42" });
-    expect(mockFetch).toHaveBeenCalledTimes(1);
     const [, init] = mockFetch.mock.calls[0];
-    expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer admin-token");
+    expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer app-token");
     expect(JSON.parse(init?.body as string).variables).toEqual({
       org: "acme",
       userName: "alice@acme.com",
     });
   });
 
-  it("does not call the API when unconfigured", async () => {
-    const result = await resolveGithubLoginFromSaml(makeEnv({ GITHUB_ORG: "" }), "alice@acme.com");
+  it("does not call the API when the GitHub App is unconfigured", async () => {
+    mockGetConfig.mockReturnValue(null);
+    const result = await resolveGithubLoginFromSaml(makeEnv(), "alice@acme.com");
     expect(result).toBeNull();
     expect(mockFetch).not.toHaveBeenCalled();
   });
@@ -74,6 +94,12 @@ describe("resolveGithubLoginFromSaml", () => {
   it("returns null when no email is provided", async () => {
     expect(await resolveGithubLoginFromSaml(makeEnv(), null)).toBeNull();
     expect(await resolveGithubLoginFromSaml(makeEnv(), "")).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the org cannot be derived from the installation", async () => {
+    mockGetOrg.mockResolvedValue(null);
+    expect(await resolveGithubLoginFromSaml(makeEnv(), "alice@acme.com")).toBeNull();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 

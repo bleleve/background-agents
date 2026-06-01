@@ -660,6 +660,44 @@ export function isGitHubAppConfigured(env: {
   return !!(env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY && env.GITHUB_APP_INSTALLATION_ID);
 }
 
+const installationAccountLoginCache = new Map<string, string>();
+
+/**
+ * Resolve the login of the account (organization or user) the App is installed
+ * on. The installation→account mapping is stable, so it is cached for the
+ * isolate lifetime. Returns null when the lookup fails.
+ */
+export async function getInstallationAccountLogin(
+  config: GitHubAppConfig,
+  env?: InstallationTokenCacheBindings
+): Promise<string | null> {
+  const cached = installationAccountLoginCache.get(config.installationId);
+  if (cached) return cached;
+
+  try {
+    const jwt = await generateAppJwt(config.appId, config.privateKey);
+    const response = await fetchWithTimeout(
+      `https://api.github.com/app/installations/${config.installationId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": resolveUserAgent(env),
+        },
+      }
+    );
+    if (!response.ok) return null;
+    const data = (await response.json()) as { account?: { login?: string } | null };
+    const login = data.account?.login;
+    if (!login) return null;
+    installationAccountLoginCache.set(config.installationId, login);
+    return login;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Get GitHub App config from environment.
  */

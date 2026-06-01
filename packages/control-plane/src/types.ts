@@ -66,18 +66,14 @@ export interface Env {
   INTERNAL_CALLBACK_SECRET?: string; // For signing callbacks to slack-bot
   SLACK_BOT_TOKEN?: string; // Slack bot token for agent-initiated chat.postMessage calls
 
-  // GitHub App secrets (for git operations)
+  // GitHub App secrets (for git operations). Also used to resolve a Slack/Linear
+  // user's GitHub login on demand from the org's SAML SSO external identities
+  // (so they can be assigned/reviewed on PRs without a web login); this requires
+  // GitHub Enterprise Cloud with SAML SSO and the App granted the org permission
+  // to read SAML identities. The org login is derived from the installation.
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_INSTALLATION_ID?: string;
-
-  // GitHub org SAML SSO (optional). When both are set, the control plane can
-  // resolve a Slack/Linear user's GitHub login on demand from the org's SAML
-  // external identities, so they can be assigned/reviewed on PRs without ever
-  // logging into the web UI. Requires GitHub Enterprise Cloud with SAML SSO and
-  // a token with admin:org that is SSO-authorized.
-  GITHUB_ORG?: string;
-  GITHUB_ADMIN_ORG_TOKEN?: string;
 
   // GitLab secrets (for git operations and API access when SCM_PROVIDER=gitlab)
   GITLAB_ACCESS_TOKEN?: string;

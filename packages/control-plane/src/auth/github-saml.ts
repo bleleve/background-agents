@@ -2,16 +2,23 @@
  * On-demand resolution of a person's GitHub login from the organization's SAML
  * SSO external identities, keyed by email (the SAML NameID).
  *
- * This is the one source that can map an email → GitHub login: the GitHub App
- * installation token cannot. It requires GitHub Enterprise Cloud with SAML SSO
- * and a token with `admin:org` that is SSO-authorized (`GITHUB_ADMIN_ORG_TOKEN`),
- * plus the org login (`GITHUB_ORG`). When either is absent the resolver is a
- * no-op, so the feature stays fully optional.
+ * This is the one source that can map an email → GitHub login: it requires
+ * GitHub Enterprise Cloud with SAML SSO. It reuses the GitHub App installation
+ * token already configured for the deployment (the App must be granted the
+ * organization permission needed to read SAML identities), and derives the org
+ * login from the App installation — so no extra credentials or config are
+ * required. When the App is not configured the resolver is a no-op.
  */
 
 import type { Env } from "../types";
 import { createLogger } from "../logger";
-import { fetchWithTimeout } from "./github-app";
+import {
+  fetchWithTimeout,
+  getCachedInstallationToken,
+  getGitHubAppConfig,
+  getInstallationAccountLogin,
+  isGitHubAppConfigured,
+} from "./github-app";
 
 const log = createLogger("github-saml");
 
@@ -55,33 +62,45 @@ interface ExternalIdentitiesResponse {
   errors?: unknown;
 }
 
-/** Whether the SAML SSO directory lookup is configured for this deployment. */
+/** Whether the SAML SSO directory lookup can run (the GitHub App is configured). */
 export function isGithubSamlConfigured(env: Env): boolean {
-  return Boolean(env.GITHUB_ORG && env.GITHUB_ADMIN_ORG_TOKEN);
+  return isGitHubAppConfigured(env);
 }
 
 /**
  * Resolve a GitHub login + user id from an email via the org's SAML external
- * identities. Best-effort: returns null (never throws) when unconfigured, on a
- * miss, or on any API/parse error.
+ * identities, using the GitHub App installation token. Best-effort: returns
+ * null (never throws) when the App is unconfigured, on a miss, or on any
+ * API/parse error.
  */
 export async function resolveGithubLoginFromSaml(
   env: Env,
   email: string | null | undefined
 ): Promise<SamlGithubIdentity | null> {
-  if (!email || !isGithubSamlConfigured(env)) return null;
+  if (!email) return null;
+
+  const config = getGitHubAppConfig(env);
+  if (!config) return null;
+
+  const userAgentBindings = { userAgent: env.APP_NAME };
 
   try {
+    const [org, token] = await Promise.all([
+      getInstallationAccountLogin(config, userAgentBindings),
+      getCachedInstallationToken(config, userAgentBindings),
+    ]);
+    if (!org) return null;
+
     const response = await fetchWithTimeout(GITHUB_GRAPHQL_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.GITHUB_ADMIN_ORG_TOKEN}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         "User-Agent": env.APP_NAME ?? "open-inspect",
       },
       body: JSON.stringify({
         query: EXTERNAL_IDENTITY_QUERY,
-        variables: { org: env.GITHUB_ORG, userName: email },
+        variables: { org, userName: email },
       }),
     });
 
