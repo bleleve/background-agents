@@ -124,6 +124,19 @@ variable "github_app_installation_id" {
   type        = string
 }
 
+variable "github_org" {
+  description = "GitHub organization login. When set together with github_admin_org_token, enables on-demand resolution of a Slack/Linear user's GitHub login from the org's SAML SSO directory (so they can be assigned/reviewed on PRs without a web login)."
+  type        = string
+  default     = ""
+}
+
+variable "github_admin_org_token" {
+  description = "GitHub token with admin:org, SSO-authorized, used to read the org's SAML external identities (email -> GitHub login). Leave empty to disable SAML directory resolution."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # =============================================================================
 # GitHub Bot Configuration
 # =============================================================================

@@ -86,7 +86,8 @@ module "control_plane_worker" {
     ] : [],
     local.use_daytona_backend && var.daytona_target != "" ? [
       { name = "DAYTONA_TARGET", value = var.daytona_target },
-    ] : []
+    ] : [],
+    var.github_org != "" ? [{ name = "GITHUB_ORG", value = var.github_org }] : []
   )
 
   secrets = concat(
@@ -113,6 +114,11 @@ module "control_plane_worker" {
     # token can authorize chat.postMessage from agent tool calls.
     length(var.slack_bot_token) > 0 ? [
       { name = "SLACK_BOT_TOKEN", value = var.slack_bot_token },
+    ] : [],
+    # Enables on-demand resolution of a Slack/Linear user's GitHub login from the
+    # org's SAML SSO directory (paired with the GITHUB_ORG plain-text binding).
+    length(var.github_admin_org_token) > 0 ? [
+      { name = "GITHUB_ADMIN_ORG_TOKEN", value = var.github_admin_org_token },
     ] : []
   )
 

@@ -13,9 +13,10 @@ import {
 import { SessionInternalPaths, buildSessionInternalUrl } from "./session/contracts";
 import { createSessionRuntimeClient } from "./session/runtime-client";
 import { SessionIndexStore } from "./db/session-index";
-import { UserStore } from "./db/user-store";
+import { UserStore, isUniqueConstraintError } from "./db/user-store";
 import type { ProviderIdentity } from "./db/user-store";
 import { UserScmTokenStore, DEFAULT_TOKEN_LIFETIME_MS } from "./db/user-scm-tokens";
+import { isGithubSamlConfigured, resolveGithubLoginFromSaml } from "./auth/github-saml";
 import {
   resolveCodeServerEnabled,
   resolveSandboxSettings,
@@ -851,7 +852,9 @@ async function resolveGitHubEnrichment(
 ): Promise<GitHubEnrichment | null> {
   const identities = await userStore.getIdentitiesForUser(userId);
   const githubIdentity = identities.find((i) => i.provider === "github");
-  if (!githubIdentity) return null;
+  if (!githubIdentity) {
+    return resolveGitHubEnrichmentFromSaml(env, userStore, userId);
+  }
 
   const [user, tokens] = await Promise.all([
     userStore.getUserById(userId),
@@ -876,6 +879,53 @@ async function resolveGitHubEnrichment(
     accessTokenEncrypted: tokens?.accessTokenEncrypted,
     refreshTokenEncrypted: tokens?.refreshTokenEncrypted,
     tokenExpiresAt: tokens?.expiresAt,
+  };
+}
+
+/**
+ * Fallback when a canonical user has no linked GitHub identity (e.g. a
+ * Slack/Linear user who never logged into the web UI): resolve their GitHub
+ * login on demand from the org's SAML SSO directory by email, persist it as a
+ * GitHub identity so subsequent lookups hit the normal path, and return the
+ * enrichment. No OAuth token — PRs are bot-authored and assignees/reviewers
+ * only need the login. Returns null when unconfigured, no email, or no match.
+ */
+async function resolveGitHubEnrichmentFromSaml(
+  env: Env,
+  userStore: UserStore,
+  userId: string
+): Promise<GitHubEnrichment | null> {
+  if (!isGithubSamlConfigured(env)) return null;
+
+  const user = await userStore.getUserById(userId);
+  if (!user?.email) return null;
+
+  const resolved = await resolveGithubLoginFromSaml(env, user.email);
+  if (!resolved) return null;
+
+  try {
+    await userStore.createIdentity({
+      userId,
+      provider: "github",
+      providerUserId: resolved.userId,
+      providerLogin: resolved.login,
+      providerEmail: user.email,
+    });
+  } catch (e) {
+    // The GitHub user id may already be linked to a different canonical user
+    // (race or email mismatch). Keep going — we can still attribute the login.
+    if (!isUniqueConstraintError(e)) throw e;
+    logger.warn("Failed to persist SAML-resolved GitHub identity", {
+      userId,
+      error: e instanceof Error ? e : String(e),
+    });
+  }
+
+  return {
+    scmUserId: resolved.userId,
+    scmLogin: resolved.login,
+    displayName: user.displayName ?? resolved.login,
+    email: user.email,
   };
 }
 
