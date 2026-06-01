@@ -68,6 +68,16 @@ export interface SessionLifecycleHandlerDeps {
   getSandboxSocket: () => WebSocket | null;
   sendToSandbox: (ws: WebSocket, message: string | object) => boolean;
   updateSandboxStatus: (status: SandboxStatus) => void;
+  /**
+   * Fire-and-forget cross-channel session-lifecycle notification. Called
+   * after a successful archive / unarchive transition; the implementation
+   * routes the call to the originating bot via the session's most recent
+   * bot-tagged message. No-op when the session has no bot origin.
+   */
+  notifySessionLifecycle?: (params: {
+    event: "archived" | "unarchived";
+    actorAuthorId: string | null;
+  }) => void;
 }
 
 function sessionTitleUpdateStatus(
@@ -284,6 +294,11 @@ export function createSessionLifecycleHandler(
 
       await deps.transitionSessionStatus("archived");
 
+      deps.notifySessionLifecycle?.({
+        event: "archived",
+        actorAuthorId: body.userId ? `web:${body.userId}` : null,
+      });
+
       return Response.json({ status: "archived" });
     },
 
@@ -313,6 +328,11 @@ export function createSessionLifecycleHandler(
       }
 
       await deps.transitionSessionStatus("active");
+
+      deps.notifySessionLifecycle?.({
+        event: "unarchived",
+        actorAuthorId: body.userId ? `web:${body.userId}` : null,
+      });
 
       return Response.json({ status: "active" });
     },
