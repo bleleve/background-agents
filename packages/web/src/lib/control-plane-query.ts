@@ -6,6 +6,13 @@ export const SESSION_CONTROL_PLANE_QUERY_PARAMS = [
   "createdBy",
 ] as const;
 
+export const AUTOMATION_CONTROL_PLANE_QUERY_PARAMS = [
+  ...DEFAULT_CONTROL_PLANE_QUERY_PARAMS,
+  "createdBy",
+  "repoOwner",
+  "repoName",
+] as const;
+
 export function buildControlPlanePath(
   basePath: string,
   searchParams: URLSearchParams,

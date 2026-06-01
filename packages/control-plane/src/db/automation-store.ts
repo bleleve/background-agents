@@ -155,7 +155,11 @@ export class AutomationStore {
   }
 
   async list(
-    options: { repoOwner?: string; repoName?: string } = {}
+    options: {
+      repoOwner?: string;
+      repoName?: string;
+      createdByUserIds?: readonly string[];
+    } = {}
   ): Promise<{ automations: AutomationRow[]; total: number }> {
     const conditions: string[] = ["deleted_at IS NULL"];
     const params: unknown[] = [];
@@ -167,6 +171,10 @@ export class AutomationStore {
     if (options.repoName) {
       conditions.push("repo_name = ?");
       params.push(options.repoName.toLowerCase());
+    }
+    if (options.createdByUserIds?.length) {
+      conditions.push(`user_id IN (${options.createdByUserIds.map(() => "?").join(", ")})`);
+      params.push(...options.createdByUserIds);
     }
 
     const where = `WHERE ${conditions.join(" AND ")}`;

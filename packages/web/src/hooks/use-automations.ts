@@ -5,13 +5,20 @@ import type {
   ListAutomationsResponse,
   ListAutomationRunsResponse,
 } from "@open-inspect/shared";
+import { buildAutomationsListKey, CURRENT_USER_CREATED_BY } from "@/lib/automation-list";
 
-export function useAutomations() {
+export type AutomationCreatorFilter = "all" | "mine";
+
+export function useAutomations(creatorFilter: AutomationCreatorFilter = "all") {
   const { data: session } = useSession();
 
-  const { data, isLoading, mutate } = useSWR<ListAutomationsResponse>(
-    session ? "/api/automations" : null
-  );
+  const key = session
+    ? buildAutomationsListKey({
+        createdBy: creatorFilter === "mine" ? [CURRENT_USER_CREATED_BY] : undefined,
+      })
+    : null;
+
+  const { data, isLoading, mutate } = useSWR<ListAutomationsResponse>(key);
 
   return {
     automations: data?.automations ?? [],
