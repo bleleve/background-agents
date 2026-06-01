@@ -2,8 +2,7 @@
 /// <reference types="@testing-library/jest-dom" />
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { cleanup, render, screen } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import type { Automation } from "@open-inspect/shared";
 import AutomationsPage from "./page";
@@ -61,25 +60,39 @@ afterEach(() => {
 });
 
 describe("AutomationsPage", () => {
-  it("requests mine-filtered automations when Mine is selected", async () => {
-    const user = userEvent.setup();
-    mockUseSidebarContext.mockReturnValue({ isOpen: true, toggle: vi.fn() });
-    mockUseAutomations.mockImplementation((creatorFilter: "all" | "mine" = "all") => ({
-      automations: creatorFilter === "mine" ? [] : [sampleAutomation],
+  it("shows all automations when the sidebar filter is All", () => {
+    mockUseSidebarContext.mockReturnValue({
+      isOpen: true,
+      toggle: vi.fn(),
+      creatorFilter: "all",
+      setCreatorFilter: vi.fn(),
+    });
+    mockUseAutomations.mockReturnValue({
+      automations: [sampleAutomation],
       loading: false,
       mutate: vi.fn(),
-    }));
+    });
 
     render(<AutomationsPage />);
 
     expect(screen.getByTestId("automations-list")).toHaveTextContent("Daily sync");
-    expect(mockUseAutomations).toHaveBeenCalledWith("all");
+  });
 
-    await user.click(screen.getByText("Mine"));
-
-    await waitFor(() => {
-      expect(mockUseAutomations).toHaveBeenLastCalledWith("mine");
+  it("shows mine-filtered automations when the sidebar filter is Mine", () => {
+    mockUseSidebarContext.mockReturnValue({
+      isOpen: true,
+      toggle: vi.fn(),
+      creatorFilter: "mine",
+      setCreatorFilter: vi.fn(),
     });
+    mockUseAutomations.mockReturnValue({
+      automations: [],
+      loading: false,
+      mutate: vi.fn(),
+    });
+
+    render(<AutomationsPage />);
+
     expect(screen.getByTestId("automations-list")).toHaveTextContent("");
   });
 });

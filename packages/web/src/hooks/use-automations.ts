@@ -5,12 +5,12 @@ import type {
   ListAutomationsResponse,
   ListAutomationRunsResponse,
 } from "@open-inspect/shared";
+import { useSidebarContext } from "@/components/sidebar-context";
 import { buildAutomationsListKey, CURRENT_USER_CREATED_BY } from "@/lib/automation-list";
 
-export type AutomationCreatorFilter = "all" | "mine";
-
-export function useAutomations(creatorFilter: AutomationCreatorFilter = "all") {
+export function useAutomations() {
   const { data: session } = useSession();
+  const { creatorFilter } = useSidebarContext();
 
   const key = session
     ? buildAutomationsListKey({

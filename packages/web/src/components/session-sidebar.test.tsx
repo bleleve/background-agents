@@ -4,8 +4,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
-import { SWRConfig } from "swr";
+import { useMemo, useState, type ReactNode } from "react";
+import { SWRConfig, type SWRConfiguration } from "swr";
 import { MOBILE_LONG_PRESS_MS, SessionSidebar } from "./session-sidebar";
+import { SidebarContext } from "@/components/sidebar-context";
+import type { CreatorFilter } from "@/lib/creator-filter";
 import {
   buildSessionsPageKey,
   CURRENT_USER_CREATED_BY,
@@ -82,6 +85,39 @@ function jsonResponse(body: unknown) {
   });
 }
 
+function SidebarTestProvider({ children }: { children: ReactNode }) {
+  const [creatorFilter, setCreatorFilter] = useState<CreatorFilter>("all");
+  const value = useMemo(
+    () => ({
+      isOpen: true,
+      toggle: vi.fn(),
+      open: vi.fn(),
+      close: vi.fn(),
+      creatorFilter,
+      setCreatorFilter,
+    }),
+    [creatorFilter]
+  );
+
+  return <SidebarContext.Provider value={value}>{children}</SidebarContext.Provider>;
+}
+
+function renderSessionSidebar(swrConfig?: SWRConfiguration, ui: ReactNode = <SessionSidebar />) {
+  return render(
+    <SidebarTestProvider>
+      <SWRConfig
+        value={{
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+          ...swrConfig,
+        }}
+      >
+        {ui}
+      </SWRConfig>
+    </SidebarTestProvider>
+  );
+}
+
 describe("SessionSidebar", () => {
   it("renders nested child sessions under their immediate parent", async () => {
     const parent = createSession(1, { updatedAt: 4000 });
@@ -100,22 +136,14 @@ describe("SessionSidebar", () => {
       updatedAt: 2000,
     });
 
-    render(
-      <SWRConfig
-        value={{
-          fallback: {
-            [SIDEBAR_SESSIONS_KEY]: {
-              sessions: [parent, child, grandchild],
-              hasMore: false,
-            },
-          },
-          dedupingInterval: 0,
-          revalidateOnFocus: false,
-        }}
-      >
-        <SessionSidebar />
-      </SWRConfig>
-    );
+    renderSessionSidebar({
+      fallback: {
+        [SIDEBAR_SESSIONS_KEY]: {
+          sessions: [parent, child, grandchild],
+          hasMore: false,
+        },
+      },
+    });
 
     expect(await screen.findByText("Session 1")).toBeInTheDocument();
     expect(screen.getByText("Child session")).toBeInTheDocument();
@@ -142,21 +170,13 @@ describe("SessionSidebar", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    const { container } = render(
-      <SWRConfig
-        value={{
-          provider: () => new Map(),
-          dedupingInterval: 0,
-          revalidateOnFocus: false,
-          fetcher: async (url: string) => {
-            const response = await fetch(url);
-            return response.json();
-          },
-        }}
-      >
-        <SessionSidebar />
-      </SWRConfig>
-    );
+    const { container } = renderSessionSidebar({
+      provider: () => new Map(),
+      fetcher: async (url: string) => {
+        const response = await fetch(url);
+        return response.json();
+      },
+    });
 
     expect(await screen.findByText("Session 1")).toBeInTheDocument();
 
@@ -215,21 +235,13 @@ describe("SessionSidebar", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(
-      <SWRConfig
-        value={{
-          provider: () => new Map(),
-          dedupingInterval: 0,
-          revalidateOnFocus: false,
-          fetcher: async (url: string) => {
-            const response = await fetch(url);
-            return response.json();
-          },
-        }}
-      >
-        <SessionSidebar />
-      </SWRConfig>
-    );
+    renderSessionSidebar({
+      provider: () => new Map(),
+      fetcher: async (url: string) => {
+        const response = await fetch(url);
+        return response.json();
+      },
+    });
 
     expect(await screen.findByText("Session 1")).toBeInTheDocument();
 
@@ -277,21 +289,13 @@ describe("SessionSidebar", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    const { container } = render(
-      <SWRConfig
-        value={{
-          provider: () => new Map(),
-          dedupingInterval: 0,
-          revalidateOnFocus: false,
-          fetcher: async (url: string) => {
-            const response = await fetch(url);
-            return response.json();
-          },
-        }}
-      >
-        <SessionSidebar />
-      </SWRConfig>
-    );
+    const { container } = renderSessionSidebar({
+      provider: () => new Map(),
+      fetcher: async (url: string) => {
+        const response = await fetch(url);
+        return response.json();
+      },
+    });
 
     expect(await screen.findByText("Session 1")).toBeInTheDocument();
 
@@ -335,16 +339,11 @@ describe("SessionSidebar", () => {
     mockUseIsMobile.mockReturnValue(true);
     const onSessionSelect = vi.fn();
 
-    render(
-      <SWRConfig
-        value={{
-          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false } },
-          dedupingInterval: 0,
-          revalidateOnFocus: false,
-        }}
-      >
-        <SessionSidebar onSessionSelect={onSessionSelect} />
-      </SWRConfig>
+    renderSessionSidebar(
+      {
+        fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false } },
+      },
+      <SessionSidebar onSessionSelect={onSessionSelect} />
     );
 
     const link = await screen.findByRole("link", { name: /session 1/i });
@@ -358,16 +357,11 @@ describe("SessionSidebar", () => {
     mockUseIsMobile.mockReturnValue(true);
     const onSessionSelect = vi.fn();
 
-    render(
-      <SWRConfig
-        value={{
-          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false } },
-          dedupingInterval: 0,
-          revalidateOnFocus: false,
-        }}
-      >
-        <SessionSidebar onSessionSelect={onSessionSelect} />
-      </SWRConfig>
+    renderSessionSidebar(
+      {
+        fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false } },
+      },
+      <SessionSidebar onSessionSelect={onSessionSelect} />
     );
 
     fireEvent.click(screen.getByRole("link", { name: /^reef$/i }));
@@ -381,17 +375,9 @@ describe("SessionSidebar", () => {
   it("opens rename actions on mobile long press", async () => {
     mockUseIsMobile.mockReturnValue(true);
 
-    render(
-      <SWRConfig
-        value={{
-          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false } },
-          dedupingInterval: 0,
-          revalidateOnFocus: false,
-        }}
-      >
-        <SessionSidebar />
-      </SWRConfig>
-    );
+    renderSessionSidebar({
+      fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false } },
+    });
 
     const link = await screen.findByRole("link", { name: /session 1/i });
     vi.useFakeTimers();
@@ -417,17 +403,9 @@ describe("SessionSidebar", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(
-      <SWRConfig
-        value={{
-          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false } },
-          dedupingInterval: 0,
-          revalidateOnFocus: false,
-        }}
-      >
-        <SessionSidebar />
-      </SWRConfig>
-    );
+    renderSessionSidebar({
+      fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false } },
+    });
 
     const link = await screen.findByRole("link", { name: /session 1/i });
     vi.useFakeTimers();
@@ -458,17 +436,9 @@ describe("SessionSidebar", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(
-      <SWRConfig
-        value={{
-          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false } },
-          dedupingInterval: 0,
-          revalidateOnFocus: false,
-        }}
-      >
-        <SessionSidebar />
-      </SWRConfig>
-    );
+    renderSessionSidebar({
+      fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false } },
+    });
 
     const link = await screen.findByRole("link", { name: /session 1/i });
     vi.useFakeTimers();

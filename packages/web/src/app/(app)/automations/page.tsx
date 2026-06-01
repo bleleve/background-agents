@@ -3,18 +3,16 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useSidebarContext } from "@/components/sidebar-layout";
-import { useAutomations, type AutomationCreatorFilter } from "@/hooks/use-automations";
+import { useAutomations } from "@/hooks/use-automations";
 import { AutomationsList } from "@/components/automations/automations-list";
 import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { SidebarIcon, PlusIcon } from "@/components/ui/icons";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 
 export default function AutomationsPage() {
-  const { isOpen, toggle } = useSidebarContext();
-  const [creatorFilter, setCreatorFilter] = useState<AutomationCreatorFilter>("all");
-  const { automations, loading, mutate } = useAutomations(creatorFilter);
+  const { isOpen, toggle, creatorFilter } = useSidebarContext();
+  const { automations, loading, mutate } = useAutomations();
 
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -74,33 +72,6 @@ export default function AutomationsPage() {
               {actionError}
             </ErrorBanner>
           )}
-
-          <div className="mb-4 max-w-xs">
-            <ToggleGroup
-              type="single"
-              value={creatorFilter}
-              onValueChange={(value) => {
-                if (value === "all" || value === "mine") {
-                  setCreatorFilter(value);
-                }
-              }}
-              className="grid grid-cols-2 rounded-md border border-border-muted bg-muted p-0.5"
-              aria-label="Automation owner filter"
-            >
-              <ToggleGroupItem
-                value="all"
-                className="h-7 rounded-sm text-xs data-[state=on]:bg-background data-[state=on]:text-foreground"
-              >
-                All
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="mine"
-                className="h-7 rounded-sm text-xs data-[state=on]:bg-background data-[state=on]:text-foreground"
-              >
-                Mine
-              </ToggleGroupItem>
-            </ToggleGroup>
-          </div>
 
           {loading ? (
             <div className="flex justify-center py-12">
