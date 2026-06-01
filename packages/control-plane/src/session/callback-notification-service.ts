@@ -4,11 +4,13 @@
  * Extracted from SessionDO to reduce its size. Handles:
  * - Notifying originating clients (Slack, Linear) on execution completion
  * - Throttled tool-call progress callbacks
+ * - Cross-channel plan verdict notifications (approve/reject from web/etc.)
  * - HMAC payload signing for callback authentication
  */
 
 import { computeHmacHex } from "@open-inspect/shared";
 import type { Logger } from "../logger";
+import type { PlanResponse } from "./services/plan.service";
 import type { SessionRow } from "./types";
 
 /**
@@ -18,6 +20,13 @@ export interface CallbackRepository {
   getMessageCallbackContext(
     messageId: string
   ): { callback_context: string | null; source: string | null } | null;
+  /**
+   * Find the most recent message with a non-null callback_context.
+   * Used for session-level lifecycle events (archive, unarchive) that
+   * don't bind to a specific message but still need to reach the
+   * originating bot.
+   */
+  getLatestCallbackEnvelope(): { callback_context: string; source: string | null } | null;
   getSession(): SessionRow | null;
 }
 
@@ -48,6 +57,19 @@ export interface CallbackServiceDeps {
  * single duplicate Linear/Slack activity, not data loss.
  */
 const NOTIFIED_CALL_IDS_CAP = 500;
+
+/**
+ * Pull the channel prefix out of an `approverAuthorId` like `"slack:U123"`,
+ * `"linear:abc"`, `"web:user-id"`. Returns null when the id is null or
+ * doesn't carry a recognizable prefix — callers treat that as "fire the
+ * callback" (better to over-notify than miss a cross-channel update).
+ */
+function extractSourcePrefix(approverAuthorId: string | null): string | null {
+  if (!approverAuthorId) return null;
+  const idx = approverAuthorId.indexOf(":");
+  if (idx <= 0) return null;
+  return approverAuthorId.slice(0, idx);
+}
 
 export class CallbackNotificationService {
   private readonly repository: CallbackRepository;
@@ -190,6 +212,265 @@ export class CallbackNotificationService {
 
     this.log.error("Failed to notify callback client after retries", {
       message_id: messageId,
+      source,
+    });
+  }
+
+  /**
+   * Notify the originating bot of a plan verdict (approve / reject) when the
+   * verdict was set from a different channel than the one that posted the
+   * "Plan awaiting approval" message. Same-channel approvals are skipped —
+   * the bot's own modal/webhook handler already updates its surface.
+   *
+   * Routing mirrors `notifyComplete`: look up the plan's triggering
+   * message, read its `callback_context` + `source`, then POST a signed
+   * payload to the bot's `/callbacks/plan-status` endpoint via the
+   * existing `getBinding(source)` switch.
+   */
+  async notifyPlanStatus(params: {
+    triggerMessageId: string;
+    plan: PlanResponse;
+    verdict: "approved" | "rejected";
+    approverAuthorId: string | null;
+    implementationModel?: string | null;
+    reason?: string | null;
+  }): Promise<void> {
+    const { triggerMessageId, plan, verdict, approverAuthorId } = params;
+
+    const message = this.repository.getMessageCallbackContext(triggerMessageId);
+    if (!message?.callback_context) {
+      this.log.debug("callback.plan_status", {
+        plan_version: plan.version,
+        outcome: "skipped",
+        skip_reason: "no_callback_context",
+      });
+      return;
+    }
+
+    // Same-channel approvals are handled by the bot's own modal/webhook —
+    // don't double-update.
+    const approverSource = extractSourcePrefix(approverAuthorId);
+    if (approverSource && approverSource === message.source) {
+      this.log.debug("callback.plan_status", {
+        plan_version: plan.version,
+        approver_source: approverSource,
+        message_source: message.source,
+        outcome: "skipped",
+        skip_reason: "same_channel",
+      });
+      return;
+    }
+
+    // Automation-sourced messages don't have a user-facing surface to update.
+    const context = JSON.parse(message.callback_context) as Record<string, unknown>;
+    if (context.source === "automation") {
+      this.log.debug("callback.plan_status", {
+        plan_version: plan.version,
+        outcome: "skipped",
+        skip_reason: "automation_source",
+      });
+      return;
+    }
+
+    if (!this.env.INTERNAL_CALLBACK_SECRET) {
+      this.log.debug("callback.plan_status", {
+        plan_version: plan.version,
+        outcome: "skipped",
+        skip_reason: "no_secret",
+      });
+      return;
+    }
+
+    const source = message.source ?? null;
+    const binding = this.getBinding(source);
+    if (!binding) {
+      this.log.debug("callback.plan_status", {
+        plan_version: plan.version,
+        source,
+        outcome: "skipped",
+        skip_reason: "no_binding",
+      });
+      return;
+    }
+
+    const sessionId = this.getSessionId();
+    const timestamp = Date.now();
+
+    const payloadData = {
+      sessionId,
+      planVersion: plan.version,
+      plan,
+      verdict,
+      approverAuthorId,
+      ...(params.implementationModel != null
+        ? { implementationModel: params.implementationModel }
+        : {}),
+      ...(params.reason != null ? { reason: params.reason } : {}),
+      timestamp,
+      context,
+    };
+
+    const signature = await this.signPayload(payloadData, this.env.INTERNAL_CALLBACK_SECRET);
+    const payload = { ...payloadData, signature };
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await binding.fetch("https://internal/callbacks/plan-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (response.ok) {
+          this.log.info("callback.plan_status", {
+            plan_version: plan.version,
+            source,
+            verdict,
+            outcome: "success",
+          });
+          return;
+        }
+
+        const responseText = await response.text().catch(() => "");
+        this.log.warn("callback.plan_status", {
+          plan_version: plan.version,
+          source,
+          verdict,
+          outcome: "error",
+          http_status: response.status,
+          response_body: responseText.slice(0, 500),
+        });
+      } catch (e) {
+        this.log.warn("callback.plan_status", {
+          plan_version: plan.version,
+          source,
+          verdict,
+          outcome: "error",
+          attempt: attempt + 1,
+          error: e instanceof Error ? e : new Error(String(e)),
+        });
+      }
+
+      if (attempt < 1) await new Promise((r) => setTimeout(r, 1000));
+    }
+
+    this.log.error("Failed to deliver plan-status callback after retries", {
+      plan_version: plan.version,
+      source,
+      verdict,
+    });
+  }
+
+  /**
+   * Notify the originating bot of a session-lifecycle event
+   * (archive / unarchive). Unlike plan_status these events don't bind
+   * to a specific message, so we route based on the most recent
+   * message that carries a callback_context (a `latest-bot-touch`
+   * heuristic — handles users who resumed the session from a different
+   * Slack channel or Linear issue). No-op when the session has no
+   * bot-originated messages.
+   */
+  async notifySessionLifecycle(params: {
+    event: "archived" | "unarchived";
+    actorAuthorId: string | null;
+  }): Promise<void> {
+    const { event, actorAuthorId } = params;
+
+    const envelope = this.repository.getLatestCallbackEnvelope();
+    if (!envelope) {
+      this.log.debug("callback.session_lifecycle", {
+        event,
+        outcome: "skipped",
+        skip_reason: "no_bot_origin",
+      });
+      return;
+    }
+
+    const context = JSON.parse(envelope.callback_context) as Record<string, unknown>;
+    if (context.source === "automation") {
+      this.log.debug("callback.session_lifecycle", {
+        event,
+        outcome: "skipped",
+        skip_reason: "automation_source",
+      });
+      return;
+    }
+
+    if (!this.env.INTERNAL_CALLBACK_SECRET) {
+      this.log.debug("callback.session_lifecycle", {
+        event,
+        outcome: "skipped",
+        skip_reason: "no_secret",
+      });
+      return;
+    }
+
+    const source = envelope.source ?? null;
+    const binding = this.getBinding(source);
+    if (!binding) {
+      this.log.debug("callback.session_lifecycle", {
+        event,
+        source,
+        outcome: "skipped",
+        skip_reason: "no_binding",
+      });
+      return;
+    }
+
+    const sessionId = this.getSessionId();
+    const timestamp = Date.now();
+
+    const payloadData = {
+      sessionId,
+      event,
+      actorAuthorId,
+      timestamp,
+      context,
+    };
+
+    const signature = await this.signPayload(payloadData, this.env.INTERNAL_CALLBACK_SECRET);
+    const payload = { ...payloadData, signature };
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await binding.fetch("https://internal/callbacks/session-lifecycle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (response.ok) {
+          this.log.info("callback.session_lifecycle", {
+            event,
+            source,
+            outcome: "success",
+          });
+          return;
+        }
+
+        const responseText = await response.text().catch(() => "");
+        this.log.warn("callback.session_lifecycle", {
+          event,
+          source,
+          outcome: "error",
+          http_status: response.status,
+          response_body: responseText.slice(0, 500),
+        });
+      } catch (e) {
+        this.log.warn("callback.session_lifecycle", {
+          event,
+          source,
+          outcome: "error",
+          attempt: attempt + 1,
+          error: e instanceof Error ? e : new Error(String(e)),
+        });
+      }
+
+      if (attempt < 1) await new Promise((r) => setTimeout(r, 1000));
+    }
+
+    this.log.error("Failed to deliver session-lifecycle callback after retries", {
+      event,
       source,
     });
   }

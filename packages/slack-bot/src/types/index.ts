@@ -131,7 +131,7 @@ export type SlackInteractionPayload = {
  * Callback context passed with prompts for follow-up notifications.
  */
 export type { SlackCallbackContext, CallbackContext } from "@open-inspect/shared";
-import type { SlackCallbackContext } from "@open-inspect/shared";
+import type { PlanArtifact, SlackCallbackContext } from "@open-inspect/shared";
 
 // Keep backward-compatible alias
 export type SlackBotCallbackContext = SlackCallbackContext;
@@ -170,6 +170,46 @@ export interface ToolCallCallback {
   tool: string;
   args: Record<string, unknown>;
   callId: string;
+  timestamp: number;
+  signature: string;
+  context: SlackCallbackContext;
+}
+
+/**
+ * Plan-status callback payload from control-plane. Fired when a plan
+ * verdict (approve/reject) was set from a different channel than Slack —
+ * e.g. the user approved a Slack-triggered plan from the web UI — so the
+ * Slack bot can update its "Plan awaiting approval" message into the
+ * terminal-verdict form.
+ *
+ * Mirrors the wire shape of the corresponding control-plane payload in
+ * `callback-notification-service.ts:notifyPlanStatus`.
+ */
+export interface PlanStatusCallback {
+  sessionId: string;
+  planVersion: number;
+  plan: PlanArtifact;
+  verdict: "approved" | "rejected";
+  approverAuthorId: string | null;
+  implementationModel?: string;
+  reason?: string;
+  timestamp: number;
+  signature: string;
+  context: SlackCallbackContext;
+}
+
+/**
+ * Session-lifecycle callback payload from control-plane. Fired when a
+ * session transitions to/from "archived" by an actor on a surface that
+ * isn't the originating bot — most commonly a user archiving from the
+ * web UI. Lets the bot post a follow-up message in the originating
+ * Slack thread so the user can see the state change without watching
+ * the web app.
+ */
+export interface SessionLifecycleCallback {
+  sessionId: string;
+  event: "archived" | "unarchived";
+  actorAuthorId: string | null;
   timestamp: number;
   signature: string;
   context: SlackCallbackContext;
