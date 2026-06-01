@@ -12,6 +12,7 @@ import type {
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
+  ReviewThreadPayload,
   CheckSuiteCompletedPayload,
 } from "./types";
 import type { Logger } from "./logger";
@@ -22,6 +23,7 @@ import {
   handleReviewRequested,
   handleIssueComment,
   handleReviewComment,
+  handleReviewThreadResolved,
   handleCheckSuiteCompleted,
   type HandlerResult,
 } from "./handlers";
@@ -256,6 +258,14 @@ function dispatchHandler(
     case "pull_request_review_comment":
       if (p.action === "created") {
         return handleReviewComment(env, log, payload as ReviewCommentPayload, traceId);
+      }
+      return Promise.resolve({
+        outcome: "skipped",
+        skip_reason: "unsupported_action",
+      });
+    case "pull_request_review_thread":
+      if (p.action === "resolved") {
+        return handleReviewThreadResolved(env, log, payload as ReviewThreadPayload, traceId);
       }
       return Promise.resolve({
         outcome: "skipped",

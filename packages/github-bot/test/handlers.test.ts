@@ -5,6 +5,7 @@ import type {
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
+  ReviewThreadPayload,
   CheckSuiteCompletedPayload,
 } from "../src/types";
 import type { Logger } from "../src/logger";
@@ -52,6 +53,7 @@ import {
   handleReviewRequested,
   handleIssueComment,
   handleReviewComment,
+  handleReviewThreadResolved,
   handleCheckSuiteCompleted,
 } from "../src/handlers";
 import { generateInstallationToken, postReaction, checkSenderPermission } from "../src/github-auth";
@@ -77,6 +79,14 @@ function createMockEnv(): Env {
     if (/\/sessions\/.+\/prompt$/.test(url)) {
       return Promise.resolve(
         new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+      );
+    }
+    if (url === "https://internal/review-suggestions") {
+      return Promise.resolve(new Response(JSON.stringify({ status: "recorded" }), { status: 201 }));
+    }
+    if (url === "https://internal/review-suggestions/resolve") {
+      return Promise.resolve(
+        new Response(JSON.stringify({ status: "ok", resolved: 1 }), { status: 200 })
       );
     }
     return Promise.resolve(new Response("Not found", { status: 404 }));
@@ -1081,6 +1091,100 @@ describe("handleReviewComment", () => {
     expect(result).toEqual({ outcome: "skipped", skip_reason: "repo_not_enabled" });
     expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
     expect(log.debug).toHaveBeenCalledWith("handler.repo_not_enabled", expect.anything());
+  });
+});
+
+describe("review suggestion tracking (C2)", () => {
+  const botReviewCommentPayload: ReviewCommentPayload = {
+    ...reviewCommentPayload,
+    comment: {
+      ...reviewCommentPayload.comment,
+      id: 555,
+      body: "```suggestion\nfix\n```",
+      line: 12,
+      user: { login: "test-bot[bot]" },
+    },
+  };
+
+  const reviewThreadResolvedPayload: ReviewThreadPayload = {
+    action: "resolved",
+    thread: { comments: [{ id: 555 }, { id: 556 }] },
+    pull_request: { number: 42 },
+    repository: { owner: { login: "acme" }, name: "widgets", private: false },
+    sender: { login: "carol", id: 1003 },
+  };
+
+  it("records a bot-authored review comment and does not create a session", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleReviewComment(env, log, botReviewCommentPayload, "trace-c2");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "recorded_bot_suggestion" });
+
+    const cpFetch = getControlPlaneFetch(env);
+    expect(cpFetch).toHaveBeenCalledTimes(1);
+    expect(cpFetch.mock.calls[0][0]).toBe("https://internal/review-suggestions");
+    const body = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      repoOwner: "acme",
+      repoName: "widgets",
+      prNumber: 42,
+      commentId: 555,
+      file: "src/cache.ts",
+      line: 12,
+    });
+    // No session/prompt for the bot's own comment
+    expect(cpFetch).not.toHaveBeenCalledWith("https://internal/sessions", expect.anything());
+  });
+
+  it("marks tracked suggestions resolved when a review thread is resolved", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleReviewThreadResolved(
+      env,
+      log,
+      reviewThreadResolvedPayload,
+      "trace-c2"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "review_thread_resolved" });
+
+    const cpFetch = getControlPlaneFetch(env);
+    expect(cpFetch).toHaveBeenCalledTimes(1);
+    expect(cpFetch.mock.calls[0][0]).toBe("https://internal/review-suggestions/resolve");
+    const body = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(body.commentIds).toEqual([555, 556]);
+  });
+
+  it("skips a resolved thread with no comments", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleReviewThreadResolved(
+      env,
+      log,
+      { ...reviewThreadResolvedPayload, thread: { comments: [] } },
+      "trace-c2"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "no_thread_comments" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a non-bot review comment as a tracked suggestion", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    // carol (not the bot) — falls through to the normal mention/session path
+    await handleReviewComment(env, log, reviewCommentPayload, "trace-c2");
+
+    const cpFetch = getControlPlaneFetch(env);
+    expect(cpFetch).not.toHaveBeenCalledWith(
+      "https://internal/review-suggestions",
+      expect.anything()
+    );
   });
 });
 
