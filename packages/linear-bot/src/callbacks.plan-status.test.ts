@@ -69,11 +69,11 @@ describe("isValidPlanStatusPayload", () => {
 
 describe("formatCrossChannelActor", () => {
   it("uses the display name when provided, suffixed with the channel source", () => {
-    expect(formatCrossChannelActor("web:user-1", "Benoît Lelevé")).toBe("Benoît Lelevé (via web)");
+    expect(formatCrossChannelActor("web:user-1", "John Doe")).toBe("John Doe (via web)");
   });
 
   it("returns the display name without suffix when source can't be parsed", () => {
-    expect(formatCrossChannelActor(null, "Benoît Lelevé")).toBe("Benoît Lelevé");
+    expect(formatCrossChannelActor(null, "John Doe")).toBe("John Doe");
   });
 
   it("falls back to 'someone in <source>' when displayName is missing", () => {

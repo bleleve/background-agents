@@ -640,7 +640,7 @@ async function handlePlanStatusCallback(
   // Best-effort actor mention. Cross-channel verdicts are typically
   // "web:<userId>" with the user's display name passed alongside — we
   // can't render a Slack mention for a web user, so use the display name
-  // (e.g. "Benoît Lelevé (via web)") and fall back to a generic label.
+  // (e.g. "John Doe (via web)") and fall back to a generic label.
   const actorMention = formatCrossChannelActor(approverAuthorId, approverDisplayName);
 
   const blocks = buildPlanDecidedBlocks({
