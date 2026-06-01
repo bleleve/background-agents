@@ -134,6 +134,9 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("When uncertain whether the issue is real, do not post");
     expect(prompt).toContain("Disprove it before posting");
     expect(prompt).toContain("Don't flag what the repo's own tooling already catches");
+    expect(prompt).toContain("Out of scope — do not post");
+    expect(prompt).toContain("theoretical risks that need unlikely preconditions");
+    expect(prompt).toContain("issues in code this PR does not touch");
   });
 
   it("focuses the review on blind-spot axes beyond the diff", () => {
@@ -141,6 +144,14 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("Deletions: a removed field, flag, or branch");
     expect(prompt).toContain("Cross-boundary drift");
     expect(prompt).toContain("Silent behavior changes");
+  });
+
+  it("scopes out generated/vendored noise but keeps migrations in scope", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).toContain("Skip the noise");
+    expect(prompt).toContain("lockfiles");
+    expect(prompt).toContain("vendored dependencies");
+    expect(prompt).toContain("DB migrations are in scope");
   });
 
   it("forbids submitting a review when autoApproveOnOpen is false (default)", () => {
@@ -357,9 +368,10 @@ describe("buildCommentActionPrompt", () => {
     expect(qualityIdx).toBeGreaterThan(-1);
     expect(workflowIdx).toBeGreaterThan(-1);
     expect(qualityIdx).toBeLessThan(workflowIdx);
-    // Shared quality bar carries the disprove-it / CI-filter additions
+    // Shared quality bar carries the disprove-it / CI-filter / out-of-scope additions
     expect(prompt).toContain("Disprove it before posting");
     expect(prompt).toContain("Don't flag what the repo's own tooling already catches");
+    expect(prompt).toContain("Out of scope — do not post");
   });
 });
 
@@ -415,8 +427,9 @@ describe("buildFailedChecksPrompt", () => {
     expect(qualityIdx).toBeGreaterThan(-1);
     expect(workflowIdx).toBeGreaterThan(-1);
     expect(qualityIdx).toBeLessThan(workflowIdx);
-    // Shared quality bar carries the disprove-it / CI-filter additions
+    // Shared quality bar carries the disprove-it / CI-filter / out-of-scope additions
     expect(prompt).toContain("Disprove it before posting");
     expect(prompt).toContain("Don't flag what the repo's own tooling already catches");
+    expect(prompt).toContain("Out of scope — do not post");
   });
 });

@@ -40,6 +40,7 @@ A confidently-wrong inline comment costs reviewer time and erodes trust over man
 - **Verify symbol-existence claims with grep.** Deprecated names, missing methods, env vars — confirm against the installed dependency in \`vendor/bundle/\` / \`node_modules/\` / etc., not from a newer library version's changelog.
 - **Verify language/framework behavior claims, not just existence.** If you're asserting how a method or construct *behaves* (Ruby default-argument evaluation timing, ActiveRecord \`with_lock\` reload semantics, JS hoisting, Python GIL, etc.), read the source in \`vendor/bundle/\` / \`node_modules/\` or run a small \`ruby -e\` / \`node -e\` script. Don't pattern-match from analogous-looking code in other languages or older versions of the same framework.
 - **Check that your suggested code is materially different** from the existing line. If the only difference is stylistic (equivalent regex flags for a pattern with no metacharacters, equivalent quote styles, whitespace), do not post.
+- **Out of scope — do not post (unless a comment explicitly asks about it):** theoretical risks that need unlikely preconditions; defense-in-depth suggestions when the primary defense is already adequate; issues in code this PR does not touch; "consider using library X" style preferences.
 - **When uncertain whether the issue is real, do not post.** A missed real issue is recoverable on the next review pass; a confidently-wrong one creates noise on every review.`;
 
 function buildInlineSuggestionWorkflow(params: {
@@ -223,6 +224,7 @@ ${largeDiffSection}
    - Deletions: a removed field, flag, or branch that silently changes behavior
    - Cross-boundary drift: callers, siblings, or other implementations of the same interface not updated alongside this change (many bugs live outside the diff)
    - Silent behavior changes: same signature, different behavior (defaults, ordering, empty/missing-value handling)
+   Skip the noise: don't review lockfiles, generated or minified output, vendored dependencies, or sourcemaps unless they're directly relevant — but DB migrations are in scope, review them.
 3. You may read individual files in the repo for additional context beyond the diff
 ${reviewInstruction}
 5. Leave feedback only as inline suggestion comments on specific changed files/lines when you find an issue worth calling out.
