@@ -89,6 +89,15 @@ describe("resolveGithubLoginFromSaml", () => {
     expect(await resolveGithubLoginFromSaml(makeEnv(), "x@acme.com")).toBeNull();
   });
 
+  it("returns null when the node has no SAML identity to verify against", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(
+        externalIdentities([{ samlIdentity: null, user: { login: "bob", databaseId: 7 } }])
+      )
+    );
+    expect(await resolveGithubLoginFromSaml(makeEnv(), "bob@acme.com")).toBeNull();
+  });
+
   it("rejects a result whose NameID does not match the email", async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse(

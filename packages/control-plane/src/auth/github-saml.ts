@@ -101,9 +101,11 @@ export async function resolveGithubLoginFromSaml(
     const databaseId = node?.user?.databaseId;
     if (!login || databaseId == null) return null;
 
-    // Defensive: ensure the returned identity really matches this email.
+    // Defensive: ensure the returned identity really matches this email. A
+    // missing NameID can't be verified, so treat it as a non-match rather than
+    // risk attributing the PR to the wrong GitHub user.
     const nameId = node?.samlIdentity?.nameId;
-    if (nameId && nameId.toLowerCase() !== email.toLowerCase()) return null;
+    if (!nameId || nameId.toLowerCase() !== email.toLowerCase()) return null;
 
     return { login, userId: String(databaseId) };
   } catch (e) {
