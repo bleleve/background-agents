@@ -8,7 +8,7 @@ import {
   buildControlPlanePath,
 } from "@/lib/control-plane-query";
 import { resolveCurrentUserId } from "@/lib/current-user";
-import { CURRENT_USER_CREATED_BY } from "@/lib/session-list";
+import { CURRENT_USER_CREATED_BY } from "@/lib/automation-list";
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
