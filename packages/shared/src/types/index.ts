@@ -616,10 +616,26 @@ export interface AutomationCallbackContext {
   automationName: string;
 }
 
+/**
+ * Carried on PR-review prompts so the control-plane can route the completion
+ * callback back to github-bot, which guarantees a verdict comment exists on the
+ * PR (posting it itself if the agent didn't). The PR coordinates travel in the
+ * context so the bot doesn't need a separate session→PR mapping.
+ */
+export interface GitHubCallbackContext {
+  source: "github";
+  kind: "pr_review";
+  owner: string;
+  repo: string;
+  prNumber: number;
+  isPublic?: boolean;
+}
+
 export type CallbackContext =
   | SlackCallbackContext
   | LinearCallbackContext
-  | AutomationCallbackContext;
+  | AutomationCallbackContext
+  | GitHubCallbackContext;
 
 // API response types
 export interface CreateSessionRequest {

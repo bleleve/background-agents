@@ -262,6 +262,16 @@ describe("handlePullRequestOpened", () => {
     expect(promptBody.source).toBe("github");
     expect(promptBody.authorId).toBe("github:1001");
     expect(promptBody.content).toContain("Pull Request #42");
+    // Carries the PR-review callback context so the control-plane can route the
+    // completion callback back to the bot for the verdict guarantee.
+    expect(promptBody.callbackContext).toEqual({
+      source: "github",
+      kind: "pr_review",
+      owner: "acme",
+      repo: "widgets",
+      prNumber: 42,
+      isPublic: true,
+    });
 
     expect(log.info).toHaveBeenCalledWith(
       "session.created",
@@ -429,6 +439,16 @@ describe("handlePullRequestOpened (ready_for_review action)", () => {
     expect(promptBody.source).toBe("github");
     expect(promptBody.authorId).toBe("github:1001");
     expect(promptBody.content).toContain("Pull Request #42");
+    // Carries the PR-review callback context so the control-plane can route the
+    // completion callback back to the bot for the verdict guarantee.
+    expect(promptBody.callbackContext).toEqual({
+      source: "github",
+      kind: "pr_review",
+      owner: "acme",
+      repo: "widgets",
+      prNumber: 42,
+      isPublic: true,
+    });
 
     expect(log.info).toHaveBeenCalledWith(
       "session.created",

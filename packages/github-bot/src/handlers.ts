@@ -4,6 +4,7 @@ import {
   resolveAppName,
   parsePlanCommand,
   type PlanCommand,
+  type GitHubCallbackContext,
 } from "@open-inspect/shared";
 import type {
   Env,
@@ -242,7 +243,7 @@ async function sendPrompt(
   controlPlane: Fetcher,
   headers: Record<string, string>,
   sessionId: string,
-  params: { content: string; authorId: string }
+  params: { content: string; authorId: string; callbackContext?: GitHubCallbackContext }
 ): Promise<string> {
   const response = await controlPlane.fetch(`https://internal/sessions/${sessionId}/prompt`, {
     method: "POST",
@@ -550,6 +551,14 @@ export async function handleReviewRequested(
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
     content: prompt,
     authorId: `github:${payload.sender.id}`,
+    callbackContext: {
+      source: "github",
+      kind: "pr_review",
+      owner,
+      repo: repoName,
+      prNumber: pr.number,
+      isPublic: !repo.private,
+    },
   });
   log.info("prompt.sent", {
     ...meta,
@@ -664,6 +673,14 @@ export async function handlePullRequestOpened(
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
     content: prompt,
     authorId: `github:${sender.id}`,
+    callbackContext: {
+      source: "github",
+      kind: "pr_review",
+      owner,
+      repo: repoName,
+      prNumber: pr.number,
+      isPublic: !repo.private,
+    },
   });
   log.info("prompt.sent", {
     ...meta,

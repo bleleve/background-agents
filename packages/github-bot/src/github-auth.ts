@@ -153,3 +153,80 @@ export async function postReaction(
     return false;
   }
 }
+
+// Page size and page cap for the verdict-comment lookup. 100 is GitHub's max
+// per_page; 10 pages (1000 comments) is far more than any real PR thread, and
+// the loop short-circuits the moment it finds the marker.
+const ISSUE_COMMENTS_PER_PAGE = 100;
+const ISSUE_COMMENTS_MAX_PAGES = 10;
+
+/**
+ * Find the id of the first issue comment whose body starts with `marker`.
+ * Used to detect an already-posted verdict (the agent's own) before the bot
+ * posts a fallback, and as the idempotency guard against duplicate callbacks.
+ * Returns null when no such comment exists (or on error — caller treats a
+ * lookup failure as "absent", which at worst posts a duplicate the marker
+ * dedupes on the next pass).
+ */
+export async function findIssueCommentByMarker(
+  token: string,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  marker: string,
+  userAgent: string = DEFAULT_APP_NAME
+): Promise<number | null> {
+  for (let page = 1; page <= ISSUE_COMMENTS_MAX_PAGES; page++) {
+    const response = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}/comments?per_page=${ISSUE_COMMENTS_PER_PAGE}&page=${page}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": userAgent,
+        },
+      }
+    );
+    if (!response.ok) return null;
+    const comments = (await response.json()) as Array<{ id: number; body?: string }>;
+    const match = comments.find((c) => (c.body ?? "").startsWith(marker));
+    if (match) return match.id;
+    if (comments.length < ISSUE_COMMENTS_PER_PAGE) break;
+  }
+  return null;
+}
+
+/**
+ * Create an issue comment on a PR. Returns the new comment's id, or null on
+ * failure (best-effort — the caller logs but does not throw).
+ */
+export async function createIssueComment(
+  token: string,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  body: string,
+  userAgent: string = DEFAULT_APP_NAME
+): Promise<number | null> {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}/comments`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": userAgent,
+        },
+        body: JSON.stringify({ body }),
+      }
+    );
+    if (!response.ok) return null;
+    const created = (await response.json()) as { id: number };
+    return created.id;
+  } catch {
+    return null;
+  }
+}

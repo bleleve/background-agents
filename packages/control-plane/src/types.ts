@@ -44,6 +44,7 @@ export interface Env {
   // Service bindings
   SLACK_BOT?: Fetcher; // Optional - only if slack-bot is deployed
   LINEAR_BOT?: Fetcher; // Optional - only if linear-bot is deployed
+  GITHUB_BOT?: Fetcher; // Optional - only if github-bot is deployed (PR-review verdict callback)
 
   // Durable Objects
   SCHEDULER?: DurableObjectNamespace; // SchedulerDO for automation engine

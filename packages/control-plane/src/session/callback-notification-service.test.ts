@@ -37,11 +37,13 @@ function createTestHarness(overrides?: { env?: Partial<CallbackServiceEnv> }) {
 
   const slackBot = createMockFetcher();
   const linearBot = createMockFetcher();
+  const githubBot = createMockFetcher();
 
   const env: CallbackServiceEnv = {
     INTERNAL_CALLBACK_SECRET: "test-secret",
     SLACK_BOT: slackBot,
     LINEAR_BOT: linearBot,
+    GITHUB_BOT: githubBot,
     ...overrides?.env,
   };
 
@@ -59,6 +61,7 @@ function createTestHarness(overrides?: { env?: Partial<CallbackServiceEnv> }) {
     env,
     slackBot,
     linearBot,
+    githubBot,
   };
 }
 
@@ -209,6 +212,27 @@ describe("CallbackNotificationService", () => {
         .fetch;
       expect(linearFetch).toHaveBeenCalledTimes(1);
 
+      const slackFetch = (harness.slackBot as unknown as { fetch: ReturnType<typeof vi.fn> }).fetch;
+      expect(slackFetch).not.toHaveBeenCalled();
+    });
+
+    it("routes to GITHUB_BOT for github source", async () => {
+      vi.mocked(harness.repository.getMessageCallbackContext).mockReturnValue({
+        callback_context: JSON.stringify({ source: "github", kind: "pr_review", prNumber: 42 }),
+        source: "github",
+      });
+
+      const githubFetch = (harness.githubBot as unknown as { fetch: ReturnType<typeof vi.fn> })
+        .fetch;
+      vi.mocked(githubFetch).mockResolvedValue(new Response("ok", { status: 200 }));
+
+      await harness.service.notifyComplete("msg-1", true);
+
+      expect(githubFetch).toHaveBeenCalledTimes(1);
+      expect(githubFetch).toHaveBeenCalledWith(
+        "https://internal/callbacks/complete",
+        expect.any(Object)
+      );
       const slackFetch = (harness.slackBot as unknown as { fetch: ReturnType<typeof vi.fn> }).fetch;
       expect(slackFetch).not.toHaveBeenCalled();
     });
