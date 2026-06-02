@@ -1016,7 +1016,9 @@ export async function handleReviewComment(
   const repoFullName = `${owner}/${repoName}`.toLowerCase();
 
   // The bot's own inline suggestions are tracked for the acceptance-rate metric,
-  // not acted on. Record and stop before the mention/permission gates.
+  // not acted on. Record and stop before the mention/permission gates. For
+  // pull_request_review_comment events comment.user === sender, so this also
+  // supersedes the self-comment guard (no separate sender check needed below).
   if (comment.user.login === env.GITHUB_BOT_USERNAME) {
     await recordReviewSuggestion(env, log, traceId, {
       repoOwner: owner,
@@ -1036,11 +1038,6 @@ export async function handleReviewComment(
       sender: sender.login,
     });
     return { outcome: "skipped", skip_reason: "no_mention" };
-  }
-
-  if (sender.login === env.GITHUB_BOT_USERNAME) {
-    log.debug("handler.self_comment_ignored", { trace_id: traceId });
-    return { outcome: "skipped", skip_reason: "self_comment" };
   }
 
   const config = await getGitHubConfig(env, repoFullName, log);

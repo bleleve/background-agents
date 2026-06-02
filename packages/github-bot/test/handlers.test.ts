@@ -1074,11 +1074,14 @@ describe("handleReviewComment", () => {
     expect(generateInstallationToken).not.toHaveBeenCalled();
   });
 
-  it("returns early if comment is from the bot (loop prevention)", async () => {
+  it("returns early if comment is from the bot (loop prevention via tracking interception)", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
+    // Real pull_request_review_comment events have comment.user === sender, so a
+    // bot comment is caught by the tracking early-return before any action.
     const payload: ReviewCommentPayload = {
       ...reviewCommentPayload,
+      comment: { ...reviewCommentPayload.comment, user: { login: "test-bot[bot]" } },
       sender: {
         login: "test-bot[bot]",
         id: 2001,
@@ -1088,7 +1091,7 @@ describe("handleReviewComment", () => {
 
     const result = await handleReviewComment(env, log, payload, "trace-3");
 
-    expect(result).toEqual({ outcome: "skipped", skip_reason: "self_comment" });
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "recorded_bot_suggestion" });
     expect(generateInstallationToken).not.toHaveBeenCalled();
   });
 

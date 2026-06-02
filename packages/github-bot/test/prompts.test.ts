@@ -168,8 +168,10 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain(REEF_VERDICT_MARKER);
     expect(prompt).toContain("Overall risk");
     expect(prompt).toContain("By area");
-    // Re-review anchor: find prior verdict, then create OR update in place
+    // Re-review anchor: find prior verdict (paginated so it survives PRs with >30 comments),
+    // then create OR update in place
     expect(prompt).toContain(`select(.body | startswith("${REEF_VERDICT_MARKER}"))`);
+    expect(prompt).toContain("gh api --paginate");
     expect(prompt).toContain('gh api -X PATCH "repos/acme/widgets/issues/comments/$EXISTING"');
     expect(prompt).toContain('gh api -X POST "repos/acme/widgets/issues/42/comments"');
   });

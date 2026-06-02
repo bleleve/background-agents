@@ -107,7 +107,7 @@ function buildVerdictWorkflow(params: { owner: string; repo: string; number: num
    - If nothing survived the quality bar above, say so plainly and set the overall risk accordingly. Do not invent findings to justify a verdict.
 - Find any prior verdict comment, then create or update in place:
 
-   EXISTING="$(gh api "repos/${owner}/${repo}/issues/${number}/comments" --jq '[.[] | select(.body | startswith("${REEF_VERDICT_MARKER}"))][0].id // empty')"
+   EXISTING="$(gh api --paginate "repos/${owner}/${repo}/issues/${number}/comments" --jq '.[] | select(.body | startswith("${REEF_VERDICT_MARKER}")) | .id' | head -n1)"
    cat >/tmp/pr-verdict.md <<'EOF'
    ${REEF_VERDICT_MARKER}
    ## Review verdict
