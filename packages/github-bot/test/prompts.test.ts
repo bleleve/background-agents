@@ -168,8 +168,11 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).not.toContain("do not submit a review or a general PR comment");
     expect(prompt).toContain("review verdict");
     expect(prompt).toContain(REEF_VERDICT_MARKER);
-    expect(prompt).toContain("Overall risk");
-    expect(prompt).toContain("By area");
+    // Compact prioritized format: risk badge + "Worth a look" findings + collapsed all-clear + footer
+    expect(prompt).toContain("🟢 low");
+    expect(prompt).toContain("Worth a look");
+    expect(prompt).toContain("Reviewed, no concerns");
+    expect(prompt).toContain("Reef automated review");
     // Re-review anchor: find prior verdict (paginated so it survives PRs with >30 comments),
     // then create OR update in place
     expect(prompt).toContain(`select(.body | startswith("${REEF_VERDICT_MARKER}"))`);

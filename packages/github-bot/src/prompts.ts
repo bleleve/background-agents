@@ -101,20 +101,25 @@ function buildVerdictWorkflow(params: { owner: string; repo: string; number: num
 
    ${REEF_VERDICT_MARKER}
 
-- Structure the body as a risk map so a human knows where to start:
-   - **Overall risk**: low | medium | high — one sentence why.
-   - **By area** (highest-risk first): one line per changed area/file with notable risk, as \`path\` — <risk> — <where to start>.
-   - If nothing survived the quality bar above, say so plainly and set the overall risk accordingly. Do not invent findings to justify a verdict.
+- Structure the body as a scannable risk map — keep it tight, signal over ceremony:
+   - **Lead line:** a risk badge + a one-sentence summary. Badge: 🟢 low · 🟡 medium · 🔴 high.
+   - **Worth a look** — only if findings survived the quality bar, highest-risk first. One bullet per finding: \`<🟡|🔴> \`path:line\` — <the concrete risk in a few words> → [inline](<html_url of the inline comment you posted in step 6>)\`. Omit this whole section when nothing survived.
+   - **Reviewed, no concerns:** one terse line naming the areas/files you checked that had nothing notable.
+   - Footer line, exactly: \`<sub>🤖 Reef automated review</sub>\`.
+   - Do not invent findings to justify a verdict. A clean PR is just the 🟢 lead line + the "Reviewed" line + the footer (no "Worth a look" section).
 - Find any prior verdict comment, then create or update in place, printing the comment URL so you can confirm it landed:
 
    EXISTING="$(gh api --paginate "repos/${owner}/${repo}/issues/${number}/comments" --jq '.[] | select(.body | startswith("${REEF_VERDICT_MARKER}")) | .id' | head -n1)"
    cat >/tmp/pr-verdict.md <<'EOF'
    ${REEF_VERDICT_MARKER}
-   ## Review verdict
-   **Overall risk:** <low|medium|high> — <one sentence>
+   **<🟢|🟡|🔴> Reef verdict — <Low|Medium|High> risk** · <one-sentence summary>
 
-   **By area:**
-   - \`<path>\` — <risk> — <where to start>
+   **Worth a look**
+   - <🟡|🔴> \`<path:line>\` — <concrete risk> → [inline](<inline comment html_url>)
+
+   **Reviewed, no concerns:** <comma-separated areas>
+
+   <sub>🤖 Reef automated review</sub>
    EOF
    if [ -n "$EXISTING" ]; then
      gh api -X PATCH "repos/${owner}/${repo}/issues/comments/$EXISTING" -F body=@/tmp/pr-verdict.md --jq '.html_url'
