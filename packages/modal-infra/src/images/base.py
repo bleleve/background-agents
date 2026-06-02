@@ -229,6 +229,7 @@ base_image = (
         f"npm install -g @opencode-ai/plugin@{OPENCODE_VERSION} zod",
         "npm install -g oxlint@latest",
         "oxlint --version",
+        "npm install -g typescript-language-server@5.3.0",
         # Langfuse OpenCode plugin (loaded when LANGFUSE_* env vars are provided)
         "npm install -g opencode-plugin-langfuse@latest",
     )
