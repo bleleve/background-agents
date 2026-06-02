@@ -1,4 +1,7 @@
-import { buildUntrustedUserContentBlock as buildSharedBlock } from "@open-inspect/shared";
+import {
+  buildUntrustedUserContentBlock as buildSharedBlock,
+  UNTRUSTED_REPO_CONTENT_GUIDANCE,
+} from "@open-inspect/shared";
 
 // All GitHub bot callers share the same warning fingerprint, so we wrap the
 // shared helper here to keep the call sites terse. The shared helper handles
@@ -170,6 +173,8 @@ ${prBranchesBlock}
 - **Description**:
 ${prDescriptionBlock}
 
+${UNTRUSTED_REPO_CONTENT_GUIDANCE}
+
 ## Instructions
 1. Run \`gh pr diff ${number}\` to see the full diff
 2. Review the changes thoroughly, focusing on:
@@ -229,13 +234,25 @@ export function buildCommentActionPrompt(params: {
   let prDetails = "";
   if (title || (base && head)) {
     prDetails = "\n\n## PR Details";
-    if (title) prDetails += `\n- **Title**: ${title}`;
+    if (title) {
+      const prTitleBlock = buildUntrustedUserContentBlock({
+        source: "github_pr_title",
+        author: "github",
+        content: title,
+      });
+      prDetails += `\n- **Title**:\n${prTitleBlock}`;
+    }
     if (base && head) prDetails += `\n- **Branch**: ${base} ← ${head}`;
   }
 
   let codeLocation = "";
   if (filePath && diffHunk) {
-    codeLocation = `\n\n## Code Location\nThis comment is about \`${filePath}\`:\n\`\`\`\n${diffHunk}\n\`\`\``;
+    const diffHunkBlock = buildUntrustedUserContentBlock({
+      source: "github_diff_hunk",
+      author: "github",
+      content: diffHunk,
+    });
+    codeLocation = `\n\n## Code Location\nThis comment is about \`${filePath}\`:\n${diffHunkBlock}`;
   }
 
   let replyInstruction = "";
@@ -251,6 +268,8 @@ ${buildUntrustedUserContentBlock({
   author: commenter,
   content: commentBody,
 })}
+
+${UNTRUSTED_REPO_CONTENT_GUIDANCE}
 
 ## Instructions
 1. Run \`gh pr diff ${number}\` if you need to see the current changes
@@ -333,6 +352,8 @@ ${prAuthorBlock}
 ${prBranchesBlock}
 - **Check Suite Conclusion**:
 ${checkConclusionBlock}
+
+${UNTRUSTED_REPO_CONTENT_GUIDANCE}
 
 ## Instructions
 1. Inspect failing checks for this PR:
