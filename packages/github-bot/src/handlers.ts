@@ -1043,7 +1043,9 @@ export async function handleReviewComment(
       prNumber: pr.number,
       commentId: comment.id,
       file: comment.path,
-      line: comment.line ?? comment.position ?? null,
+      // `position` is a deprecated diff-hunk offset, not a file line — never let
+      // it stand in for `line`, or the metric's line column gets a hunk offset.
+      line: comment.line ?? null,
     });
     return { outcome: "skipped", skip_reason: "recorded_bot_suggestion" };
   }

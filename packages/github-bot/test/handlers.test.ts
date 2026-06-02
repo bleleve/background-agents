@@ -1175,6 +1175,31 @@ describe("review suggestion tracking (C2)", () => {
     expect(cpFetch).not.toHaveBeenCalledWith("https://internal/sessions", expect.anything());
   });
 
+  it("records line: null (not the deprecated position offset) when the comment has no line", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    // Bot comment with a `position` (deprecated diff-hunk offset) but no `line`.
+    const noLinePayload: ReviewCommentPayload = {
+      ...reviewCommentPayload,
+      comment: {
+        ...reviewCommentPayload.comment, // position: 5, no `line`
+        id: 557,
+        body: "```suggestion\nfix\n```",
+        user: { login: "test-bot[bot]" },
+      },
+    };
+
+    const result = await handleReviewComment(env, log, noLinePayload, "trace-c2-noline");
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "recorded_bot_suggestion" });
+
+    const cpFetch = getControlPlaneFetch(env);
+    const body = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(body.commentId).toBe(557);
+    // The deprecated `position` (5) must NOT leak into the `line` column.
+    expect(body.line).toBeNull();
+  });
+
   it("marks tracked suggestions resolved when a review thread is resolved", async () => {
     const env = createMockEnv();
     const log = createMockLogger();

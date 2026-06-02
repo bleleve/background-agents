@@ -137,6 +137,8 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("Out of scope — do not post");
     expect(prompt).toContain("theoretical risks that need unlikely preconditions");
     expect(prompt).toContain("issues in code this PR does not touch");
+    // "rare in practice" must not drop data-corruption findings (severity, not just likelihood)
+    expect(prompt).toContain("silent data corruption or loss");
   });
 
   it("focuses the review on blind-spot axes beyond the diff", () => {
