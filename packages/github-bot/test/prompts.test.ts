@@ -176,6 +176,16 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain('gh api -X POST "repos/acme/widgets/issues/42/comments"');
   });
 
+  it("makes the verdict mandatory and self-verified so a clean PR still gets one", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    // Decoupled from findings: a clean review must not skip the verdict
+    expect(prompt).toContain("mandatory");
+    expect(prompt).toContain("regardless of your conclusion");
+    // Self-verification: the posting call prints html_url and the agent must confirm it landed
+    expect(prompt).toContain("--jq '.html_url'");
+    expect(prompt).toContain("Do not end the review without a posted verdict");
+  });
+
   it("keeps the verdict regardless of autoApproveOnOpen", () => {
     const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
     expect(prompt).toContain(REEF_VERDICT_MARKER);

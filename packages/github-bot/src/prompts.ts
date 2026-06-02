@@ -96,7 +96,7 @@ export const REEF_VERDICT_MARKER = "<!-- reef-verdict -->";
 
 function buildVerdictWorkflow(params: { owner: string; repo: string; number: number }): string {
   const { owner, repo, number } = params;
-  return `7. Post a single **review verdict** comment — one editable top-level PR comment that serves as the re-review anchor. On a re-review, update it in place instead of posting a new one.
+  return `7. Post a single **review verdict** comment. **This is your final action and it is mandatory — post it regardless of your conclusion.** Even when the PR is clean and you posted no inline suggestions, you MUST still post the verdict, with the overall risk set accordingly. "Nothing to flag" is itself a verdict, not a reason to skip this step. It is one editable top-level PR comment that serves as the re-review anchor; on a re-review, update it in place instead of posting a new one.
 - The body MUST begin with this exact marker line (invisible when rendered; it lets you find the comment again):
 
    ${REEF_VERDICT_MARKER}
@@ -105,7 +105,7 @@ function buildVerdictWorkflow(params: { owner: string; repo: string; number: num
    - **Overall risk**: low | medium | high — one sentence why.
    - **By area** (highest-risk first): one line per changed area/file with notable risk, as \`path\` — <risk> — <where to start>.
    - If nothing survived the quality bar above, say so plainly and set the overall risk accordingly. Do not invent findings to justify a verdict.
-- Find any prior verdict comment, then create or update in place:
+- Find any prior verdict comment, then create or update in place, printing the comment URL so you can confirm it landed:
 
    EXISTING="$(gh api --paginate "repos/${owner}/${repo}/issues/${number}/comments" --jq '.[] | select(.body | startswith("${REEF_VERDICT_MARKER}")) | .id' | head -n1)"
    cat >/tmp/pr-verdict.md <<'EOF'
@@ -117,10 +117,11 @@ function buildVerdictWorkflow(params: { owner: string; repo: string; number: num
    - \`<path>\` — <risk> — <where to start>
    EOF
    if [ -n "$EXISTING" ]; then
-     gh api -X PATCH "repos/${owner}/${repo}/issues/comments/$EXISTING" -F body=@/tmp/pr-verdict.md
+     gh api -X PATCH "repos/${owner}/${repo}/issues/comments/$EXISTING" -F body=@/tmp/pr-verdict.md --jq '.html_url'
    else
-     gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" -F body=@/tmp/pr-verdict.md
+     gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" -F body=@/tmp/pr-verdict.md --jq '.html_url'
    fi
+- Confirm the command printed the comment's \`html_url\`. If it printed nothing or errored, the verdict did NOT post — fix the call and retry until a URL comes back. Do not end the review without a posted verdict.
 - The verdict prioritizes; it does not reopen the door to speculative findings. Do not list anything here that did not survive the quality bar above.`;
 }
 
