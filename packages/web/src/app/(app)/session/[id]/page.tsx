@@ -42,6 +42,7 @@ import {
   DEFAULT_MODEL,
   getDefaultReasoningEffort,
   isValidReasoningEffort,
+  parseReviewSessionPrNumber,
   type ModelCategory,
   type PlanArtifact,
 } from "@open-inspect/shared";
@@ -1189,6 +1190,7 @@ function SessionContent({
               sessionId={sessionState?.id || ""}
               sessionStatus={sessionState?.status || ""}
               artifacts={artifacts}
+              reviewPrNumber={parseReviewSessionPrNumber(sessionState?.title)}
               onArchive={handleArchive}
               onUnarchive={handleUnarchive}
             />

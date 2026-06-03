@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { generateAppJwt, postReaction, checkSenderPermission } from "../src/github-auth";
+import {
+  generateAppJwt,
+  postReaction,
+  checkSenderPermission,
+  removeIssueLabel,
+} from "../src/github-auth";
 
 /** Generate a PKCS#8 PEM RSA key pair for testing. */
 async function generateTestKeyPair(): Promise<{ privateKeyPem: string }> {
@@ -225,5 +230,39 @@ describe("checkSenderPermission", () => {
         headers: expect.objectContaining({ "User-Agent": "Acme Bot" }),
       })
     );
+  });
+});
+
+describe("removeIssueLabel", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("issues a DELETE for the label and returns true on success", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(new Response("", { status: 200 }));
+
+    const ok = await removeIssueLabel("tok", "acme", "widgets", 42, "ask-for-review", "Acme Bot");
+
+    expect(ok).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://api.github.com/repos/acme/widgets/issues/42/labels/ask-for-review",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("treats a 404 (label not present) as success — nothing to remove", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(new Response("Not Found", { status: 404 }));
+    expect(await removeIssueLabel("tok", "acme", "widgets", 42, "ask-for-review")).toBe(true);
+  });
+
+  it("returns false on a network error", async () => {
+    vi.mocked(globalThis.fetch).mockRejectedValue(new Error("network error"));
+    expect(await removeIssueLabel("tok", "acme", "widgets", 42, "ask-for-review")).toBe(false);
   });
 });

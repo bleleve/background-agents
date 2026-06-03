@@ -110,15 +110,31 @@ access model and can authenticate auxiliary private repos on the configured SCM 
 
 ## Webhook Events
 
-| Event                         | Action             | Trigger                     | Handler                   |
-| ----------------------------- | ------------------ | --------------------------- | ------------------------- |
-| `pull_request`                | `opened`           | Non-draft PR opened         | `handlePullRequestOpened` |
-| `pull_request`                | `review_requested` | Compatibility event path    | `handleReviewRequested`   |
-| `issue_comment`               | `created`          | @mention in a PR comment    | `handleIssueComment`      |
-| `pull_request_review_comment` | `created`          | @mention in a review thread | `handleReviewComment`     |
+| Event                         | Action             | Trigger                      | Handler                    |
+| ----------------------------- | ------------------ | ---------------------------- | -------------------------- |
+| `pull_request`                | `opened`           | Non-draft PR opened          | `handlePullRequestOpened`  |
+| `pull_request`                | `review_requested` | Compatibility event path     | `handleReviewRequested`    |
+| `pull_request`                | `labeled`          | `ask-for-review` label added | `handlePullRequestLabeled` |
+| `issue_comment`               | `created`          | @mention in a PR comment     | `handleIssueComment`       |
+| `pull_request_review_comment` | `created`          | @mention in a review thread  | `handleReviewComment`      |
 
 All events are processed asynchronously via `executionCtx.waitUntil()`. The webhook endpoint returns
 200 immediately after signature verification and delivery dedupe.
+
+### Re-triggering a review
+
+A completed review can be re-run two ways, both reusing the same review machinery. On a re-review
+the agent finds the prior verdict by its `<!-- reef-verdict -->` marker, **deletes it, and posts a
+fresh verdict comment** — a new comment notifies subscribers, whereas an in-place edit would be
+silent.
+
+- **`ask-for-review` label** — add the label to a PR to re-run the full review. The bot removes the
+  label again once the review completes, so re-adding it re-triggers. (No extra GitHub App config —
+  the `labeled` action ships with the already-subscribed `Pull request` event.)
+- **Web UI** — the "Re-run review" button on a PR-review session calls the bot's internal
+  `POST /internal/reviews` endpoint (HMAC-authenticated with `INTERNAL_CALLBACK_SECRET`), which runs
+  the same review attributed to the requesting user. Requires `GITHUB_BOT_URL` set on the web app
+  (and the `GITHUB_BOT_WORKER` service binding on Cloudflare).
 
 ### Handler Flows
 
@@ -139,6 +155,13 @@ people to request the GitHub App bot through the PR reviewer picker.
 2. Post eyes reaction on the PR (fire-and-forget)
 3. Create session via control plane
 4. Send code review prompt (includes PR metadata + `gh` CLI instructions)
+
+**Pull Request Labeled (re-review):**
+
+1. Check the added `label.name` is `ask-for-review` — skip otherwise
+2. Skip drafts; apply the usual repo-enablement, visibility, and caller gating
+3. Post eyes reaction, create session, send the code review prompt
+4. On completion, the bot removes the `ask-for-review` label (see `handleCompleteCallback`)
 
 **Issue Comment:**
 

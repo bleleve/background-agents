@@ -75,6 +75,23 @@ export interface PullRequestOpenedPayload {
   sender: { login: string; id: number; avatar_url: string };
 }
 
+export interface PullRequestLabeledPayload {
+  action: "labeled";
+  label: { name: string };
+  pull_request: {
+    number: number;
+    title: string;
+    body: string | null;
+    user: { login: string };
+    head: { ref: string; sha: string };
+    base: { ref: string };
+    draft: boolean;
+    labels?: Array<{ name: string }>;
+  };
+  repository: { owner: { login: string }; name: string; private: boolean };
+  sender: { login: string; id: number; avatar_url: string };
+}
+
 export interface ReviewRequestedPayload {
   action: "review_requested";
   pull_request: {

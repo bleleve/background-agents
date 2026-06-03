@@ -3,12 +3,14 @@ import {
   fetchModelDefaults,
   resolveAppName,
   parsePlanCommand,
+  reviewSessionTitle,
   type PlanCommand,
   type GitHubCallbackContext,
 } from "@open-inspect/shared";
 import type {
   Env,
   PullRequestOpenedPayload,
+  PullRequestLabeledPayload,
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
@@ -29,6 +31,7 @@ import {
   extractPlanModelFromLabels,
   extractReviewModelFromLabels,
   hasPlanLabel,
+  isAskForReviewLabel,
   type GitHubLabel,
 } from "./label-resolution";
 
@@ -328,7 +331,9 @@ interface GitHubPullRequestDetails {
   body: string | null;
   user: { login: string };
   head: { ref: string; sha: string };
-  base: { ref: string };
+  // `base.repo.private` lets the internal review endpoint (which has no webhook
+  // payload) resolve repo visibility for the prompt's untrusted-content guidance.
+  base: { ref: string; repo?: { private: boolean } };
   draft: boolean;
   state: string;
   additions?: number;
@@ -465,6 +470,107 @@ async function resolveCallerGating(
   return { allowed: true, ghToken, headers };
 }
 
+/** Logged `action` / `handler_action` value identifying which path ran a review. */
+type ReviewActionLabel = "review" | "auto_review" | "rereview";
+
+interface RunCodeReviewParams {
+  owner: string;
+  repoName: string;
+  prNumber: number;
+  title: string;
+  body: string | null;
+  author: string;
+  base: string;
+  head: string;
+  isPublic: boolean;
+  model: string;
+  reasoningEffort?: string | null;
+  codeReviewInstructions?: string | null;
+  autoApproveOnOpen?: boolean;
+  scmLogin: string;
+  scmUserId: string;
+  scmAvatarUrl: string;
+  actionLabel: ReviewActionLabel;
+  meta: Record<string, unknown>;
+}
+
+/**
+ * Shared core for every full code review: create a session, detect a large
+ * diff, build the review prompt, and send it with the `pr_review` completion
+ * callback context. Used by the auto-review-on-open, review-requested,
+ * `reef-review` label, and web-triggered re-review paths so they stay in sync.
+ */
+async function runCodeReview(
+  env: Env,
+  log: Logger,
+  ghToken: string,
+  headers: Record<string, string>,
+  params: RunCodeReviewParams
+): Promise<HandlerResult> {
+  const sessionId = await createSession(env.CONTROL_PLANE, headers, {
+    repoOwner: params.owner,
+    repoName: params.repoName,
+    title: reviewSessionTitle(params.prNumber),
+    model: params.model,
+    reasoningEffort: params.reasoningEffort,
+    scmLogin: params.scmLogin,
+    scmUserId: params.scmUserId,
+    scmAvatarUrl: params.scmAvatarUrl,
+    prNumber: params.prNumber,
+  });
+  log.info("session.created", {
+    ...params.meta,
+    session_id: sessionId,
+    action: params.actionLabel,
+    review_model: params.model,
+  });
+
+  const largeDiff = await isLargeDiff(ghToken, params.owner, params.repoName, params.prNumber);
+
+  const prompt = buildCodeReviewPrompt({
+    owner: params.owner,
+    repo: params.repoName,
+    number: params.prNumber,
+    title: params.title,
+    body: params.body,
+    author: params.author,
+    base: params.base,
+    head: params.head,
+    isPublic: params.isPublic,
+    codeReviewInstructions: params.codeReviewInstructions,
+    autoApproveOnOpen: params.autoApproveOnOpen,
+    largeDiff,
+    sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
+  });
+
+  const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
+    content: prompt,
+    authorId: `github:${params.scmUserId}`,
+    callbackContext: {
+      source: "github",
+      kind: "pr_review",
+      owner: params.owner,
+      repo: params.repoName,
+      prNumber: params.prNumber,
+      isPublic: params.isPublic,
+    },
+  });
+  log.info("prompt.sent", {
+    ...params.meta,
+    session_id: sessionId,
+    message_id: messageId,
+    source: "github",
+    content_length: prompt.length,
+  });
+
+  return {
+    outcome: "processed",
+    session_id: sessionId,
+    message_id: messageId,
+    handler_action: params.actionLabel,
+  };
+}
+
 export async function handleReviewRequested(
   env: Env,
   log: Logger,
@@ -520,71 +626,28 @@ export async function handleReviewRequested(
 
   // `review-<alias>` label overrides the configured model for PR reviews only.
   // It must be applied before the PR is opened or the review request fires.
-  const reviewLabels: GitHubLabel[] = pr.labels ?? [];
-  const reviewModel = extractReviewModelFromLabels(reviewLabels) ?? config.model;
+  const reviewModel = extractReviewModelFromLabels(pr.labels ?? []) ?? config.model;
 
-  const sessionId = await createSession(env.CONTROL_PLANE, headers, {
-    repoOwner: owner,
-    repoName,
-    title: `GitHub: Review PR #${pr.number}`,
-    model: reviewModel,
-    reasoningEffort: config.reasoningEffort,
-    scmLogin: sender.login,
-    scmUserId: String(sender.id),
-    scmAvatarUrl: sender.avatar_url,
-    prNumber: pr.number,
-  });
-  log.info("session.created", {
-    ...meta,
-    session_id: sessionId,
-    action: "review",
-    review_model: reviewModel,
-  });
-
-  const largeDiff = await isLargeDiff(ghToken, owner, repoName, pr.number);
-
-  const prompt = buildCodeReviewPrompt({
+  return runCodeReview(env, log, ghToken, headers, {
     owner,
-    repo: repoName,
-    number: pr.number,
+    repoName,
+    prNumber: pr.number,
     title: pr.title,
     body: pr.body,
     author: pr.user.login,
     base: pr.base.ref,
     head: pr.head.ref,
     isPublic: !repo.private,
+    model: reviewModel,
+    reasoningEffort: config.reasoningEffort,
     codeReviewInstructions: config.codeReviewInstructions,
     autoApproveOnOpen: config.autoApproveOnOpen,
-    largeDiff,
-    sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
+    scmLogin: sender.login,
+    scmUserId: String(sender.id),
+    scmAvatarUrl: sender.avatar_url,
+    actionLabel: "review",
+    meta,
   });
-
-  const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
-    content: prompt,
-    authorId: `github:${payload.sender.id}`,
-    callbackContext: {
-      source: "github",
-      kind: "pr_review",
-      owner,
-      repo: repoName,
-      prNumber: pr.number,
-      isPublic: !repo.private,
-    },
-  });
-  log.info("prompt.sent", {
-    ...meta,
-    session_id: sessionId,
-    message_id: messageId,
-    source: "github",
-    content_length: prompt.length,
-  });
-
-  return {
-    outcome: "processed",
-    session_id: sessionId,
-    message_id: messageId,
-    handler_action: "review",
-  };
 }
 
 export async function handlePullRequestOpened(
@@ -649,71 +712,202 @@ export async function handlePullRequestOpened(
 
   // `review-<alias>` label overrides the configured model for the auto-review.
   // Must be applied before the PR is opened.
-  const autoReviewLabels: GitHubLabel[] = pr.labels ?? [];
-  const autoReviewModel = extractReviewModelFromLabels(autoReviewLabels) ?? config.model;
+  const autoReviewModel = extractReviewModelFromLabels(pr.labels ?? []) ?? config.model;
 
-  const sessionId = await createSession(env.CONTROL_PLANE, headers, {
-    repoOwner: owner,
-    repoName,
-    title: `GitHub: Review PR #${pr.number}`,
-    model: autoReviewModel,
-    reasoningEffort: config.reasoningEffort,
-    scmLogin: sender.login,
-    scmUserId: String(sender.id),
-    scmAvatarUrl: sender.avatar_url,
-    prNumber: pr.number,
-  });
-  log.info("session.created", {
-    ...meta,
-    session_id: sessionId,
-    action: "auto_review",
-    review_model: autoReviewModel,
-  });
-
-  const largeDiff = await isLargeDiff(ghToken, owner, repoName, pr.number);
-
-  const prompt = buildCodeReviewPrompt({
+  return runCodeReview(env, log, ghToken, headers, {
     owner,
-    repo: repoName,
-    number: pr.number,
+    repoName,
+    prNumber: pr.number,
     title: pr.title,
     body: pr.body,
     author: pr.user.login,
     base: pr.base.ref,
     head: pr.head.ref,
     isPublic: !repo.private,
+    model: autoReviewModel,
+    reasoningEffort: config.reasoningEffort,
     codeReviewInstructions: config.codeReviewInstructions,
     autoApproveOnOpen: config.autoApproveOnOpen,
-    largeDiff,
-    sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
+    scmLogin: sender.login,
+    scmUserId: String(sender.id),
+    scmAvatarUrl: sender.avatar_url,
+    actionLabel: "auto_review",
+    meta,
+  });
+}
+
+/**
+ * A label was added to a PR. When it's the `ask-for-review` trigger label,
+ * re-run the full code review. The label is removed again when the review
+ * completes (see handleCompleteCallback), so re-adding it re-triggers.
+ */
+export async function handlePullRequestLabeled(
+  env: Env,
+  log: Logger,
+  payload: PullRequestLabeledPayload,
+  traceId: string
+): Promise<HandlerResult> {
+  const { pull_request: pr, repository: repo, sender, label } = payload;
+  const owner = repo.owner.login;
+  const repoName = repo.name;
+  const repoFullName = `${owner}/${repoName}`.toLowerCase();
+
+  if (!isAskForReviewLabel(label.name)) {
+    log.debug("handler.not_review_label", { trace_id: traceId, label: label.name });
+    return { outcome: "skipped", skip_reason: "not_review_label" };
+  }
+
+  if (pr.draft) {
+    log.debug("handler.draft_pr_skipped", { trace_id: traceId, pull_number: pr.number });
+    return { outcome: "skipped", skip_reason: "draft_pr" };
+  }
+
+  const config = await getGitHubConfig(env, repoFullName, log);
+
+  if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
+    log.debug("handler.repo_not_enabled", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "repo_not_enabled" };
+  }
+
+  if (config.privateReposOnly && !repo.private) {
+    log.debug("handler.public_repo_skipped", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "public_repo_skipped" };
+  }
+
+  const gating = await resolveCallerGating(
+    env,
+    config,
+    sender.login,
+    owner,
+    repoName,
+    log,
+    traceId,
+    repoFullName
+  );
+  if (!gating.allowed) return { outcome: "skipped", skip_reason: gating.reason };
+  const { ghToken, headers } = gating;
+
+  const meta = { trace_id: traceId, repo: repoFullName, pull_number: pr.number };
+  fireAndForgetReaction(
+    log,
+    ghToken,
+    `https://api.github.com/repos/${owner}/${repoName}/issues/${pr.number}/reactions`,
+    resolveAppName(env),
+    meta
+  );
+
+  const reviewModel = extractReviewModelFromLabels(pr.labels ?? []) ?? config.model;
+
+  return runCodeReview(env, log, ghToken, headers, {
+    owner,
+    repoName,
+    prNumber: pr.number,
+    title: pr.title,
+    body: pr.body,
+    author: pr.user.login,
+    base: pr.base.ref,
+    head: pr.head.ref,
+    isPublic: !repo.private,
+    model: reviewModel,
+    reasoningEffort: config.reasoningEffort,
+    codeReviewInstructions: config.codeReviewInstructions,
+    // An explicit re-review never auto-approves.
+    autoApproveOnOpen: false,
+    scmLogin: sender.login,
+    scmUserId: String(sender.id),
+    scmAvatarUrl: sender.avatar_url,
+    actionLabel: "rereview",
+    meta,
+  });
+}
+
+/** Body of an internal `POST /internal/reviews` request (from the web UI). */
+export interface InternalReviewRequest {
+  owner: string;
+  repo: string;
+  prNumber: number;
+  /** The Reef user who clicked "Re-run review" — attributed as the session author. */
+  requestedBy: { login: string; id: string | number; avatarUrl?: string | null };
+  /** Optional model override; defaults to the repo's configured review model. */
+  model?: string;
+}
+
+export type InternalReviewResult =
+  | { ok: true; sessionId: string }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Re-run a PR review on demand, triggered by the Reef web UI (not a webhook).
+ * The caller is already authenticated at the HTTP layer (HMAC), so there is no
+ * sender gating here — but repo enablement and visibility are still enforced.
+ */
+export async function handleReviewRequestInternal(
+  env: Env,
+  log: Logger,
+  req: InternalReviewRequest,
+  traceId: string
+): Promise<InternalReviewResult> {
+  const owner = req.owner;
+  const repoName = req.repo;
+  const repoFullName = `${owner}/${repoName}`.toLowerCase();
+  const meta = { trace_id: traceId, repo: repoFullName, pull_number: req.prNumber };
+
+  const config = await getGitHubConfig(env, repoFullName, log);
+  if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
+    log.info("internal_review.repo_not_enabled", meta);
+    return { ok: false, status: 403, error: "repo_not_enabled" };
+  }
+
+  const userAgent = resolveAppName(env);
+  const [ghToken, headers] = await Promise.all([
+    generateInstallationToken({
+      appId: env.GITHUB_APP_ID,
+      privateKey: env.GITHUB_APP_PRIVATE_KEY,
+      installationId: env.GITHUB_APP_INSTALLATION_ID,
+      userAgent,
+    }),
+    getAuthHeaders(env, traceId),
+  ]);
+
+  const details = await fetchPullRequestDetails(ghToken, owner, repoName, req.prNumber);
+  if (!details) {
+    log.info("internal_review.pr_not_found", meta);
+    return { ok: false, status: 404, error: "pull_request_not_found" };
+  }
+
+  // Default to private when visibility can't be determined — the safe choice for
+  // the prompt's untrusted-content handling.
+  const isPublic = !(details.base.repo?.private ?? true);
+  if (config.privateReposOnly && isPublic) {
+    log.info("internal_review.public_repo_skipped", meta);
+    return { ok: false, status: 403, error: "public_repo_skipped" };
+  }
+
+  const result = await runCodeReview(env, log, ghToken, headers, {
+    owner,
+    repoName,
+    prNumber: req.prNumber,
+    title: details.title,
+    body: details.body,
+    author: details.user.login,
+    base: details.base.ref,
+    head: details.head.ref,
+    isPublic,
+    model: req.model ?? config.model,
+    reasoningEffort: config.reasoningEffort,
+    codeReviewInstructions: config.codeReviewInstructions,
+    autoApproveOnOpen: false,
+    scmLogin: req.requestedBy.login,
+    scmUserId: String(req.requestedBy.id),
+    scmAvatarUrl: req.requestedBy.avatarUrl ?? "",
+    actionLabel: "rereview",
+    meta,
   });
 
-  const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
-    content: prompt,
-    authorId: `github:${sender.id}`,
-    callbackContext: {
-      source: "github",
-      kind: "pr_review",
-      owner,
-      repo: repoName,
-      prNumber: pr.number,
-      isPublic: !repo.private,
-    },
-  });
-  log.info("prompt.sent", {
-    ...meta,
-    session_id: sessionId,
-    message_id: messageId,
-    source: "github",
-    content_length: prompt.length,
-  });
-
-  return {
-    outcome: "processed",
-    session_id: sessionId,
-    message_id: messageId,
-    handler_action: "auto_review",
-  };
+  if (result.outcome === "processed") {
+    return { ok: true, sessionId: result.session_id };
+  }
+  return { ok: false, status: 500, error: result.skip_reason };
 }
 
 export async function handleCheckSuiteCompleted(
