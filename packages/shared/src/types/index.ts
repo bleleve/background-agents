@@ -645,6 +645,8 @@ export interface CreateSessionRequest {
   model?: string;
   reasoningEffort?: string;
   branch?: string;
+  /** GitHub PR number this session reviews/acts on (github-bot sessions only). */
+  prNumber?: number;
   /**
    * When true, the session is gated on an explicit human approval of a plan
    * before any implementation step runs. The agent must call the save_plan
@@ -773,6 +775,43 @@ export interface AnalyticsBreakdownEntry {
 
 export interface AnalyticsBreakdownResponse {
   entries: AnalyticsBreakdownEntry[];
+}
+
+// ─── Review-suggestion analytics ───────────────────────────────────────────────
+// Volume-first: these measure how noisy the reviewer is (suggestions per PR, by
+// repo/model/risk). `resolved` is the count of resolved review threads — a WEAK
+// proxy that conflates "applied" and "dismissed", never an acceptance/quality rate.
+
+export const REVIEW_SUGGESTION_BREAKDOWN_BY = ["repo", "model", "risk_score"] as const;
+export type ReviewSuggestionBreakdownBy = (typeof REVIEW_SUGGESTION_BREAKDOWN_BY)[number];
+
+export interface ReviewSuggestionsSummaryResponse {
+  total: number;
+  prsReviewed: number;
+  perPr: number;
+  resolved: number;
+}
+
+export interface ReviewSuggestionsBreakdownEntry {
+  key: string;
+  total: number;
+  prs: number;
+  perPr: number;
+  resolved: number;
+}
+
+export interface ReviewSuggestionsBreakdownResponse {
+  entries: ReviewSuggestionsBreakdownEntry[];
+}
+
+export interface ReviewSuggestionsTimeseriesPoint {
+  date: string;
+  posted: number;
+  resolved: number;
+}
+
+export interface ReviewSuggestionsTimeseriesResponse {
+  series: ReviewSuggestionsTimeseriesPoint[];
 }
 
 // ─── Automation Engine ────────────────────────────────────────────────────────

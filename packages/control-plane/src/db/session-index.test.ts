@@ -7,6 +7,7 @@ type SessionRow = {
   title: string | null;
   repo_owner: string;
   repo_name: string;
+  pr_number: number | null;
   model: string;
   reasoning_effort: string | null;
   base_branch: string | null;
@@ -127,6 +128,7 @@ class FakeD1Database {
         title,
         repoOwner,
         repoName,
+        prNumber,
         model,
         reasoningEffort,
         baseBranch,
@@ -145,6 +147,7 @@ class FakeD1Database {
         string | null,
         string,
         string,
+        number | null,
         string,
         string | null,
         string | null,
@@ -166,6 +169,7 @@ class FakeD1Database {
           title,
           repo_owner: repoOwner,
           repo_name: repoName,
+          pr_number: prNumber ?? null,
           model,
           reasoning_effort: reasoningEffort,
           base_branch: baseBranch,
@@ -372,6 +376,7 @@ describe("SessionIndexStore", () => {
       expect(result).toEqual({
         ...session,
         // Defaults applied for missing optional fields
+        prNumber: null,
         parentSessionId: null,
         spawnSource: "user",
         spawnDepth: 0,

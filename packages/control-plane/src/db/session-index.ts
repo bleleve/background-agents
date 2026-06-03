@@ -5,6 +5,7 @@ export interface SessionEntry {
   title: string | null;
   repoOwner: string;
   repoName: string;
+  prNumber?: number | null;
   model: string;
   reasoningEffort: string | null;
   baseBranch: string | null;
@@ -29,6 +30,7 @@ interface SessionRow {
   title: string | null;
   repo_owner: string;
   repo_name: string;
+  pr_number: number | null;
   model: string;
   reasoning_effort: string | null;
   base_branch: string | null;
@@ -70,6 +72,7 @@ function toEntry(row: SessionRow): SessionEntry {
     title: row.title,
     repoOwner: row.repo_owner,
     repoName: row.repo_name,
+    prNumber: row.pr_number,
     model: row.model,
     reasoningEffort: row.reasoning_effort,
     baseBranch: row.base_branch,
@@ -96,14 +99,15 @@ export class SessionIndexStore {
   async create(session: SessionEntry): Promise<void> {
     await this.db
       .prepare(
-        `INSERT OR IGNORE INTO sessions (id, title, repo_owner, repo_name, model, reasoning_effort, base_branch, status, parent_session_id, spawn_source, spawn_depth, automation_id, automation_run_id, scm_login, user_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO sessions (id, title, repo_owner, repo_name, pr_number, model, reasoning_effort, base_branch, status, parent_session_id, spawn_source, spawn_depth, automation_id, automation_run_id, scm_login, user_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         session.id,
         session.title,
         session.repoOwner.toLowerCase(),
         session.repoName.toLowerCase(),
+        session.prNumber ?? null,
         session.model,
         session.reasoningEffort,
         session.baseBranch,
@@ -128,6 +132,27 @@ export class SessionIndexStore {
       .first<SessionRow>();
 
     return result ? toEntry(result) : null;
+  }
+
+  /**
+   * Model of the most recent github-bot session for a given PR. Used to attribute
+   * a posted review suggestion to the model that produced it. Returns null when
+   * no matching session exists (e.g. the PR was never reviewed by the bot).
+   */
+  async findLatestModelForPr(
+    repoOwner: string,
+    repoName: string,
+    prNumber: number
+  ): Promise<string | null> {
+    const result = await this.db
+      .prepare(
+        `SELECT model FROM sessions
+         WHERE repo_owner = ? AND repo_name = ? AND pr_number = ? AND spawn_source = 'github-bot'
+         ORDER BY created_at DESC LIMIT 1`
+      )
+      .bind(repoOwner.toLowerCase(), repoName.toLowerCase(), prNumber)
+      .first<{ model: string }>();
+    return result?.model ?? null;
   }
 
   async list(options: ListSessionsOptions = {}): Promise<ListSessionsResult> {

@@ -39,6 +39,30 @@ vi.mock("@/components/analytics/repo-bar-chart", () => ({
   AnalyticsRepoBarChart: () => <div data-testid="analytics-repo-chart" />,
 }));
 
+vi.mock("@/hooks/use-review-suggestions", () => ({
+  useReviewSuggestionAnalytics: () => ({
+    summary: undefined,
+    repoBreakdown: undefined,
+    modelBreakdown: undefined,
+    riskScoreBreakdown: undefined,
+    timeseries: undefined,
+    loading: false,
+    error: undefined,
+  }),
+}));
+
+vi.mock("@/components/analytics/review-suggestions-cards", () => ({
+  ReviewSuggestionsCards: () => <div data-testid="review-suggestions-cards" />,
+}));
+
+vi.mock("@/components/analytics/review-suggestions-breakdown", () => ({
+  ReviewSuggestionsBreakdown: () => <div data-testid="review-suggestions-breakdown" />,
+}));
+
+vi.mock("@/components/analytics/review-suggestions-trend-chart", () => ({
+  ReviewSuggestionsTrendChart: () => <div data-testid="review-suggestions-trend" />,
+}));
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();

@@ -17,6 +17,8 @@ export interface SessionInitInput {
   // Repository
   repoOwner: string;
   repoName: string;
+  /** GitHub PR number this session reviews/acts on (github-bot sessions only). */
+  prNumber?: number | null;
   repoId?: number | null;
   defaultBranch?: string;
   branch?: string;
@@ -84,6 +86,7 @@ export async function initializeSession(
     title: input.title || null,
     repoOwner: input.repoOwner,
     repoName: input.repoName,
+    prNumber: input.prNumber ?? null,
     model: input.model,
     reasoningEffort: input.reasoningEffort,
     baseBranch: input.branch || input.defaultBranch || "main",

@@ -11,3 +11,18 @@ export function buildAnalyticsTimeseriesPath(searchParams: URLSearchParams): str
 export function buildAnalyticsBreakdownPath(searchParams: URLSearchParams): string {
   return buildControlPlanePath("/analytics/breakdown", searchParams, ["days", "by"]);
 }
+
+export function buildReviewSuggestionsSummaryPath(searchParams: URLSearchParams): string {
+  return buildControlPlanePath("/analytics/review-suggestions", searchParams, ["days"]);
+}
+
+export function buildReviewSuggestionsBreakdownPath(searchParams: URLSearchParams): string {
+  return buildControlPlanePath("/analytics/review-suggestions/breakdown", searchParams, [
+    "days",
+    "by",
+  ]);
+}
+
+export function buildReviewSuggestionsTimeseriesPath(searchParams: URLSearchParams): string {
+  return buildControlPlanePath("/analytics/review-suggestions/timeseries", searchParams, ["days"]);
+}

@@ -5,6 +5,7 @@ import { formatAnalyticsCount } from "@/lib/analytics";
 interface SummaryCardsProps {
   days: AnalyticsDays;
   summary?: AnalyticsSummaryResponse;
+  reviewSuggestionsTotal?: number;
   loading: boolean;
 }
 
@@ -19,11 +20,16 @@ function SummaryCard({ label, value, hint }: { label: string; value: string; hin
   );
 }
 
-export function AnalyticsSummaryCards({ days, summary, loading }: SummaryCardsProps) {
+export function AnalyticsSummaryCards({
+  days,
+  summary,
+  reviewSuggestionsTotal,
+  loading,
+}: SummaryCardsProps) {
   if (loading && !summary) {
     return (
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        {Array.from({ length: 5 }).map((_, index) => (
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        {Array.from({ length: 6 }).map((_, index) => (
           <div
             key={index}
             className="rounded-md border border-border-muted bg-card p-4 animate-pulse"
@@ -50,7 +56,7 @@ export function AnalyticsSummaryCards({ days, summary, loading }: SummaryCardsPr
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <SummaryCard
           label="Total Sessions"
           value={formatAnalyticsCount(summary.totalSessions)}
@@ -75,6 +81,11 @@ export function AnalyticsSummaryCards({ days, summary, loading }: SummaryCardsPr
           label="PRs Created"
           value={formatAnalyticsCount(summary.totalPrs)}
           hint="Platform-tracked PR artifacts"
+        />
+        <SummaryCard
+          label="Suggestions"
+          value={formatAnalyticsCount(reviewSuggestionsTotal ?? 0)}
+          hint="Inline review suggestions posted"
         />
       </div>
 

@@ -489,4 +489,65 @@ describe("D1 SessionIndexStore", () => {
       expect(session!.userId).toBeNull();
     });
   });
+
+  describe("findLatestModelForPr", () => {
+    it("returns the model of the most recent github-bot session for a PR", async () => {
+      const store = new SessionIndexStore(env.DB);
+      const base = Date.now();
+      await store.create({
+        id: "pr-sess-old",
+        title: null,
+        repoOwner: "acme",
+        repoName: "web-app",
+        prNumber: 42,
+        model: "anthropic/claude-haiku-4-5",
+        reasoningEffort: null,
+        baseBranch: null,
+        status: "completed",
+        spawnSource: "github-bot",
+        createdAt: base,
+        updatedAt: base,
+      });
+      await store.create({
+        id: "pr-sess-new",
+        title: null,
+        repoOwner: "acme",
+        repoName: "web-app",
+        prNumber: 42,
+        model: "anthropic/claude-opus-4-8",
+        reasoningEffort: null,
+        baseBranch: null,
+        status: "active",
+        spawnSource: "github-bot",
+        createdAt: base + 1000,
+        updatedAt: base + 1000,
+      });
+
+      expect(await store.findLatestModelForPr("acme", "web-app", 42)).toBe(
+        "anthropic/claude-opus-4-8"
+      );
+    });
+
+    it("ignores non-github-bot sessions and unknown PRs", async () => {
+      const store = new SessionIndexStore(env.DB);
+      const now = Date.now();
+      await store.create({
+        id: "pr-sess-user",
+        title: null,
+        repoOwner: "acme",
+        repoName: "web-app",
+        prNumber: 7,
+        model: "anthropic/claude-opus-4-8",
+        reasoningEffort: null,
+        baseBranch: null,
+        status: "active",
+        spawnSource: "user",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      expect(await store.findLatestModelForPr("acme", "web-app", 7)).toBeNull();
+      expect(await store.findLatestModelForPr("acme", "web-app", 999)).toBeNull();
+    });
+  });
 });

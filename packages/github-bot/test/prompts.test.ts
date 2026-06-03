@@ -206,6 +206,15 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("review verdict");
   });
 
+  it("delegates documentation-staleness to pr-doc-sentinel and folds it into the verdict", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).toContain("pr-doc-sentinel");
+    expect(prompt).toContain("documentation-staleness pass");
+    // Doc findings ride in the single verdict comment, not a separate message
+    expect(prompt).toContain("**Docs**");
+    expect(prompt).toContain("never as a separate comment");
+  });
+
   it("omits the lookout/dive guidance by default", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
     expect(prompt).not.toContain("Large diff — survey, then dive");

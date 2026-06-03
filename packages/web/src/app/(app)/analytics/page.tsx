@@ -6,6 +6,9 @@ import { AnalyticsRepoBarChart } from "@/components/analytics/repo-bar-chart";
 import { AnalyticsSummaryCards } from "@/components/analytics/summary-cards";
 import { AnalyticsTimeseriesChart } from "@/components/analytics/timeseries-chart";
 import { AnalyticsUserTable } from "@/components/analytics/user-table";
+import { ReviewSuggestionsCards } from "@/components/analytics/review-suggestions-cards";
+import { ReviewSuggestionsBreakdown } from "@/components/analytics/review-suggestions-breakdown";
+import { ReviewSuggestionsTrendChart } from "@/components/analytics/review-suggestions-trend-chart";
 import { useSidebarContext } from "@/components/sidebar-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +16,7 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { SidebarIcon } from "@/components/ui/icons";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAnalyticsDashboard } from "@/hooks/use-analytics";
+import { useReviewSuggestionAnalytics } from "@/hooks/use-review-suggestions";
 import {
   ANALYTICS_DAYS,
   ANALYTICS_REFRESH_INTERVAL_MS,
@@ -31,6 +35,7 @@ export default function AnalyticsPage() {
   const [sortDirection, setSortDirection] = useState<AnalyticsSortDirection>("desc");
   const { summary, timeseries, repoBreakdown, userBreakdown, loading, error } =
     useAnalyticsDashboard(days);
+  const reviewSuggestions = useReviewSuggestionAnalytics(days);
   const userEntries = userBreakdown?.entries;
 
   const sortedUserEntries = useMemo(
@@ -150,7 +155,12 @@ export default function AnalyticsPage() {
 
           {!error || hasCachedData ? (
             <>
-              <AnalyticsSummaryCards days={days} summary={summary} loading={loading} />
+              <AnalyticsSummaryCards
+                days={days}
+                summary={summary}
+                reviewSuggestionsTotal={reviewSuggestions.summary?.total}
+                loading={loading}
+              />
 
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
                 <AnalyticsTimeseriesChart series={timeseries?.series} loading={loading} />
@@ -164,6 +174,37 @@ export default function AnalyticsPage() {
                 sortDirection={sortDirection}
                 onSort={handleSort}
               />
+
+              <section className="space-y-4">
+                <ReviewSuggestionsCards
+                  days={days}
+                  summary={reviewSuggestions.summary}
+                  loading={reviewSuggestions.loading}
+                />
+
+                <ReviewSuggestionsTrendChart
+                  series={reviewSuggestions.timeseries?.series}
+                  loading={reviewSuggestions.loading}
+                />
+
+                <div className="grid gap-6 lg:grid-cols-3">
+                  <ReviewSuggestionsBreakdown
+                    title="By repository"
+                    entries={reviewSuggestions.repoBreakdown?.entries}
+                    loading={reviewSuggestions.loading}
+                  />
+                  <ReviewSuggestionsBreakdown
+                    title="By model"
+                    entries={reviewSuggestions.modelBreakdown?.entries}
+                    loading={reviewSuggestions.loading}
+                  />
+                  <ReviewSuggestionsBreakdown
+                    title="By risk"
+                    entries={reviewSuggestions.riskScoreBreakdown?.entries}
+                    loading={reviewSuggestions.loading}
+                  />
+                </div>
+              </section>
             </>
           ) : null}
         </div>

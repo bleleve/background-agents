@@ -231,6 +231,7 @@ function isSandboxAuthRoute(path: string): boolean {
 function isScmAgnosticRoute(path: string): boolean {
   return (
     /^\/analytics\/(summary|timeseries|breakdown)$/.test(path) ||
+    /^\/analytics\/review-suggestions(\/(breakdown|timeseries))?$/.test(path) ||
     /^\/provider-identities\/github\/[^/]+$/.test(path)
   );
 }
@@ -965,6 +966,7 @@ async function handleCreateSession(
     actorEmail?: string;
     actorAvatarUrl?: string;
   };
+  const prNumber = typeof body.prNumber === "number" ? body.prNumber : null;
 
   if (!body.repoOwner || !body.repoName) {
     return error("repoOwner and repoName are required");
@@ -1078,6 +1080,7 @@ async function handleCreateSession(
     sessionId,
     repoOwner,
     repoName,
+    prNumber,
     repoId,
     defaultBranch,
     branch: body.branch,

@@ -128,6 +128,7 @@ async function createSession(
     scmLogin: string;
     scmUserId: string;
     scmAvatarUrl: string;
+    prNumber?: number;
     planMode?: boolean;
     planModel?: string;
   }
@@ -142,6 +143,9 @@ async function createSession(
     scmAvatarUrl: params.scmAvatarUrl,
     spawnSource: "github-bot",
   };
+  if (params.prNumber) {
+    body.prNumber = params.prNumber;
+  }
   if (params.reasoningEffort) {
     body.reasoningEffort = params.reasoningEffort;
   }
@@ -523,6 +527,7 @@ export async function handleReviewRequested(
     scmLogin: sender.login,
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
+    prNumber: pr.number,
   });
   log.info("session.created", {
     ...meta,
@@ -645,6 +650,7 @@ export async function handlePullRequestOpened(
     scmLogin: sender.login,
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
+    prNumber: pr.number,
   });
   log.info("session.created", {
     ...meta,
@@ -972,6 +978,7 @@ export async function handleIssueComment(
     scmLogin: sender.login,
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
+    prNumber: issue.number,
     planMode,
     planModel,
   });
@@ -1099,6 +1106,7 @@ export async function handleReviewComment(
     scmLogin: sender.login,
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
+    prNumber: pr.number,
   });
   log.info("session.created", { ...meta, session_id: sessionId, action: "review_comment" });
 

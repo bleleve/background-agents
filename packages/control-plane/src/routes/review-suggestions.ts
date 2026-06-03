@@ -5,6 +5,7 @@
 
 import { generateId } from "../auth/crypto";
 import { ReviewSuggestionStore } from "../db/review-suggestion-store";
+import { SessionIndexStore } from "../db/session-index";
 import type { Env } from "../types";
 import {
   type RequestContext,
@@ -49,6 +50,18 @@ async function handleRecord(
     return error("repoOwner, repoName, prNumber, and commentId are required");
   }
 
+  // Attribute the suggestion to the model of the review session that posted it,
+  // resolved from the session index by (repo, PR). The bot doesn't know the model
+  // at webhook time, so an explicit body.model (rare) takes precedence, then the
+  // session lookup, else null (unattributed).
+  const model =
+    body.model ??
+    (await new SessionIndexStore(env.DB).findLatestModelForPr(
+      body.repoOwner,
+      body.repoName,
+      body.prNumber
+    ));
+
   const store = new ReviewSuggestionStore(env.DB);
   await store.record({
     id: generateId(),
@@ -58,7 +71,7 @@ async function handleRecord(
     commentId: body.commentId,
     file: body.file ?? null,
     line: body.line ?? null,
-    model: body.model ?? null,
+    model: model ?? null,
     promptVersion: body.promptVersion ?? null,
     riskScore: body.riskScore ?? null,
     status: "open",

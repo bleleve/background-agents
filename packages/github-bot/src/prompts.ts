@@ -107,6 +107,7 @@ function buildVerdictWorkflow(params: { owner: string; repo: string; number: num
 - Structure the body as a scannable risk map — keep it tight, signal over ceremony:
    - **Lead line:** a risk badge + a one-sentence summary. Badge: 🟢 low · 🟡 medium · 🔴 high.
    - **Worth a look** — only if findings survived the quality bar, highest-risk first. One bullet per finding: \`<🟡|🔴> \`path:line\` — <the concrete risk in a few words> → [inline](<html_url of the inline comment you posted in step 6>)\`. Omit this whole section when nothing survived.
+   - **Docs** — only if the pr-doc-sentinel returned findings, one bullet each: \`📝 \`path\` — <what diverged>\`. Omit this section entirely when there is no doc drift.
    - **Reviewed, no concerns:** one terse line naming the areas/files you checked that had nothing notable.
    - Footer line, exactly: \`<sub>🤖 Reef automated review</sub>\`.
    - Do not invent findings to justify a verdict. A clean PR is just the 🟢 lead line + the "Reviewed" line + the footer (no "Worth a look" section).
@@ -119,6 +120,9 @@ function buildVerdictWorkflow(params: { owner: string; repo: string; number: num
 
    **Worth a look**
    - <🟡|🔴> \`<path:line>\` — <concrete risk> → [inline](<inline comment html_url>)
+
+   **Docs**
+   - 📝 \`<path>\` — <what diverged>
 
    **Reviewed, no concerns:** <comma-separated areas>
 
@@ -238,6 +242,7 @@ ${UNTRUSTED_REPO_CONTENT_GUIDANCE}
    - Silent behavior changes: same signature, different behavior (defaults, ordering, empty/missing-value handling)
    Skip the noise: don't review lockfiles, generated or minified output, vendored dependencies, or sourcemaps unless they're directly relevant — but DB migrations are in scope, review them.
 3. You may read individual files in the repo for additional context beyond the diff
+   When the diff changes public or exported APIs, config, flags, CLI/commands, or documentation files, delegate a documentation-staleness pass to the \`pr-doc-sentinel\` subagent (read-only; it returns findings, it does not post). Fold anything it raises into the **Docs** line of the verdict — never as a separate comment.
 ${reviewInstruction}
 5. Leave feedback only as inline suggestion comments on specific changed files/lines when you find an issue worth calling out.
 6. For each inline suggestion comment, use this flow:
