@@ -16,8 +16,9 @@ resource "null_resource" "d1_migrations" {
 
   triggers = {
     database_id = cloudflare_d1_database.main.id
+    # Recurse so fork/*.sql migrations also invalidate the hash when they change.
     migrations_sha = sha256(join(",", [
-      for f in sort(fileset("${var.project_root}/terraform/d1/migrations", "*.sql")) :
+      for f in sort(fileset("${var.project_root}/terraform/d1/migrations", "**/*.sql")) :
       filesha256("${var.project_root}/terraform/d1/migrations/${f}")
     ]))
   }

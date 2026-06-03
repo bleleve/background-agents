@@ -11,6 +11,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate-migrations:
+    name: Validate D1 migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check for duplicate migration prefixes
+        run: bash scripts/validate-migrations.sh
+
   lint-typescript:
     name: Lint & Format (TypeScript)
     runs-on: ubuntu-latest
