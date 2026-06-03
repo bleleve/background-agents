@@ -189,3 +189,15 @@ describe("applyMigrations", () => {
     }
   });
 });
+
+describe("MIGRATIONS integrity", () => {
+  // Migrations are keyed and ordered by id. A merge that duplicates an id (e.g. fork and
+  // upstream both adding id 35) would otherwise silently skip one via applied.has(id).
+  it("has unique, strictly increasing ids", () => {
+    const ids = MIGRATIONS.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (let i = 1; i < ids.length; i++) {
+      expect(ids[i]).toBeGreaterThan(ids[i - 1]);
+    }
+  });
+});

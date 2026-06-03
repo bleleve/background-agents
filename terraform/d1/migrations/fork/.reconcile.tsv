@@ -1,0 +1,9 @@
+# Renames of already-applied fork migrations from numeric prefixes to timestamps.
+# d1-migrate.sh replays each row before applying pending migrations: it re-keys the
+# tracking row to the new timestamp version AND frees the old numeric prefix so upstream
+# can reuse it without being silently skipped. Idempotent; safe to keep forever.
+# Format (TAB-separated): old_version<TAB>old_name<TAB>new_version<TAB>new_name
+0000	0000_create_opencode_config.sql	20260410110215	20260410110215_create_opencode_config.sql
+0021	0021_add_default_models_to_model_preferences.sql	20260520220934	20260520220934_add_default_models_to_model_preferences.sql
+0022	0022_create_review_suggestions.sql	20260601183342	20260601183342_create_review_suggestions.sql
+0023	0023_add_pr_number_to_sessions.sql	20260603104335	20260603104335_add_pr_number_to_sessions.sql

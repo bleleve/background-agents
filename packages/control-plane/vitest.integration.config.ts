@@ -11,7 +11,13 @@ function generateTestEncryptionKey(): string {
 }
 
 export default defineWorkersConfig(async () => {
-  const migrations = await readD1Migrations(migrationsPath);
+  // Upstream migrations (numeric prefixes) apply first, then fork-local ones
+  // (timestamp prefixes) from the fork/ subdirectory. readD1Migrations is not
+  // recursive, so read each directory and concatenate in apply order.
+  const migrations = [
+    ...(await readD1Migrations(migrationsPath)),
+    ...(await readD1Migrations(path.join(migrationsPath, "fork"))),
+  ];
 
   return {
     test: {
