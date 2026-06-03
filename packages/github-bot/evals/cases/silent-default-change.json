@@ -1,0 +1,20 @@
+{
+  "name": "silent-default-change",
+  "description": "A function's default argument flips true -> false, silently changing behavior for every existing caller that relied on the default. Blind-spot axis: silent behavior change.",
+  "pr": {
+    "owner": "acme",
+    "repo": "widgets",
+    "number": 102,
+    "title": "Make retries opt-in",
+    "body": "Expose a retry flag on the client.",
+    "author": "bob",
+    "base": "main",
+    "head": "feature/retry-flag",
+    "isPublic": false
+  },
+  "diff": "diff --git a/src/client.ts b/src/client.ts\n@@ -7,7 +7,7 @@ export function createClient(\n   baseUrl: string,\n-  retryEnabled = true,\n+  retryEnabled = false,\n ): Client {\n   return new Client(baseUrl, { retryEnabled });\n }",
+  "expectedFinding": {
+    "file": "src/client.ts",
+    "summary": "Default for `retryEnabled` changed true -> false. Existing callers that omit the argument silently lose retries even though the signature is unchanged."
+  }
+}

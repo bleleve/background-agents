@@ -4,6 +4,7 @@ import {
   resolveAppName,
   parsePlanCommand,
   type PlanCommand,
+  type GitHubCallbackContext,
 } from "@open-inspect/shared";
 import type {
   Env,
@@ -11,6 +12,7 @@ import type {
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
+  ReviewThreadPayload,
   CheckSuiteCompletedPayload,
 } from "./types";
 import type { Logger } from "./logger";
@@ -39,6 +41,79 @@ async function getAuthHeaders(env: Env, traceId: string): Promise<Record<string,
     "Content-Type": "application/json",
     ...(await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET, traceId)),
   };
+}
+
+/**
+ * Record a bot-posted inline review suggestion in the control-plane (for the
+ * acceptance-rate metric). Best-effort: failures are logged, never thrown, so
+ * webhook processing is unaffected.
+ */
+async function recordReviewSuggestion(
+  env: Env,
+  log: Logger,
+  traceId: string,
+  params: {
+    repoOwner: string;
+    repoName: string;
+    prNumber: number;
+    commentId: number;
+    file?: string | null;
+    line?: number | null;
+  }
+): Promise<void> {
+  try {
+    const headers = await getAuthHeaders(env, traceId);
+    const response = await env.CONTROL_PLANE.fetch("https://internal/review-suggestions", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(params),
+    });
+    if (!response.ok) {
+      log.warn("review_suggestion.record_failed", {
+        trace_id: traceId,
+        comment_id: params.commentId,
+        status: response.status,
+      });
+    }
+  } catch (err) {
+    log.warn("review_suggestion.record_error", {
+      trace_id: traceId,
+      comment_id: params.commentId,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+  }
+}
+
+/**
+ * Mark tracked suggestions resolved when their review thread is resolved.
+ * Best-effort, same as {@link recordReviewSuggestion}.
+ */
+async function resolveReviewSuggestions(
+  env: Env,
+  log: Logger,
+  traceId: string,
+  commentIds: number[]
+): Promise<void> {
+  if (commentIds.length === 0) return;
+  try {
+    const headers = await getAuthHeaders(env, traceId);
+    const response = await env.CONTROL_PLANE.fetch("https://internal/review-suggestions/resolve", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ commentIds }),
+    });
+    if (!response.ok) {
+      log.warn("review_suggestion.resolve_failed", {
+        trace_id: traceId,
+        status: response.status,
+      });
+    }
+  } catch (err) {
+    log.warn("review_suggestion.resolve_error", {
+      trace_id: traceId,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+  }
 }
 
 async function createSession(
@@ -168,7 +243,7 @@ async function sendPrompt(
   controlPlane: Fetcher,
   headers: Record<string, string>,
   sessionId: string,
-  params: { content: string; authorId: string }
+  params: { content: string; authorId: string; callbackContext?: GitHubCallbackContext }
 ): Promise<string> {
   const response = await controlPlane.fetch(`https://internal/sessions/${sessionId}/prompt`, {
     method: "POST",
@@ -252,6 +327,32 @@ interface GitHubPullRequestDetails {
   base: { ref: string };
   draft: boolean;
   state: string;
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
+}
+
+/**
+ * Above this many changed lines (additions + deletions), the review prompt
+ * switches the agent into a Lookout-then-Dive strategy (delegating focused
+ * investigations via spawn-task) so attention does not dilute across a big diff.
+ */
+const LARGE_DIFF_THRESHOLD_LINES = 600;
+
+/**
+ * Best-effort check of whether a PR is large enough to warrant the
+ * Lookout/Diver review strategy. Returns false if PR details can't be fetched.
+ */
+async function isLargeDiff(
+  token: string,
+  owner: string,
+  repo: string,
+  pullNumber: number
+): Promise<boolean> {
+  const details = await fetchPullRequestDetails(token, owner, repo, pullNumber);
+  if (!details) return false;
+  const changedLines = (details.additions ?? 0) + (details.deletions ?? 0);
+  return changedLines >= LARGE_DIFF_THRESHOLD_LINES;
 }
 
 function getFailedCheckAttemptKey(repoFullName: string, pullNumber: number): string {
@@ -430,6 +531,8 @@ export async function handleReviewRequested(
     review_model: reviewModel,
   });
 
+  const largeDiff = await isLargeDiff(ghToken, owner, repoName, pr.number);
+
   const prompt = buildCodeReviewPrompt({
     owner,
     repo: repoName,
@@ -442,11 +545,20 @@ export async function handleReviewRequested(
     isPublic: !repo.private,
     codeReviewInstructions: config.codeReviewInstructions,
     autoApproveOnOpen: config.autoApproveOnOpen,
+    largeDiff,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
     content: prompt,
     authorId: `github:${payload.sender.id}`,
+    callbackContext: {
+      source: "github",
+      kind: "pr_review",
+      owner,
+      repo: repoName,
+      prNumber: pr.number,
+      isPublic: !repo.private,
+    },
   });
   log.info("prompt.sent", {
     ...meta,
@@ -541,6 +653,8 @@ export async function handlePullRequestOpened(
     review_model: autoReviewModel,
   });
 
+  const largeDiff = await isLargeDiff(ghToken, owner, repoName, pr.number);
+
   const prompt = buildCodeReviewPrompt({
     owner,
     repo: repoName,
@@ -553,11 +667,20 @@ export async function handlePullRequestOpened(
     isPublic: !repo.private,
     codeReviewInstructions: config.codeReviewInstructions,
     autoApproveOnOpen: config.autoApproveOnOpen,
+    largeDiff,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
     content: prompt,
     authorId: `github:${sender.id}`,
+    callbackContext: {
+      source: "github",
+      kind: "pr_review",
+      owner,
+      repo: repoName,
+      prNumber: pr.number,
+      isPublic: !repo.private,
+    },
   });
   log.info("prompt.sent", {
     ...meta,
@@ -909,6 +1032,24 @@ export async function handleReviewComment(
   const repoName = repo.name;
   const repoFullName = `${owner}/${repoName}`.toLowerCase();
 
+  // The bot's own inline suggestions are tracked for the acceptance-rate metric,
+  // not acted on. Record and stop before the mention/permission gates. For
+  // pull_request_review_comment events comment.user === sender, so this also
+  // supersedes the self-comment guard (no separate sender check needed below).
+  if (comment.user.login === env.GITHUB_BOT_USERNAME) {
+    await recordReviewSuggestion(env, log, traceId, {
+      repoOwner: owner,
+      repoName,
+      prNumber: pr.number,
+      commentId: comment.id,
+      file: comment.path,
+      // `position` is a deprecated diff-hunk offset, not a file line — never let
+      // it stand in for `line`, or the metric's line column gets a hunk offset.
+      line: comment.line ?? null,
+    });
+    return { outcome: "skipped", skip_reason: "recorded_bot_suggestion" };
+  }
+
   if (!hasAnyMention(comment.body, getTriggerMentions(env))) {
     log.debug("handler.no_mention", {
       trace_id: traceId,
@@ -916,11 +1057,6 @@ export async function handleReviewComment(
       sender: sender.login,
     });
     return { outcome: "skipped", skip_reason: "no_mention" };
-  }
-
-  if (sender.login === env.GITHUB_BOT_USERNAME) {
-    log.debug("handler.self_comment_ignored", { trace_id: traceId });
-    return { outcome: "skipped", skip_reason: "self_comment" };
   }
 
   const config = await getGitHubConfig(env, repoFullName, log);
@@ -1000,4 +1136,23 @@ export async function handleReviewComment(
     message_id: messageId,
     handler_action: "review_comment",
   };
+}
+
+/**
+ * A review thread was resolved on GitHub. Mark any tracked suggestions on its
+ * comments as resolved — this is the acceptance signal for the metric.
+ */
+export async function handleReviewThreadResolved(
+  env: Env,
+  log: Logger,
+  payload: ReviewThreadPayload,
+  traceId: string
+): Promise<HandlerResult> {
+  const commentIds = payload.thread.comments.map((c) => c.id);
+  if (commentIds.length === 0) {
+    return { outcome: "skipped", skip_reason: "no_thread_comments" };
+  }
+
+  await resolveReviewSuggestions(env, log, traceId, commentIds);
+  return { outcome: "skipped", skip_reason: "review_thread_resolved" };
 }

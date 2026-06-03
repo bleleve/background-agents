@@ -5,6 +5,7 @@ import type {
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
+  ReviewThreadPayload,
   CheckSuiteCompletedPayload,
 } from "../src/types";
 import type { Logger } from "../src/logger";
@@ -52,6 +53,7 @@ import {
   handleReviewRequested,
   handleIssueComment,
   handleReviewComment,
+  handleReviewThreadResolved,
   handleCheckSuiteCompleted,
 } from "../src/handlers";
 import { generateInstallationToken, postReaction, checkSenderPermission } from "../src/github-auth";
@@ -77,6 +79,14 @@ function createMockEnv(): Env {
     if (/\/sessions\/.+\/prompt$/.test(url)) {
       return Promise.resolve(
         new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+      );
+    }
+    if (url === "https://internal/review-suggestions") {
+      return Promise.resolve(new Response(JSON.stringify({ status: "recorded" }), { status: 201 }));
+    }
+    if (url === "https://internal/review-suggestions/resolve") {
+      return Promise.resolve(
+        new Response(JSON.stringify({ status: "ok", resolved: 1 }), { status: 200 })
       );
     }
     return Promise.resolve(new Response("Not found", { status: 404 }));
@@ -199,6 +209,20 @@ beforeEach(() => {
   vi.mocked(postReaction).mockResolvedValue(true);
   vi.mocked(checkSenderPermission).mockResolvedValue({ hasPermission: true });
   vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig });
+  // Default PR-details fetch: small diff, so review handlers see largeDiff=false.
+  // Tests that need a large diff (or check-suite details) override this per test.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ number: 42, additions: 1, deletions: 1, changed_files: 1 }), {
+        status: 200,
+      })
+    )
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("handlePullRequestOpened", () => {
@@ -238,6 +262,16 @@ describe("handlePullRequestOpened", () => {
     expect(promptBody.source).toBe("github");
     expect(promptBody.authorId).toBe("github:1001");
     expect(promptBody.content).toContain("Pull Request #42");
+    // Carries the PR-review callback context so the control-plane can route the
+    // completion callback back to the bot for the verdict guarantee.
+    expect(promptBody.callbackContext).toEqual({
+      source: "github",
+      kind: "pr_review",
+      owner: "acme",
+      repo: "widgets",
+      prNumber: 42,
+      isPublic: true,
+    });
 
     expect(log.info).toHaveBeenCalledWith(
       "session.created",
@@ -405,6 +439,16 @@ describe("handlePullRequestOpened (ready_for_review action)", () => {
     expect(promptBody.source).toBe("github");
     expect(promptBody.authorId).toBe("github:1001");
     expect(promptBody.content).toContain("Pull Request #42");
+    // Carries the PR-review callback context so the control-plane can route the
+    // completion callback back to the bot for the verdict guarantee.
+    expect(promptBody.callbackContext).toEqual({
+      source: "github",
+      kind: "pr_review",
+      owner: "acme",
+      repo: "widgets",
+      prNumber: 42,
+      isPublic: true,
+    });
 
     expect(log.info).toHaveBeenCalledWith(
       "session.created",
@@ -1050,11 +1094,14 @@ describe("handleReviewComment", () => {
     expect(generateInstallationToken).not.toHaveBeenCalled();
   });
 
-  it("returns early if comment is from the bot (loop prevention)", async () => {
+  it("returns early if comment is from the bot (loop prevention via tracking interception)", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
+    // Real pull_request_review_comment events have comment.user === sender, so a
+    // bot comment is caught by the tracking early-return before any action.
     const payload: ReviewCommentPayload = {
       ...reviewCommentPayload,
+      comment: { ...reviewCommentPayload.comment, user: { login: "test-bot[bot]" } },
       sender: {
         login: "test-bot[bot]",
         id: 2001,
@@ -1064,7 +1111,7 @@ describe("handleReviewComment", () => {
 
     const result = await handleReviewComment(env, log, payload, "trace-3");
 
-    expect(result).toEqual({ outcome: "skipped", skip_reason: "self_comment" });
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "recorded_bot_suggestion" });
     expect(generateInstallationToken).not.toHaveBeenCalled();
   });
 
@@ -1081,6 +1128,159 @@ describe("handleReviewComment", () => {
     expect(result).toEqual({ outcome: "skipped", skip_reason: "repo_not_enabled" });
     expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
     expect(log.debug).toHaveBeenCalledWith("handler.repo_not_enabled", expect.anything());
+  });
+});
+
+describe("review suggestion tracking (C2)", () => {
+  const botReviewCommentPayload: ReviewCommentPayload = {
+    ...reviewCommentPayload,
+    comment: {
+      ...reviewCommentPayload.comment,
+      id: 555,
+      body: "```suggestion\nfix\n```",
+      line: 12,
+      user: { login: "test-bot[bot]" },
+    },
+  };
+
+  const reviewThreadResolvedPayload: ReviewThreadPayload = {
+    action: "resolved",
+    thread: { comments: [{ id: 555 }, { id: 556 }] },
+    pull_request: { number: 42 },
+    repository: { owner: { login: "acme" }, name: "widgets", private: false },
+    sender: { login: "carol", id: 1003 },
+  };
+
+  it("records a bot-authored review comment and does not create a session", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleReviewComment(env, log, botReviewCommentPayload, "trace-c2");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "recorded_bot_suggestion" });
+
+    const cpFetch = getControlPlaneFetch(env);
+    expect(cpFetch).toHaveBeenCalledTimes(1);
+    expect(cpFetch.mock.calls[0][0]).toBe("https://internal/review-suggestions");
+    const body = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      repoOwner: "acme",
+      repoName: "widgets",
+      prNumber: 42,
+      commentId: 555,
+      file: "src/cache.ts",
+      line: 12,
+    });
+    // No session/prompt for the bot's own comment
+    expect(cpFetch).not.toHaveBeenCalledWith("https://internal/sessions", expect.anything());
+  });
+
+  it("records line: null (not the deprecated position offset) when the comment has no line", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    // Bot comment with a `position` (deprecated diff-hunk offset) but no `line`.
+    const noLinePayload: ReviewCommentPayload = {
+      ...reviewCommentPayload,
+      comment: {
+        ...reviewCommentPayload.comment, // position: 5, no `line`
+        id: 557,
+        body: "```suggestion\nfix\n```",
+        user: { login: "test-bot[bot]" },
+      },
+    };
+
+    const result = await handleReviewComment(env, log, noLinePayload, "trace-c2-noline");
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "recorded_bot_suggestion" });
+
+    const cpFetch = getControlPlaneFetch(env);
+    const body = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(body.commentId).toBe(557);
+    // The deprecated `position` (5) must NOT leak into the `line` column.
+    expect(body.line).toBeNull();
+  });
+
+  it("marks tracked suggestions resolved when a review thread is resolved", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleReviewThreadResolved(
+      env,
+      log,
+      reviewThreadResolvedPayload,
+      "trace-c2"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "review_thread_resolved" });
+
+    const cpFetch = getControlPlaneFetch(env);
+    expect(cpFetch).toHaveBeenCalledTimes(1);
+    expect(cpFetch.mock.calls[0][0]).toBe("https://internal/review-suggestions/resolve");
+    const body = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(body.commentIds).toEqual([555, 556]);
+  });
+
+  it("skips a resolved thread with no comments", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleReviewThreadResolved(
+      env,
+      log,
+      { ...reviewThreadResolvedPayload, thread: { comments: [] } },
+      "trace-c2"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "no_thread_comments" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a non-bot review comment as a tracked suggestion", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    // carol (not the bot) — falls through to the normal mention/session path
+    await handleReviewComment(env, log, reviewCommentPayload, "trace-c2");
+
+    const cpFetch = getControlPlaneFetch(env);
+    expect(cpFetch).not.toHaveBeenCalledWith(
+      "https://internal/review-suggestions",
+      expect.anything()
+    );
+  });
+});
+
+describe("size-gated lookout/diver review (D)", () => {
+  it("injects the lookout/dive guidance for a large diff", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ number: 42, additions: 700, deletions: 50 }), {
+          status: 200,
+        })
+      )
+    );
+
+    await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-d");
+
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain("Large diff — survey, then dive");
+    expect(promptBody.content).toContain("spawn-task");
+  });
+
+  it("omits the lookout/dive guidance for a small diff", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    // default beforeEach fetch stub returns a small diff
+
+    await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-d");
+
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).not.toContain("Large diff — survey, then dive");
   });
 });
 

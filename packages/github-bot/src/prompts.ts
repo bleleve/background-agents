@@ -37,10 +37,13 @@ function buildCommentGuidelines(isPublicRepo: boolean): string {
 const SUGGESTION_QUALITY_BAR = `
 **Quality bar — verify before posting an inline suggestion.**
 A confidently-wrong inline comment costs reviewer time and erodes trust over many PRs.
+- **Disprove it before posting (most important).** For each finding, write one sentence on how an experienced engineer would refute it — a guard you overlooked, a caller that already handles the case, or intended behavior. If that refutation holds up, drop the finding. Post only what survives this step. Exception: "this rarely happens in practice" does **not** clear a finding whose consequence is silent data corruption or loss — judge those by severity, not just likelihood.
+- **Don't flag what the repo's own tooling already catches.** If lint, type-check, or the formatter would report it, skip it (run the repo's own checks when in doubt). Focus on behavioral risk, not style the build already enforces.
 - **Verify shell/regex/pattern claims empirically.** Test against representative input in the sandbox (e.g. \`printf 'pod/sidekiq-x\\npod/sourcery-sidekiq-y\\n' | grep -E '/sidekiq-'\`) rather than reasoning from analogous code you've seen elsewhere.
 - **Verify symbol-existence claims with grep.** Deprecated names, missing methods, env vars — confirm against the installed dependency in \`vendor/bundle/\` / \`node_modules/\` / etc., not from a newer library version's changelog.
 - **Verify language/framework behavior claims, not just existence.** If you're asserting how a method or construct *behaves* (Ruby default-argument evaluation timing, ActiveRecord \`with_lock\` reload semantics, JS hoisting, Python GIL, etc.), read the source in \`vendor/bundle/\` / \`node_modules/\` or run a small \`ruby -e\` / \`node -e\` script. Don't pattern-match from analogous-looking code in other languages or older versions of the same framework.
 - **Check that your suggested code is materially different** from the existing line. If the only difference is stylistic (equivalent regex flags for a pattern with no metacharacters, equivalent quote styles, whitespace), do not post.
+- **Out of scope — do not post (unless a comment explicitly asks about it):** theoretical risks that need unlikely preconditions (but do flag silent data corruption or loss even when the trigger is rare); defense-in-depth suggestions when the primary defense is already adequate; issues in code this PR does not touch; "consider using library X" style preferences.
 - **When uncertain whether the issue is real, do not post.** A missed real issue is recoverable on the next review pass; a confidently-wrong one creates noise on every review.`;
 
 function buildInlineSuggestionWorkflow(params: {
@@ -89,6 +92,59 @@ function buildInlineSuggestionWorkflow(params: {
 - Confirm the API response \`html_url\` is a diff comment with an **Apply suggestion** button.`;
 }
 
+// Hidden HTML marker that prefixes the review-verdict comment body. Invisible when
+// rendered as markdown, it lets the agent find and edit its own prior verdict on a
+// re-review instead of posting a new comment each time (single re-review anchor).
+export const REEF_VERDICT_MARKER = "<!-- reef-verdict -->";
+
+function buildVerdictWorkflow(params: { owner: string; repo: string; number: number }): string {
+  const { owner, repo, number } = params;
+  return `7. Post a single **review verdict** comment. **This is your final action and it is mandatory — post it regardless of your conclusion.** Even when the PR is clean and you posted no inline suggestions, you MUST still post the verdict, with the overall risk set accordingly. "Nothing to flag" is itself a verdict, not a reason to skip this step. It is one editable top-level PR comment that serves as the re-review anchor; on a re-review, update it in place instead of posting a new one.
+- The body MUST begin with this exact marker line (invisible when rendered; it lets you find the comment again):
+
+   ${REEF_VERDICT_MARKER}
+
+- Structure the body as a scannable risk map — keep it tight, signal over ceremony:
+   - **Lead line:** a risk badge + a one-sentence summary. Badge: 🟢 low · 🟡 medium · 🔴 high.
+   - **Worth a look** — only if findings survived the quality bar, highest-risk first. One bullet per finding: \`<🟡|🔴> \`path:line\` — <the concrete risk in a few words> → [inline](<html_url of the inline comment you posted in step 6>)\`. Omit this whole section when nothing survived.
+   - **Reviewed, no concerns:** one terse line naming the areas/files you checked that had nothing notable.
+   - Footer line, exactly: \`<sub>🤖 Reef automated review</sub>\`.
+   - Do not invent findings to justify a verdict. A clean PR is just the 🟢 lead line + the "Reviewed" line + the footer (no "Worth a look" section).
+- Find any prior verdict comment, then create or update in place, printing the comment URL so you can confirm it landed:
+
+   EXISTING="$(gh api --paginate "repos/${owner}/${repo}/issues/${number}/comments" --jq '.[] | select(.body | startswith("${REEF_VERDICT_MARKER}")) | .id' | head -n1)"
+   cat >/tmp/pr-verdict.md <<'EOF'
+   ${REEF_VERDICT_MARKER}
+   **<🟢|🟡|🔴> Reef verdict — <Low|Medium|High> risk** · <one-sentence summary>
+
+   **Worth a look**
+   - <🟡|🔴> \`<path:line>\` — <concrete risk> → [inline](<inline comment html_url>)
+
+   **Reviewed, no concerns:** <comma-separated areas>
+
+   <sub>🤖 Reef automated review</sub>
+   EOF
+   if [ -n "$EXISTING" ]; then
+     gh api -X PATCH "repos/${owner}/${repo}/issues/comments/$EXISTING" -F body=@/tmp/pr-verdict.md --jq '.html_url'
+   else
+     gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" -F body=@/tmp/pr-verdict.md --jq '.html_url'
+   fi
+- Confirm the command printed the comment's \`html_url\`. If it printed nothing or errored, the verdict did NOT post — fix the call and retry until a URL comes back. Do not end the review without a posted verdict.
+- The verdict prioritizes; it does not reopen the door to speculative findings. Do not list anything here that did not survive the quality bar above.`;
+}
+
+// For large diffs, attention dilutes if you try to review everything at full
+// depth in one pass. This guidance turns the primary agent into a Lookout that
+// triages risk, then delegates focused Dives via the `spawn-task` tool.
+function buildLookoutDiverGuidance(): string {
+  return `## Large diff — survey, then dive
+This PR is large. Don't review every line at full depth in one pass.
+1. **Lookout (survey):** skim the whole diff and list the highest-risk areas — the ones most likely to hide a real behavioral bug.
+2. **Dive:** for each high-risk area, delegate a focused investigation with the \`spawn-task\` tool. Give the diver a tight prompt naming the file(s) and the specific risk to verify, and have it report back its verified findings rather than post. A diver should use **Sonar** — running the code or tests in its sandbox — to confirm a suspected bug instead of reasoning from the diff alone. Collect results with \`get-task-status\`; abort a runaway diver with \`cancel-task\`.
+3. **Consolidate:** fold the divers' verified findings into your own review. You remain responsible for posting inline suggestions and the single verdict comment, and the quality bar above applies equally to delegated findings.
+Keep delegation proportional to risk — a handful of focused dives beats one diver per file.`;
+}
+
 export function buildCodeReviewPrompt(params: {
   owner: string;
   repo: string;
@@ -101,6 +157,7 @@ export function buildCodeReviewPrompt(params: {
   isPublic: boolean;
   codeReviewInstructions?: string | null;
   autoApproveOnOpen?: boolean;
+  largeDiff?: boolean;
 }): string {
   const {
     owner,
@@ -114,6 +171,7 @@ export function buildCodeReviewPrompt(params: {
     isPublic,
     codeReviewInstructions,
     autoApproveOnOpen,
+    largeDiff,
   } = params;
 
   const prTitleBlock = buildUntrustedUserContentBlock({
@@ -137,9 +195,6 @@ export function buildCodeReviewPrompt(params: {
     content: body ?? "_No description provided._",
   });
 
-  const noFindingsInstruction = `gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" \\
-     -f body="I reviewed this PR and found no findings."`;
-
   const reviewInstruction = autoApproveOnOpen
     ? `4. When your review is complete, submit it via:
 
@@ -152,13 +207,8 @@ export function buildCodeReviewPrompt(params: {
    REQUEST_CHANGES if you found real issues. Use COMMENT for general feedback that does not block merging.
    If you found no issues and the changes are not clearly low-risk, do not submit a review at all.`
     : `4. Do not submit a pull request review.`;
-  const noFindingsCommentInstruction = autoApproveOnOpen
-    ? `7. If you found no actionable file-specific feedback and did not submit an APPROVE review because the PR is not clearly low-risk, post a comment on the PR to indicate no findings were found:
 
-   ${noFindingsInstruction}`
-    : `7. If you do not find any actionable file-specific feedback, post a comment on the PR to indicate no findings were found:
-
-   ${noFindingsInstruction}`;
+  const largeDiffSection = largeDiff ? `\n${buildLookoutDiverGuidance()}\n` : "";
 
   return `You are reviewing Pull Request #${number} in ${owner}/${repo}.
 The repository has been cloned and you are on the PR head branch.
@@ -172,6 +222,7 @@ ${prAuthorBlock}
 ${prBranchesBlock}
 - **Description**:
 ${prDescriptionBlock}
+${largeDiffSection}
 
 ${UNTRUSTED_REPO_CONTENT_GUIDANCE}
 
@@ -182,6 +233,10 @@ ${UNTRUSTED_REPO_CONTENT_GUIDANCE}
    - Security concerns
    - Performance implications
    - Code clarity and maintainability
+   - Deletions: a removed field, flag, or branch that silently changes behavior
+   - Cross-boundary drift: callers, siblings, or other implementations of the same interface not updated alongside this change (many bugs live outside the diff)
+   - Silent behavior changes: same signature, different behavior (defaults, ordering, empty/missing-value handling)
+   Skip the noise: don't review lockfiles, generated or minified output, vendored dependencies, or sourcemaps unless they're directly relevant — but DB migrations are in scope, review them.
 3. You may read individual files in the repo for additional context beyond the diff
 ${reviewInstruction}
 5. Leave feedback only as inline suggestion comments on specific changed files/lines when you find an issue worth calling out.
@@ -191,7 +246,7 @@ ${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
-${noFindingsCommentInstruction}
+${buildVerdictWorkflow({ owner, repo, number })}
 ${buildCustomInstructionsSection(codeReviewInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
 }

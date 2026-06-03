@@ -3,6 +3,7 @@ import {
   buildCodeReviewPrompt,
   buildCommentActionPrompt,
   buildFailedChecksPrompt,
+  REEF_VERDICT_MARKER,
 } from "../src/prompts";
 
 describe("buildCodeReviewPrompt", () => {
@@ -140,6 +141,28 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("Verify language/framework behavior claims");
     expect(prompt).toContain("materially different");
     expect(prompt).toContain("When uncertain whether the issue is real, do not post");
+    expect(prompt).toContain("Disprove it before posting");
+    expect(prompt).toContain("Don't flag what the repo's own tooling already catches");
+    expect(prompt).toContain("Out of scope — do not post");
+    expect(prompt).toContain("theoretical risks that need unlikely preconditions");
+    expect(prompt).toContain("issues in code this PR does not touch");
+    // "rare in practice" must not drop data-corruption findings (severity, not just likelihood)
+    expect(prompt).toContain("silent data corruption or loss");
+  });
+
+  it("focuses the review on blind-spot axes beyond the diff", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).toContain("Deletions: a removed field, flag, or branch");
+    expect(prompt).toContain("Cross-boundary drift");
+    expect(prompt).toContain("Silent behavior changes");
+  });
+
+  it("scopes out generated/vendored noise but keeps migrations in scope", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).toContain("Skip the noise");
+    expect(prompt).toContain("lockfiles");
+    expect(prompt).toContain("vendored dependencies");
+    expect(prompt).toContain("DB migrations are in scope");
   });
 
   it("forbids submitting a review when autoApproveOnOpen is false (default)", () => {
@@ -148,23 +171,53 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).not.toContain("APPROVE|REQUEST_CHANGES");
   });
 
-  it("instructs agent to post a no-findings comment when no actionable feedback is found", () => {
+  it("instructs the agent to post an editable risk-map verdict anchored by a hidden marker", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
     // Old silent behavior must be gone
     expect(prompt).not.toContain("do not submit a review or a general PR comment");
-    // New behavior: post an issue comment indicating no findings
-    expect(prompt).toContain("repos/acme/widgets/issues/42/comments");
-    expect(prompt).toContain("no findings");
+    expect(prompt).toContain("review verdict");
+    expect(prompt).toContain(REEF_VERDICT_MARKER);
+    // Compact prioritized format: risk badge + "Worth a look" findings + collapsed all-clear + footer
+    expect(prompt).toContain("🟢 low");
+    expect(prompt).toContain("Worth a look");
+    expect(prompt).toContain("Reviewed, no concerns");
+    expect(prompt).toContain("Reef automated review");
+    // Re-review anchor: find prior verdict (paginated so it survives PRs with >30 comments),
+    // then create OR update in place
+    expect(prompt).toContain(`select(.body | startswith("${REEF_VERDICT_MARKER}"))`);
+    expect(prompt).toContain("gh api --paginate");
+    expect(prompt).toContain('gh api -X PATCH "repos/acme/widgets/issues/comments/$EXISTING"');
+    expect(prompt).toContain('gh api -X POST "repos/acme/widgets/issues/42/comments"');
   });
 
-  it("no-findings comment instruction is conditional when autoApproveOnOpen is true", () => {
+  it("makes the verdict mandatory and self-verified so a clean PR still gets one", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    // Decoupled from findings: a clean review must not skip the verdict
+    expect(prompt).toContain("mandatory");
+    expect(prompt).toContain("regardless of your conclusion");
+    // Self-verification: the posting call prints html_url and the agent must confirm it landed
+    expect(prompt).toContain("--jq '.html_url'");
+    expect(prompt).toContain("Do not end the review without a posted verdict");
+  });
+
+  it("keeps the verdict regardless of autoApproveOnOpen", () => {
     const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
-    expect(prompt).not.toContain("do not submit a review or a general PR comment");
-    expect(prompt).toContain("repos/acme/widgets/issues/42/comments");
-    expect(prompt).toContain("no findings");
-    expect(prompt).toContain(
-      "did not submit an APPROVE review because the PR is not clearly low-risk"
-    );
+    expect(prompt).toContain(REEF_VERDICT_MARKER);
+    expect(prompt).toContain("review verdict");
+  });
+
+  it("omits the lookout/dive guidance by default", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).not.toContain("Large diff — survey, then dive");
+  });
+
+  it("injects lookout/dive guidance when largeDiff is true", () => {
+    const prompt = buildCodeReviewPrompt({ ...baseParams, largeDiff: true });
+    expect(prompt).toContain("Large diff — survey, then dive");
+    expect(prompt).toContain("Lookout (survey)");
+    expect(prompt).toContain("spawn-task");
+    expect(prompt).toContain("get-task-status");
+    expect(prompt).toContain("Sonar");
   });
 
   it("includes APPROVE/REQUEST_CHANGES/COMMENT submit instruction when autoApproveOnOpen is true", () => {
@@ -374,6 +427,10 @@ describe("buildCommentActionPrompt", () => {
     expect(qualityIdx).toBeGreaterThan(-1);
     expect(workflowIdx).toBeGreaterThan(-1);
     expect(qualityIdx).toBeLessThan(workflowIdx);
+    // Shared quality bar carries the disprove-it / CI-filter / out-of-scope additions
+    expect(prompt).toContain("Disprove it before posting");
+    expect(prompt).toContain("Don't flag what the repo's own tooling already catches");
+    expect(prompt).toContain("Out of scope — do not post");
   });
 });
 
@@ -438,5 +495,9 @@ describe("buildFailedChecksPrompt", () => {
     expect(qualityIdx).toBeGreaterThan(-1);
     expect(workflowIdx).toBeGreaterThan(-1);
     expect(qualityIdx).toBeLessThan(workflowIdx);
+    // Shared quality bar carries the disprove-it / CI-filter / out-of-scope additions
+    expect(prompt).toContain("Disprove it before posting");
+    expect(prompt).toContain("Don't flag what the repo's own tooling already catches");
+    expect(prompt).toContain("Out of scope — do not post");
   });
 });

@@ -12,6 +12,7 @@ import type {
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
+  ReviewThreadPayload,
   CheckSuiteCompletedPayload,
 } from "./types";
 import type { Logger } from "./logger";
@@ -22,6 +23,7 @@ import {
   handleReviewRequested,
   handleIssueComment,
   handleReviewComment,
+  handleReviewThreadResolved,
   handleCheckSuiteCompleted,
   type HandlerResult,
 } from "./handlers";
@@ -30,6 +32,11 @@ import {
   buildInternalAuthHeaders,
   createKvCacheStore,
 } from "@open-inspect/shared";
+import {
+  verifyCallbackSignature,
+  handleCompleteCallback,
+  type CompleteCallbackPayload,
+} from "./callbacks";
 
 const app = new Hono<{ Bindings: Env }>();
 const DELIVERY_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -46,6 +53,45 @@ function ttlSecondsFromMs(ttlMs: number): number {
 }
 
 app.get("/health", (c) => c.json({ status: "healthy", service: "open-inspect-github-bot" }));
+
+// Completion callback from the control-plane for review sessions. Guarantees a
+// verdict comment exists on the PR (posts a fallback if the agent didn't).
+app.post("/callbacks/complete", async (c) => {
+  const log = createLogger("callback", {}, parseLogLevel(c.env.LOG_LEVEL));
+
+  let payload: CompleteCallbackPayload;
+  try {
+    payload = await c.req.json<CompleteCallbackPayload>();
+  } catch {
+    return c.json({ error: "invalid json" }, 400);
+  }
+  if (typeof payload?.signature !== "string") {
+    return c.json({ error: "missing signature" }, 400);
+  }
+
+  const valid = await verifyCallbackSignature(payload, c.env.INTERNAL_CALLBACK_SECRET);
+  if (!valid) {
+    log.warn("callback.signature_invalid", { session_id: payload.sessionId });
+    return c.json({ error: "unauthorized" }, 401);
+  }
+
+  // Run the verdict guarantee out of band so the control-plane's callback
+  // returns promptly and isn't retried while GitHub API calls are in flight.
+  c.executionCtx.waitUntil(
+    handleCompleteCallback(c.env, log, payload).catch((err) => {
+      log.error("callback.complete_error", {
+        session_id: payload.sessionId,
+        error: err instanceof Error ? err : new Error(String(err)),
+      });
+    })
+  );
+  return c.json({ ok: true });
+});
+
+// Other callback types (tool_call, session-lifecycle, plan-status) can be
+// routed to github-bot for github-sourced sessions, but the bot has nothing to
+// do with them. Acknowledge so the control-plane neither retries nor logs errors.
+app.post("/callbacks/*", (c) => c.json({ ok: true }));
 
 app.post("/webhooks/github", async (c) => {
   const log = createLogger("webhook", {}, parseLogLevel(c.env.LOG_LEVEL));
@@ -256,6 +302,14 @@ function dispatchHandler(
     case "pull_request_review_comment":
       if (p.action === "created") {
         return handleReviewComment(env, log, payload as ReviewCommentPayload, traceId);
+      }
+      return Promise.resolve({
+        outcome: "skipped",
+        skip_reason: "unsupported_action",
+      });
+    case "pull_request_review_thread":
+      if (p.action === "resolved") {
+        return handleReviewThreadResolved(env, log, payload as ReviewThreadPayload, traceId);
       }
       return Promise.resolve({
         outcome: "skipped",

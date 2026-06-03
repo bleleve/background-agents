@@ -120,10 +120,21 @@ export interface ReviewCommentPayload {
     path: string;
     diff_hunk: string;
     position: number | null;
+    line?: number | null;
     user: { login: string };
   };
   repository: { owner: { login: string }; name: string; private: boolean };
   sender: { login: string; id: number; avatar_url: string };
+}
+
+export interface ReviewThreadPayload {
+  action: "resolved" | "unresolved";
+  thread: {
+    comments: Array<{ id: number }>;
+  };
+  pull_request: { number: number };
+  repository: { owner: { login: string }; name: string; private: boolean };
+  sender: { login: string; id: number };
 }
 
 export interface CheckSuiteCompletedPayload {

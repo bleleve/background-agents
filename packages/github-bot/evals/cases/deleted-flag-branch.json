@@ -1,0 +1,20 @@
+{
+  "name": "deleted-flag-branch",
+  "description": "A feature-flag branch is deleted along with the flag check, so behavior that used to be gated now always runs. Blind-spot axis: deletions that silently change behavior.",
+  "pr": {
+    "owner": "acme",
+    "repo": "widgets",
+    "number": 103,
+    "title": "Remove legacy export gate",
+    "body": "Drop the old experimental flag.",
+    "author": "carol",
+    "base": "main",
+    "head": "chore/remove-flag",
+    "isPublic": false
+  },
+  "diff": "diff --git a/src/export.ts b/src/export.ts\n@@ -12,9 +12,7 @@ export async function exportReport(report: Report): Promise<void> {\n-  if (flags.exportV2Enabled) {\n-    await exportV2(report);\n-    return;\n-  }\n-  await exportV1(report);\n+  await exportV2(report);\n }",
+  "expectedFinding": {
+    "file": "src/export.ts",
+    "summary": "Removing the `exportV2Enabled` gate makes the V2 path unconditional and deletes the V1 fallback. Any environment still relying on V1 (or with the flag off) silently switches to V2 with no migration path."
+  }
+}

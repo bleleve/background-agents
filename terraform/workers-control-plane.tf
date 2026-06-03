@@ -56,6 +56,16 @@ module "control_plane_worker" {
         binding_name = "LINEAR_BOT"
         service_name = "open-inspect-linear-bot-${local.name_suffix}"
       }
+    ] : [],
+    # Lets the control-plane call back into github-bot on review completion to
+    # guarantee a verdict comment. Static service_name (no module reference) so
+    # no Terraform dependency edge is created with module.github_bot_worker,
+    # which itself binds to and depends on the control-plane.
+    var.enable_github_bot ? [
+      {
+        binding_name = "GITHUB_BOT"
+        service_name = "open-inspect-github-bot-${local.name_suffix}"
+      }
     ] : []
   )
 
