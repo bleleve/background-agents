@@ -311,6 +311,7 @@ async function handleGetResolvedConfig(
         reasoningEffort,
         autoReviewOnOpen: githubSettings.autoReviewOnOpen ?? true,
         autoApproveOnOpen: githubSettings.autoApproveOnOpen ?? false,
+        privateReposOnly: githubSettings.privateReposOnly ?? true,
         enabledRepos,
         allowedTriggerUsers: githubSettings.allowedTriggerUsers ?? null,
         codeReviewInstructions: githubSettings.codeReviewInstructions ?? null,

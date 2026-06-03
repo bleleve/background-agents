@@ -232,6 +232,10 @@ export class IntegrationSettingsStore {
   private validateAndNormalizeGitHubSettings(settings: GitHubBotSettings): GitHubBotSettings {
     this.validateModelAndEffort(settings);
 
+    if (settings.privateReposOnly !== undefined && typeof settings.privateReposOnly !== "boolean") {
+      throw new IntegrationSettingsValidationError("privateReposOnly must be a boolean");
+    }
+
     if (
       settings.codeReviewInstructions !== undefined &&
       typeof settings.codeReviewInstructions !== "string"

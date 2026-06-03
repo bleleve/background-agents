@@ -18,6 +18,7 @@ export interface IntegrationEntry<
 export interface GitHubBotSettings {
   autoReviewOnOpen?: boolean;
   autoApproveOnOpen?: boolean;
+  privateReposOnly?: boolean;
   model?: string;
   reasoningEffort?: string;
   allowedTriggerUsers?: string[];

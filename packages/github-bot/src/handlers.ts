@@ -491,6 +491,11 @@ export async function handleReviewRequested(
     return { outcome: "skipped", skip_reason: "repo_not_enabled" };
   }
 
+  if (config.privateReposOnly && !repo.private) {
+    log.debug("handler.public_repo_skipped", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "public_repo_skipped" };
+  }
+
   const gating = await resolveCallerGating(
     env,
     config,
@@ -607,6 +612,11 @@ export async function handlePullRequestOpened(
   if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
     log.debug("handler.repo_not_enabled", { trace_id: traceId, repo: repoFullName });
     return { outcome: "skipped", skip_reason: "repo_not_enabled" };
+  }
+
+  if (config.privateReposOnly && !repo.private) {
+    log.debug("handler.public_repo_skipped", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "public_repo_skipped" };
   }
 
   if (!config.autoReviewOnOpen) {
@@ -738,6 +748,11 @@ export async function handleCheckSuiteCompleted(
   if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
     log.debug("handler.repo_not_enabled", { trace_id: traceId, repo: repoFullName });
     return { outcome: "skipped", skip_reason: "repo_not_enabled" };
+  }
+
+  if (config.privateReposOnly && !repo.private) {
+    log.debug("handler.public_repo_skipped", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "public_repo_skipped" };
   }
 
   const [ghToken, headers] = await Promise.all([
@@ -887,6 +902,11 @@ export async function handleIssueComment(
   if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
     log.debug("handler.repo_not_enabled", { trace_id: traceId, repo: repoFullName });
     return { outcome: "skipped", skip_reason: "repo_not_enabled" };
+  }
+
+  if (config.privateReposOnly && !repo.private) {
+    log.debug("handler.public_repo_skipped", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "public_repo_skipped" };
   }
 
   const gating = await resolveCallerGating(
@@ -1071,6 +1091,11 @@ export async function handleReviewComment(
   if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
     log.debug("handler.repo_not_enabled", { trace_id: traceId, repo: repoFullName });
     return { outcome: "skipped", skip_reason: "repo_not_enabled" };
+  }
+
+  if (config.privateReposOnly && !repo.private) {
+    log.debug("handler.public_repo_skipped", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "public_repo_skipped" };
   }
 
   const gating = await resolveCallerGating(

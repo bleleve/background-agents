@@ -7,6 +7,7 @@ export interface ResolvedGitHubConfig {
   reasoningEffort: string | null;
   autoReviewOnOpen: boolean;
   autoApproveOnOpen: boolean;
+  privateReposOnly: boolean;
   enabledRepos: string[] | null;
   allowedTriggerUsers: string[] | null;
   codeReviewInstructions: string | null;
@@ -17,6 +18,8 @@ const FAIL_CLOSED: Omit<ResolvedGitHubConfig, "model"> = {
   reasoningEffort: null,
   autoReviewOnOpen: false,
   autoApproveOnOpen: false,
+  // fail-open: public-repo filtering is an opt-in restriction, not a safety gate
+  privateReposOnly: false,
   enabledRepos: [],
   allowedTriggerUsers: [],
   codeReviewInstructions: null,
@@ -62,6 +65,7 @@ export async function getGitHubConfig(
       reasoningEffort: string | null;
       autoReviewOnOpen: boolean;
       autoApproveOnOpen: boolean;
+      privateReposOnly: boolean;
       enabledRepos: string[] | null;
       allowedTriggerUsers: string[] | null;
       codeReviewInstructions: string | null;
@@ -75,6 +79,7 @@ export async function getGitHubConfig(
       reasoningEffort: null,
       autoReviewOnOpen: true,
       autoApproveOnOpen: false,
+      privateReposOnly: true,
       enabledRepos: null,
       allowedTriggerUsers: null,
       codeReviewInstructions: null,
@@ -87,6 +92,7 @@ export async function getGitHubConfig(
     reasoningEffort: data.config.reasoningEffort,
     autoReviewOnOpen: data.config.autoReviewOnOpen,
     autoApproveOnOpen: data.config.autoApproveOnOpen ?? false,
+    privateReposOnly: data.config.privateReposOnly ?? true,
     enabledRepos: data.config.enabledRepos,
     allowedTriggerUsers: data.config.allowedTriggerUsers,
     codeReviewInstructions: data.config.codeReviewInstructions,

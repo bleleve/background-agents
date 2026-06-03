@@ -30,6 +30,7 @@ vi.mock("../src/utils/integration-config", () => ({
     reasoningEffort: null,
     autoReviewOnOpen: true,
     autoApproveOnOpen: false,
+    privateReposOnly: false,
     enabledRepos: null,
     allowedTriggerUsers: null,
     codeReviewInstructions: null,
@@ -42,6 +43,7 @@ const defaultConfig: ResolvedGitHubConfig = {
   reasoningEffort: null,
   autoReviewOnOpen: true,
   autoApproveOnOpen: false,
+  privateReposOnly: false,
   enabledRepos: null,
   allowedTriggerUsers: null,
   codeReviewInstructions: null,
@@ -1343,6 +1345,8 @@ describe("integration config", () => {
       model: "anthropic/claude-haiku-4-5",
       reasoningEffort: null,
       autoReviewOnOpen: false,
+      autoApproveOnOpen: false,
+      privateReposOnly: false,
       enabledRepos: [],
       allowedTriggerUsers: [],
       codeReviewInstructions: null,
@@ -1641,5 +1645,106 @@ describe("handlePullRequestOpened autoApproveOnOpen", () => {
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.content).toContain("Do not submit a pull request review.");
     expect(promptBody.content).not.toContain("APPROVE|REQUEST_CHANGES");
+  });
+});
+
+describe("privateReposOnly", () => {
+  it("handleReviewRequested skips public repos when privateReposOnly is true", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      privateReposOnly: true,
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleReviewRequested(env, log, reviewRequestedPayload, "trace-priv-rr");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "public_repo_skipped" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("handlePullRequestOpened skips public repos when privateReposOnly is true", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      privateReposOnly: true,
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handlePullRequestOpened(
+      env,
+      log,
+      pullRequestOpenedPayload,
+      "trace-priv-pr"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "public_repo_skipped" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("handleIssueComment skips public repos when privateReposOnly is true", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      privateReposOnly: true,
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-priv-ic");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "public_repo_skipped" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("handleReviewComment skips public repos when privateReposOnly is true", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      privateReposOnly: true,
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleReviewComment(env, log, reviewCommentPayload, "trace-priv-rc");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "public_repo_skipped" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("handleCheckSuiteCompleted skips public repos when privateReposOnly is true", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      privateReposOnly: true,
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleCheckSuiteCompleted(
+      env,
+      log,
+      failedCheckSuitePayload,
+      "trace-priv-cs"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "public_repo_skipped" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("allows public repos when privateReposOnly is false", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      privateReposOnly: false,
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleReviewRequested(env, log, reviewRequestedPayload, "trace-priv-off");
+
+    expect(result.outcome).toBe("processed");
+    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(2);
   });
 });

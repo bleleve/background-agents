@@ -131,6 +131,9 @@ function GlobalSettingsSection({
   const [autoApproveOnOpen, setAutoApproveOnOpen] = useState(
     settings?.defaults?.autoApproveOnOpen ?? false
   );
+  const [privateReposOnly, setPrivateReposOnly] = useState(
+    settings?.defaults?.privateReposOnly ?? true
+  );
   const [enabledRepos, setEnabledRepos] = useState<string[]>(settings?.enabledRepos ?? []);
   const [repoScopeMode, setRepoScopeMode] = useState<"all" | "selected">(
     settings?.enabledRepos === undefined ? "all" : "selected"
@@ -159,6 +162,7 @@ function GlobalSettingsSection({
       if (settings) {
         setAutoReviewOnOpen(settings.defaults?.autoReviewOnOpen ?? true);
         setAutoApproveOnOpen(settings.defaults?.autoApproveOnOpen ?? false);
+        setPrivateReposOnly(settings.defaults?.privateReposOnly ?? true);
         setEnabledRepos(settings.enabledRepos ?? []);
         setRepoScopeMode(settings.enabledRepos === undefined ? "all" : "selected");
         setAllowedTriggerUsers(settings.defaults?.allowedTriggerUsers ?? []);
@@ -189,6 +193,7 @@ function GlobalSettingsSection({
         mutate(GLOBAL_SETTINGS_KEY);
         setAutoReviewOnOpen(true);
         setAutoApproveOnOpen(false);
+        setPrivateReposOnly(true);
         setEnabledRepos([]);
         setRepoScopeMode("all");
         setAllowedTriggerUsers([]);
@@ -217,6 +222,7 @@ function GlobalSettingsSection({
       defaults: {
         autoReviewOnOpen,
         autoApproveOnOpen,
+        privateReposOnly,
         ...(triggerUserMode === "specific" ? { allowedTriggerUsers } : {}),
         ...(codeReviewInstructions ? { codeReviewInstructions } : {}),
         ...(commentActionInstructions ? { commentActionInstructions } : {}),
@@ -295,7 +301,7 @@ function GlobalSettingsSection({
 
       <label
         htmlFor="auto-approve-toggle"
-        className="flex items-center justify-between px-4 py-3 border border-border hover:bg-muted/50 transition cursor-pointer mb-4 rounded-sm"
+        className="flex items-center justify-between px-4 py-3 border border-border hover:bg-muted/50 transition cursor-pointer mb-2 rounded-sm"
       >
         <div>
           <span className="text-sm font-medium text-foreground">Auto-approve low-risk PRs</span>
@@ -308,6 +314,27 @@ function GlobalSettingsSection({
           checked={autoApproveOnOpen}
           onCheckedChange={(checked) => {
             setAutoApproveOnOpen(checked);
+            setDirty(true);
+            setError("");
+          }}
+        />
+      </label>
+
+      <label
+        htmlFor="private-repos-toggle"
+        className="flex items-center justify-between px-4 py-3 border border-border hover:bg-muted/50 transition cursor-pointer mb-4 rounded-sm"
+      >
+        <div>
+          <span className="text-sm font-medium text-foreground">Private repositories only</span>
+          <span className="text-sm text-muted-foreground ml-2">
+            Skip sessions for public repositories
+          </span>
+        </div>
+        <Switch
+          id="private-repos-toggle"
+          checked={privateReposOnly}
+          onCheckedChange={(checked) => {
+            setPrivateReposOnly(checked);
             setDirty(true);
             setError("");
           }}
