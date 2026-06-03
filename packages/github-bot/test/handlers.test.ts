@@ -98,6 +98,7 @@ function createMockEnv(): Env {
     GITHUB_KV: { get: vi.fn(), put: vi.fn() },
     CONTROL_PLANE: { fetch: controlPlaneFetch },
     DEPLOYMENT_NAME: "test",
+    WEB_APP_URL: "https://reef.test",
     DEFAULT_MODEL: "anthropic/claude-haiku-4-5",
     GITHUB_BOT_USERNAME: "test-bot[bot]",
     GITHUB_APP_ID: "12345",

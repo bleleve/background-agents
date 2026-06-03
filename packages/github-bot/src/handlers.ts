@@ -556,6 +556,7 @@ export async function handleReviewRequested(
     codeReviewInstructions: config.codeReviewInstructions,
     autoApproveOnOpen: config.autoApproveOnOpen,
     largeDiff,
+    sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
@@ -684,6 +685,7 @@ export async function handlePullRequestOpened(
     codeReviewInstructions: config.codeReviewInstructions,
     autoApproveOnOpen: config.autoApproveOnOpen,
     largeDiff,
+    sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {

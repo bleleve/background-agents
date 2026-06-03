@@ -40,6 +40,7 @@ function createMockEnv(): Env {
     GITHUB_APP_INSTALLATION_ID: "install-id",
     INTERNAL_CALLBACK_SECRET: SECRET,
     APP_NAME: "Reef-Test",
+    WEB_APP_URL: "https://reef.test",
   } as unknown as Env;
 }
 
@@ -128,6 +129,8 @@ describe("handleCompleteCallback — verdict guarantee", () => {
     expect(body).toContain(REEF_VERDICT_MARKER);
     expect(body).toContain("Review verdict");
     expect(body).toContain("fallback");
+    // Footer links back to the session.
+    expect(body).toContain("[session](https://reef.test/session/s1)");
     expect(log.info).toHaveBeenCalledWith("verdict.repaired", expect.any(Object));
   });
 
