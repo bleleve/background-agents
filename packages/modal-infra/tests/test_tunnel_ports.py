@@ -1,5 +1,6 @@
 """Tests for tunnel port features in SandboxManager."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,6 +20,17 @@ def _mock_sandbox_with_open() -> tuple[MagicMock, AsyncMock]:
     sandbox.open = MagicMock()
     sandbox.open.aio = AsyncMock(return_value=f)
     return sandbox, f
+
+
+async def _drain_writes() -> None:
+    """Run the fire-and-forget task scheduled by ``_write_tunnel_env_file``.
+
+    The write is dispatched via ``asyncio.create_task`` and retried once, so
+    tests must let the background task finish before asserting on it.
+    """
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if pending:
+        await asyncio.gather(*pending)
 
 
 class TestResolveTunnels:
@@ -152,37 +164,46 @@ class TestWriteTunnelEnvFile:
     async def test_writes_dotenv_format_to_expected_path(self):
         sandbox, f = _mock_sandbox_with_open()
 
-        await SandboxManager._write_tunnel_env_file(
-            sandbox,
-            "sb-1",
-            {
-                3001: "https://tunnel-3001.example.com",
-                3000: "https://tunnel-3000.example.com",
-            },
-        )
+        with patch("src.sandbox.manager.asyncio.sleep", new_callable=AsyncMock):
+            await SandboxManager._write_tunnel_env_file(
+                sandbox,
+                "sb-1",
+                {
+                    3001: "https://tunnel-3001.example.com",
+                    3000: "https://tunnel-3000.example.com",
+                },
+            )
+            await _drain_writes()
 
-        sandbox.open.aio.assert_awaited_once_with(TUNNEL_ENV_FILE_PATH, "w")
-        f.write.aio.assert_awaited_once()
+        # Initial write plus one retry (see _write_tunnel_env_file docstring).
+        assert sandbox.open.aio.await_count == 2
+        sandbox.open.aio.assert_awaited_with(TUNNEL_ENV_FILE_PATH, "w")
+        assert f.write.aio.await_count == 2
         written = f.write.aio.call_args[0][0]
         # Sorted by port, dotenv format, trailing newline.
         assert written == (
             "TUNNEL_3000=https://tunnel-3000.example.com\n"
             "TUNNEL_3001=https://tunnel-3001.example.com\n"
         )
-        f.close.aio.assert_awaited_once()
+        assert f.close.aio.await_count == 2
 
     @pytest.mark.asyncio
     async def test_closes_file_when_write_raises(self):
         sandbox, f = _mock_sandbox_with_open()
         f.write.aio = AsyncMock(side_effect=Exception("write failed"))
 
-        with patch("src.sandbox.manager.log") as mock_log:
+        with (
+            patch("src.sandbox.manager.log") as mock_log,
+            patch("src.sandbox.manager.asyncio.sleep", new_callable=AsyncMock),
+        ):
             await SandboxManager._write_tunnel_env_file(
                 sandbox, "sb-1", {3000: "https://tunnel-3000.example.com"}
             )
+            await _drain_writes()
 
-        f.close.aio.assert_awaited_once()
-        mock_log.warn.assert_called_once()
+        # Both attempts open then fail to write, so the handle is closed twice.
+        assert f.close.aio.await_count == 2
+        assert mock_log.warn.call_count == 2
         assert mock_log.warn.call_args[0][0] == "tunnel.urls_write_failed"
 
     @pytest.mark.asyncio
@@ -191,12 +212,17 @@ class TestWriteTunnelEnvFile:
         sandbox.open = MagicMock()
         sandbox.open.aio = AsyncMock(side_effect=Exception("open failed"))
 
-        with patch("src.sandbox.manager.log") as mock_log:
+        with (
+            patch("src.sandbox.manager.log") as mock_log,
+            patch("src.sandbox.manager.asyncio.sleep", new_callable=AsyncMock),
+        ):
             await SandboxManager._write_tunnel_env_file(
                 sandbox, "sb-1", {3000: "https://tunnel-3000.example.com"}
             )
+            await _drain_writes()
 
-        mock_log.warn.assert_called_once()
+        # Both attempts fail to open the file.
+        assert mock_log.warn.call_count == 2
         assert mock_log.warn.call_args[0][0] == "tunnel.urls_write_failed"
 
 
@@ -208,15 +234,19 @@ class TestResolveAndSetupTunnelsWritesFile:
         sandbox, f = _mock_sandbox_with_open()
         tunnel_urls = {3000: "https://tunnel-3000.example.com"}
 
-        with patch.object(
-            SandboxManager,
-            "_resolve_tunnels",
-            new_callable=AsyncMock,
-            return_value=tunnel_urls,
+        with (
+            patch.object(
+                SandboxManager,
+                "_resolve_tunnels",
+                new_callable=AsyncMock,
+                return_value=tunnel_urls,
+            ),
+            patch("src.sandbox.manager.asyncio.sleep", new_callable=AsyncMock),
         ):
             await SandboxManager._resolve_and_setup_tunnels(sandbox, "sb-1", False, False, [3000])
+            await _drain_writes()
 
-        sandbox.open.aio.assert_awaited_once_with(TUNNEL_ENV_FILE_PATH, "w")
+        sandbox.open.aio.assert_awaited_with(TUNNEL_ENV_FILE_PATH, "w")
         written = f.write.aio.call_args[0][0]
         assert "TUNNEL_3000=https://tunnel-3000.example.com" in written
 
