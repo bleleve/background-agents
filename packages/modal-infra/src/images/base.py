@@ -50,7 +50,7 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
 # v71: keep opencode-ai pinned and add ffmpeg for MP4 browser recordings
-CACHE_BUSTER = "v74-add-kafka-native-build-deps"
+CACHE_BUSTER = "v75-fix-tunnel-env-file-race"
 
 # Base image with all development tools
 base_image = (
@@ -229,6 +229,7 @@ base_image = (
         f"npm install -g @opencode-ai/plugin@{OPENCODE_VERSION} zod",
         "npm install -g oxlint@latest",
         "oxlint --version",
+        "npm install -g typescript-language-server@5.3.0",
         # Langfuse OpenCode plugin (loaded when LANGFUSE_* env vars are provided)
         "npm install -g opencode-plugin-langfuse@latest",
     )

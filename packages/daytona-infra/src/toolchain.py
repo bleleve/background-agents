@@ -53,6 +53,7 @@ def build_base_image(repo_root: Path) -> Image:
             "npm install -g @opencode-ai/plugin@latest zod",
             "npm install -g oxlint@latest",
             "oxlint --version",
+            "npm install -g typescript-language-server@5.3.0",
             f"curl -fsSL -o /tmp/rtk.tar.gz "
             f"https://github.com/rtk-ai/rtk/releases/download/v{RTK_VERSION}/rtk-x86_64-unknown-linux-musl.tar.gz",
             "tar -xzf /tmp/rtk.tar.gz -C /usr/local/bin rtk",

@@ -323,28 +323,45 @@ class SandboxManager:
 
         Failures are logged but do not block sandbox creation; URLs are also
         returned to the control plane via the SandboxHandle.
+
+        The write is retried after a short delay because the supervisor clears
+        any stale tunnel file early in startup, and on fast (snapshot-restore)
+        boots that clear can race with — and delete — this initial write.  A
+        second write ~5 s later lands well within the supervisor's 30-second
+        wait window and survives the clear.
         """
         lines = [f"TUNNEL_{port}={url}" for port, url in sorted(tunnel_urls.items())]
         content = "\n".join(lines) + "\n"
-        try:
-            f = await sandbox.open.aio(TUNNEL_ENV_FILE_PATH, "w")
+
+        async def _write_once(attempt: int) -> None:
             try:
-                await f.write.aio(content)
-            finally:
-                await f.close.aio()
-            log.info(
-                "tunnel.urls_written",
-                sandbox_id=sandbox_id,
-                path=TUNNEL_ENV_FILE_PATH,
-                ports=list(tunnel_urls.keys()),
-            )
-        except Exception as e:
-            log.warn(
-                "tunnel.urls_write_failed",
-                sandbox_id=sandbox_id,
-                path=TUNNEL_ENV_FILE_PATH,
-                exc=e,
-            )
+                f = await sandbox.open.aio(TUNNEL_ENV_FILE_PATH, "w")
+                try:
+                    await f.write.aio(content)
+                finally:
+                    await f.close.aio()
+                log.info(
+                    "tunnel.urls_written",
+                    sandbox_id=sandbox_id,
+                    path=TUNNEL_ENV_FILE_PATH,
+                    ports=list(tunnel_urls.keys()),
+                    attempt=attempt,
+                )
+            except Exception as e:
+                log.warn(
+                    "tunnel.urls_write_failed",
+                    sandbox_id=sandbox_id,
+                    path=TUNNEL_ENV_FILE_PATH,
+                    exc=e,
+                    attempt=attempt,
+                )
+
+        async def _write_with_retry() -> None:
+            await _write_once(1)
+            await asyncio.sleep(5)
+            await _write_once(2)
+
+        asyncio.create_task(_write_with_retry())
 
     @staticmethod
     def _inject_vcs_env_vars(
