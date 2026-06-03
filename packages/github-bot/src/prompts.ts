@@ -97,8 +97,16 @@ function buildInlineSuggestionWorkflow(params: {
 // re-review instead of posting a new comment each time (single re-review anchor).
 export const REEF_VERDICT_MARKER = "<!-- reef-verdict -->";
 
-function buildVerdictWorkflow(params: { owner: string; repo: string; number: number }): string {
-  const { owner, repo, number } = params;
+function buildVerdictWorkflow(params: {
+  owner: string;
+  repo: string;
+  number: number;
+  sessionUrl?: string;
+}): string {
+  const { owner, repo, number, sessionUrl } = params;
+  const footer = sessionUrl
+    ? `<sub>🤖 Reef automated review · [session](${sessionUrl})</sub>`
+    : `<sub>🤖 Reef automated review</sub>`;
   return `7. Post a single **review verdict** comment. **This is your final action and it is mandatory — post it regardless of your conclusion.** Even when the PR is clean and you posted no inline suggestions, you MUST still post the verdict, with the overall risk set accordingly. "Nothing to flag" is itself a verdict, not a reason to skip this step. It is one editable top-level PR comment that serves as the re-review anchor; on a re-review, update it in place instead of posting a new one.
 - The body MUST begin with this exact marker line (invisible when rendered; it lets you find the comment again):
 
@@ -109,7 +117,7 @@ function buildVerdictWorkflow(params: { owner: string; repo: string; number: num
    - **Worth a look** — only if findings survived the quality bar, highest-risk first. One bullet per finding: \`<🟡|🔴> \`path:line\` — <the concrete risk in a few words> → [inline](<html_url of the inline comment you posted in step 6>)\`. Omit this whole section when nothing survived.
    - **Docs** — only if the pr-doc-sentinel returned findings, one bullet each: \`📝 \`path\` — <what diverged>\`. Omit this section entirely when there is no doc drift.
    - **Reviewed, no concerns:** one terse line naming the areas/files you checked that had nothing notable.
-   - Footer line, exactly: \`<sub>🤖 Reef automated review</sub>\`.
+   - Footer line, exactly: \`${footer}\`.
    - Do not invent findings to justify a verdict. A clean PR is just the 🟢 lead line + the "Reviewed" line + the footer (no "Worth a look" section).
 - Find any prior verdict comment, then create or update in place, printing the comment URL so you can confirm it landed:
 
@@ -126,7 +134,7 @@ function buildVerdictWorkflow(params: { owner: string; repo: string; number: num
 
    **Reviewed, no concerns:** <comma-separated areas>
 
-   <sub>🤖 Reef automated review</sub>
+   ${footer}
    EOF
    if [ -n "$EXISTING" ]; then
      gh api -X PATCH "repos/${owner}/${repo}/issues/comments/$EXISTING" -F body=@/tmp/pr-verdict.md --jq '.html_url'
@@ -134,6 +142,13 @@ function buildVerdictWorkflow(params: { owner: string; repo: string; number: num
      gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" -F body=@/tmp/pr-verdict.md --jq '.html_url'
    fi
 - Confirm the command printed the comment's \`html_url\`. If it printed nothing or errored, the verdict did NOT post — fix the call and retry until a URL comes back. Do not end the review without a posted verdict.
+- Set the PR's risk label to match the verdict — exactly one of \`low-risk\`, \`medium-risk\`, or \`high-risk\` — replacing any prior risk label so only the current one remains:
+
+   gh label create low-risk    --repo ${owner}/${repo} --color 0E8A16 --description "Reef: low risk"    >/dev/null 2>&1 || true
+   gh label create medium-risk --repo ${owner}/${repo} --color FBCA04 --description "Reef: medium risk" >/dev/null 2>&1 || true
+   gh label create high-risk   --repo ${owner}/${repo} --color D93F0B --description "Reef: high risk"   >/dev/null 2>&1 || true
+   gh pr edit ${number} --repo ${owner}/${repo} --remove-label low-risk --remove-label medium-risk --remove-label high-risk 2>/dev/null || true
+   gh pr edit ${number} --repo ${owner}/${repo} --add-label "<low|medium|high>-risk"
 - The verdict prioritizes; it does not reopen the door to speculative findings. Do not list anything here that did not survive the quality bar above.`;
 }
 
@@ -162,6 +177,7 @@ export function buildCodeReviewPrompt(params: {
   codeReviewInstructions?: string | null;
   autoApproveOnOpen?: boolean;
   largeDiff?: boolean;
+  sessionUrl?: string;
 }): string {
   const {
     owner,
@@ -176,6 +192,7 @@ export function buildCodeReviewPrompt(params: {
     codeReviewInstructions,
     autoApproveOnOpen,
     largeDiff,
+    sessionUrl,
   } = params;
 
   const prTitleBlock = buildUntrustedUserContentBlock({
@@ -251,7 +268,7 @@ ${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
-${buildVerdictWorkflow({ owner, repo, number })}
+${buildVerdictWorkflow({ owner, repo, number, sessionUrl })}
 ${buildCustomInstructionsSection(codeReviewInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
 }

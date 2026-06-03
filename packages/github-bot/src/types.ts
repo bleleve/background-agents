@@ -14,6 +14,9 @@ export interface Env {
   /** Display name shown in user-visible bot messages and HTTP User-Agent headers. */
   APP_NAME?: string;
 
+  /** Web app base URL (e.g. https://reef.example.com), used to link sessions from PR comments. */
+  WEB_APP_URL: string;
+
   /** Default model ID for new sessions. */
   DEFAULT_MODEL: string;
 

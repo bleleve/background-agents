@@ -64,15 +64,16 @@ function isPrReviewContext(context: unknown): context is GitHubCallbackContext {
  * it in place, and is explicit that it's a fallback (risk not assessed) so it's
  * never mistaken for the agent's own analysis.
  */
-function buildFallbackVerdict(success: boolean): string {
+function buildFallbackVerdict(success: boolean, sessionUrl?: string): string {
   const line = success
     ? "**Overall risk:** not assessed — the automated reviewer completed but did not emit a structured verdict. See any inline comments on this PR."
     : "**Overall risk:** unknown — the automated review did not finish.";
+  const sessionLink = sessionUrl ? ` · [session](${sessionUrl})` : "";
   return `${REEF_VERDICT_MARKER}
 ## Review verdict
 ${line}
 
-<sub>Posted by Reef as a fallback so the re-review anchor always exists.</sub>`;
+<sub>Posted by Reef as a fallback so the re-review anchor always exists.${sessionLink}</sub>`;
 }
 
 /**
@@ -126,7 +127,7 @@ export async function handleCompleteCallback(
     owner,
     repo,
     prNumber,
-    buildFallbackVerdict(payload.success),
+    buildFallbackVerdict(payload.success, `${env.WEB_APP_URL}/session/${payload.sessionId}`),
     userAgent
   );
   if (commentId === null) {

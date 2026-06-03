@@ -50,7 +50,10 @@ describe("buildCodeReviewPrompt", () => {
   it("handles null body gracefully", () => {
     const prompt = buildCodeReviewPrompt({ ...baseParams, body: null });
     expect(prompt).toContain("_No description provided._");
-    expect(prompt).not.toContain("null");
+    // A null body must not render as a standalone `null` line in the description
+    // block. (A blanket no-"null" check would wrongly trip on `>/dev/null` in the
+    // label commands, which is legitimate shell.)
+    expect(prompt).not.toContain("\nnull\n");
   });
 
   it("handles multiline body", () => {
@@ -188,6 +191,32 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("gh api --paginate");
     expect(prompt).toContain('gh api -X PATCH "repos/acme/widgets/issues/comments/$EXISTING"');
     expect(prompt).toContain('gh api -X POST "repos/acme/widgets/issues/42/comments"');
+  });
+
+  it("sets a risk label matching the verdict, replacing any prior one", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).toContain("gh label create low-risk");
+    expect(prompt).toContain("gh label create medium-risk");
+    expect(prompt).toContain("gh label create high-risk");
+    // Removes all three then adds the matching one, so only the current risk remains
+    expect(prompt).toContain(
+      "--remove-label low-risk --remove-label medium-risk --remove-label high-risk"
+    );
+    expect(prompt).toContain('--add-label "<low|medium|high>-risk"');
+  });
+
+  it("links the session in the verdict footer when a sessionUrl is provided", () => {
+    const withUrl = buildCodeReviewPrompt({
+      ...baseParams,
+      sessionUrl: "https://reef.example.com/session/sess-123",
+    });
+    expect(withUrl).toContain(
+      "🤖 Reef automated review · [session](https://reef.example.com/session/sess-123)"
+    );
+
+    const withoutUrl = buildCodeReviewPrompt(baseParams);
+    expect(withoutUrl).toContain("🤖 Reef automated review</sub>");
+    expect(withoutUrl).not.toContain("[session](");
   });
 
   it("makes the verdict mandatory and self-verified so a clean PR still gets one", () => {
