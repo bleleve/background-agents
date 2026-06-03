@@ -70,6 +70,7 @@ The bot is deployed via Terraform as a standalone Cloudflare Worker alongside th
 | `GITHUB_KV`                  | KV namespace          | Delivery dedupe store keyed by `X-GitHub-Delivery`                                                                                                                                                                |
 | `CONTROL_PLANE`              | Service binding       | Fetcher to the control plane worker                                                                                                                                                                               |
 | `DEPLOYMENT_NAME`            | Plain text            | Deployment identifier for logging                                                                                                                                                                                 |
+| `WEB_APP_URL`                | Plain text            | Web app base URL (e.g., `https://reef.example.com`); used to link the originating session in PR review verdicts                                                                                                   |
 | `DEFAULT_MODEL`              | Plain text            | Fallback build model when D1 `model_preferences` is unreachable (e.g., `anthropic/claude-haiku-4-5`). Resolution: `D1 > env var > shared constant`. Set the primary value via **Settings → Models** in the web UI |
 | `DEFAULT_PLAN_MODEL`         | Plain text            | Fallback plan-turn model when D1 is unreachable (e.g., `anthropic/claude-opus-4-7`). Same fallback chain as `DEFAULT_MODEL`                                                                                       |
 | `GITHUB_BOT_USERNAME`        | Plain text            | Bot's GitHub login (e.g., `my-app[bot]`) for @mention detection and loop prevention                                                                                                                               |
@@ -187,6 +188,10 @@ Three prompt templates in `src/prompts.ts`:
 - Post inline `suggestion` comments via `gh api .../pulls/{n}/comments`
 - Use `gh pr view ... --json headRefOid` for `commit_id`, temp markdown files for body, and
   `side=RIGHT`
+- Post a single editable risk-map **verdict** comment (anchored by a hidden marker), set the
+  matching `low-risk`/`medium-risk`/`high-risk` label on the PR, and link the originating session in
+  the footer (built from `sessionUrl`, the only extra param the handler passes beyond webhook
+  metadata)
 
 **`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and
 instructions to:
