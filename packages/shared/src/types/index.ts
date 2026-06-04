@@ -648,6 +648,15 @@ export interface CreateSessionRequest {
   /** GitHub PR number this session reviews/acts on (github-bot sessions only). */
   prNumber?: number;
   /**
+   * PR descriptor for github-bot sessions, used to seed a `pr` artifact at
+   * session init so the web UI links the session to its PR (review sessions
+   * don't open a PR themselves, so they'd otherwise have no artifact to link).
+   */
+  prUrl?: string;
+  prState?: string;
+  prHeadRef?: string;
+  prBaseRef?: string;
+  /**
    * When true, the session is gated on an explicit human approval of a plan
    * before any implementation step runs. The agent must call the save_plan
    * tool to end its first turn; subsequent prompts are dispatched in planning

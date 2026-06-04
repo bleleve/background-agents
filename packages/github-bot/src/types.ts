@@ -65,6 +65,8 @@ export interface PullRequestOpenedPayload {
     number: number;
     title: string;
     body: string | null;
+    html_url: string;
+    state: string;
     user: { login: string };
     head: { ref: string; sha: string };
     base: { ref: string };
@@ -82,6 +84,8 @@ export interface PullRequestLabeledPayload {
     number: number;
     title: string;
     body: string | null;
+    html_url: string;
+    state: string;
     user: { login: string };
     head: { ref: string; sha: string };
     base: { ref: string };
@@ -98,6 +102,8 @@ export interface ReviewRequestedPayload {
     number: number;
     title: string;
     body: string | null;
+    html_url: string;
+    state: string;
     user: { login: string };
     head: { ref: string; sha: string };
     base: { ref: string };
@@ -113,6 +119,8 @@ export interface IssueCommentPayload {
   issue: {
     number: number;
     title: string;
+    html_url: string;
+    state: string;
     pull_request?: { url: string };
     labels?: Array<{ name: string }>;
   };
@@ -130,6 +138,8 @@ export interface ReviewCommentPayload {
   pull_request: {
     number: number;
     title: string;
+    html_url: string;
+    state: string;
     head: { ref: string; sha: string };
     base: { ref: string };
     labels?: Array<{ name: string }>;

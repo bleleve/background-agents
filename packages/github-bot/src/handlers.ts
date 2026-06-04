@@ -24,6 +24,7 @@ import {
   buildCodeReviewPrompt,
   buildCommentActionPrompt,
   buildFailedChecksPrompt,
+  REEF_RISK_MARKER_RE,
 } from "./prompts";
 import { getGitHubConfig, type ResolvedGitHubConfig } from "./utils/integration-config";
 import {
@@ -62,6 +63,7 @@ async function recordReviewSuggestion(
     commentId: number;
     file?: string | null;
     line?: number | null;
+    riskScore?: string | null;
   }
 ): Promise<void> {
   try {
@@ -132,6 +134,10 @@ async function createSession(
     scmUserId: string;
     scmAvatarUrl: string;
     prNumber?: number;
+    prUrl?: string;
+    prState?: string;
+    prHeadRef?: string;
+    prBaseRef?: string;
     planMode?: boolean;
     planModel?: string;
   }
@@ -148,6 +154,13 @@ async function createSession(
   };
   if (params.prNumber) {
     body.prNumber = params.prNumber;
+    // Carry the PR descriptor so the control plane can seed a `pr` artifact at
+    // session init — that artifact is what surfaces the PR link in the web UI
+    // (build sessions get it when they open a PR; review sessions need it here).
+    if (params.prUrl) body.prUrl = params.prUrl;
+    if (params.prState) body.prState = params.prState;
+    if (params.prHeadRef) body.prHeadRef = params.prHeadRef;
+    if (params.prBaseRef) body.prBaseRef = params.prBaseRef;
   }
   if (params.reasoningEffort) {
     body.reasoningEffort = params.reasoningEffort;
@@ -329,6 +342,7 @@ interface GitHubPullRequestDetails {
   number: number;
   title: string;
   body: string | null;
+  html_url: string;
   user: { login: string };
   head: { ref: string; sha: string };
   // `base.repo.private` lets the internal review endpoint (which has no webhook
@@ -477,6 +491,10 @@ interface RunCodeReviewParams {
   owner: string;
   repoName: string;
   prNumber: number;
+  prUrl?: string;
+  prState?: string;
+  prHeadRef?: string;
+  prBaseRef?: string;
   title: string;
   body: string | null;
   author: string;
@@ -517,6 +535,10 @@ async function runCodeReview(
     scmUserId: params.scmUserId,
     scmAvatarUrl: params.scmAvatarUrl,
     prNumber: params.prNumber,
+    prUrl: params.prUrl,
+    prState: params.prState,
+    prHeadRef: params.prHeadRef,
+    prBaseRef: params.prBaseRef,
   });
   log.info("session.created", {
     ...params.meta,
@@ -632,6 +654,10 @@ export async function handleReviewRequested(
     owner,
     repoName,
     prNumber: pr.number,
+    prUrl: pr.html_url,
+    prState: pr.state,
+    prHeadRef: pr.head.ref,
+    prBaseRef: pr.base.ref,
     title: pr.title,
     body: pr.body,
     author: pr.user.login,
@@ -718,6 +744,10 @@ export async function handlePullRequestOpened(
     owner,
     repoName,
     prNumber: pr.number,
+    prUrl: pr.html_url,
+    prState: pr.state,
+    prHeadRef: pr.head.ref,
+    prBaseRef: pr.base.ref,
     title: pr.title,
     body: pr.body,
     author: pr.user.login,
@@ -802,6 +832,10 @@ export async function handlePullRequestLabeled(
     owner,
     repoName,
     prNumber: pr.number,
+    prUrl: pr.html_url,
+    prState: pr.state,
+    prHeadRef: pr.head.ref,
+    prBaseRef: pr.base.ref,
     title: pr.title,
     body: pr.body,
     author: pr.user.login,
@@ -887,6 +921,10 @@ export async function handleReviewRequestInternal(
     owner,
     repoName,
     prNumber: req.prNumber,
+    prUrl: details.html_url,
+    prState: details.state,
+    prHeadRef: details.head.ref,
+    prBaseRef: details.base.ref,
     title: details.title,
     body: details.body,
     author: details.user.login,
@@ -1195,6 +1233,9 @@ export async function handleIssueComment(
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
     prNumber: issue.number,
+    // issue_comment carries the PR's html_url/state but not its branches.
+    prUrl: issue.html_url,
+    prState: issue.state,
     planMode,
     planModel,
   });
@@ -1260,6 +1301,10 @@ export async function handleReviewComment(
   // pull_request_review_comment events comment.user === sender, so this also
   // supersedes the self-comment guard (no separate sender check needed below).
   if (comment.user.login === env.GITHUB_BOT_USERNAME) {
+    // The agent prepends a hidden `<!-- reef-risk: … -->` marker to each inline
+    // comment; pull the severity out of it so the "by risk" analytics has a value
+    // (else everything buckets to `unknown`). Normalized to lowercase, null if absent.
+    const riskScore = comment.body.match(REEF_RISK_MARKER_RE)?.[1]?.toLowerCase() ?? null;
     await recordReviewSuggestion(env, log, traceId, {
       repoOwner: owner,
       repoName,
@@ -1269,6 +1314,7 @@ export async function handleReviewComment(
       // `position` is a deprecated diff-hunk offset, not a file line — never let
       // it stand in for `line`, or the metric's line column gets a hunk offset.
       line: comment.line ?? null,
+      riskScore,
     });
     return { outcome: "skipped", skip_reason: "recorded_bot_suggestion" };
   }
@@ -1328,6 +1374,10 @@ export async function handleReviewComment(
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
     prNumber: pr.number,
+    prUrl: pr.html_url,
+    prState: pr.state,
+    prHeadRef: pr.head.ref,
+    prBaseRef: pr.base.ref,
   });
   log.info("session.created", { ...meta, session_id: sessionId, action: "review_comment" });
 

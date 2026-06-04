@@ -57,9 +57,10 @@ function buildInlineSuggestionWorkflow(params: {
 
    SHA="$(gh pr view ${number} --repo ${owner}/${repo} --json headRefOid --jq .headRefOid)"
 
-- Write the markdown body to a temp file (to avoid escaping bugs):
+- Write the markdown body to a temp file (to avoid escaping bugs). The first line MUST be a hidden risk marker — \`<!-- reef-risk: low -->\`, \`<!-- reef-risk: medium -->\`, or \`<!-- reef-risk: high -->\` — set to this finding's severity. It is invisible when rendered and is used only to bucket suggestions by risk in analytics, so do not omit it:
 
    cat >/tmp/pr-suggestion.md <<'EOF'
+   <!-- reef-risk: <low|medium|high> -->
    <what is wrong and why>
 
    \`\`\`suggestion
@@ -97,6 +98,13 @@ function buildInlineSuggestionWorkflow(params: {
 // so it can delete it before posting the fresh one.
 export const REEF_VERDICT_MARKER = "<!-- reef-verdict -->";
 
+// Hidden per-suggestion risk marker the agent prepends to each inline comment body.
+// Invisible when rendered, it carries the finding's risk so the webhook handler can
+// record it for the "by risk" suggestion analytics (which would otherwise be all
+// `unknown`). The capture group is the risk level. Keep in sync with the heredoc in
+// buildInlineSuggestionWorkflow.
+export const REEF_RISK_MARKER_RE = /<!--\s*reef-risk:\s*(low|medium|high)\s*-->/i;
+
 function buildVerdictWorkflow(params: {
   owner: string;
   repo: string;
@@ -112,13 +120,15 @@ function buildVerdictWorkflow(params: {
 
    ${REEF_VERDICT_MARKER}
 
-- Structure the body as a scannable risk map — keep it tight, signal over ceremony:
-   - **Lead line:** a risk badge + a one-sentence summary. Badge: 🟢 low · 🟡 medium · 🔴 high.
-   - **Worth a look** — only if findings survived the quality bar, highest-risk first. One bullet per finding: \`<🟡|🔴> \`path:line\` — <the concrete risk in a few words> → [inline](<html_url of the inline comment you posted in step 6>)\`. Omit this whole section when nothing survived.
-   - **Docs** — only if the pr-doc-sentinel returned findings, one bullet each: \`📝 \`path\` — <what diverged>\`. Omit this section entirely when there is no doc drift.
-   - **Reviewed, no concerns:** one terse line naming the areas/files you checked that had nothing notable.
+- Structure the body as a scannable risk map — a titled header, then a Summary that counts what you found, then the detail sections. Keep it tight; signal over ceremony:
+   - **Header:** a level-2 heading with a risk badge: \`## <🟢|🟡|🔴> Reef Review — <Low|Medium|High> risk\`. Badge: 🟢 low · 🟡 medium · 🔴 high.
+   - **\`---\`** horizontal rule under the header.
+   - **\`### Summary\`** — a one-sentence verdict as a blockquote (\`> …\`), then a count line: \`**<N> finding(s)**\` with a per-risk parenthetical (e.g. \`(1 medium, 1 high)\`) when there are findings, then \` · <M> areas reviewed, no concerns.\`. When nothing survived, write \`**No findings.**\` instead of a count.
+   - **\`### Worth a look\`** — only if findings survived the quality bar, highest-risk first. One bullet per finding: \`<🟡|🔴> \`path:line\` — <the concrete risk in a few words> → [inline](<html_url of the inline comment you posted in step 6>)\`. Omit this whole section when nothing survived.
+   - **\`### Docs\`** — only if the pr-doc-sentinel returned findings, one bullet each: \`📝 \`path\` — <what diverged>\`. Omit this section entirely when there is no doc drift.
+   - **\`### Reviewed, no concerns\`** — one terse line naming the areas/files you checked that had nothing notable.
    - Footer line, exactly: \`${footer}\`.
-   - Do not invent findings to justify a verdict. A clean PR is just the 🟢 lead line + the "Reviewed" line + the footer (no "Worth a look" section).
+   - Do not invent findings to justify a verdict. A clean PR is just the 🟢 header + the \`### Summary\` (with \`**No findings.**\`) + the \`### Reviewed, no concerns\` line + the footer (no "Worth a look" section).
 - Delete any prior verdict comment(s), then post the new verdict as a fresh comment, printing the comment URL so you can confirm it landed:
 
    for id in $(gh api --paginate "repos/${owner}/${repo}/issues/${number}/comments" --jq '.[] | select(.body | startswith("${REEF_VERDICT_MARKER}")) | .id'); do
@@ -126,15 +136,23 @@ function buildVerdictWorkflow(params: {
    done
    cat >/tmp/pr-verdict.md <<'EOF'
    ${REEF_VERDICT_MARKER}
-   **<🟢|🟡|🔴> Reef verdict — <Low|Medium|High> risk** · <one-sentence summary>
+   ## <🟢|🟡|🔴> Reef Review — <Low|Medium|High> risk
 
-   **Worth a look**
+   ---
+
+   ### Summary
+   > <one-sentence verdict>
+
+   **<N> finding(s)** (<X medium, Y high>) · <M> areas reviewed, no concerns.
+
+   ### Worth a look
    - <🟡|🔴> \`<path:line>\` — <concrete risk> → [inline](<inline comment html_url>)
 
-   **Docs**
+   ### Docs
    - 📝 \`<path>\` — <what diverged>
 
-   **Reviewed, no concerns:** <comma-separated areas>
+   ### Reviewed, no concerns
+   <comma-separated areas>
 
    ${footer}
    EOF

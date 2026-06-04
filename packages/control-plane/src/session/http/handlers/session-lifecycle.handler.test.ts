@@ -84,6 +84,7 @@ function createHandler() {
     upsertSession: vi.fn(),
     createSandbox: vi.fn(),
     createParticipant: vi.fn(),
+    createArtifact: vi.fn(),
   };
   const getDurableObjectId = vi.fn(() => "session-do-id");
   const encryptToken = vi.fn();
@@ -244,6 +245,67 @@ describe("createSessionLifecycleHandler", () => {
     });
     expect(scheduleWarmSandbox).toHaveBeenCalled();
     expect(log.info).toHaveBeenCalledWith("Triggering sandbox spawn for new session");
+    // No PR descriptor → no pr artifact seeded.
+    expect(repository.createArtifact).not.toHaveBeenCalled();
+  });
+
+  it("seeds a pr artifact when init carries a PR descriptor (review sessions)", async () => {
+    const { handler, repository, validateReasoningEffort, generateId } = createHandler();
+    validateReasoningEffort.mockReturnValue(null);
+    generateId
+      .mockReturnValueOnce("sandbox-1")
+      .mockReturnValueOnce("participant-1")
+      .mockReturnValueOnce("artifact-1");
+
+    const response = await handler.init(
+      new Request("http://internal/internal/init", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionName: "session-public-id",
+          repoOwner: "acme",
+          repoName: "repo",
+          userId: "user-1",
+          prNumber: 42,
+          prUrl: "https://github.com/acme/repo/pull/42",
+          prState: "open",
+          prHeadRef: "feature/cache",
+          prBaseRef: "main",
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(repository.createArtifact).toHaveBeenCalledWith({
+      id: "artifact-1",
+      type: "pr",
+      url: "https://github.com/acme/repo/pull/42",
+      metadata: JSON.stringify({ number: 42, state: "open", head: "feature/cache", base: "main" }),
+      createdAt: 1234,
+    });
+  });
+
+  it("does not seed a pr artifact when prNumber is present but prUrl is missing", async () => {
+    const { handler, repository, validateReasoningEffort, generateId } = createHandler();
+    validateReasoningEffort.mockReturnValue(null);
+    generateId.mockReturnValueOnce("sandbox-1").mockReturnValueOnce("participant-1");
+
+    const response = await handler.init(
+      new Request("http://internal/internal/init", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionName: "session-public-id",
+          repoOwner: "acme",
+          repoName: "repo",
+          userId: "user-1",
+          prNumber: 42,
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(repository.createArtifact).not.toHaveBeenCalled();
   });
 
   it("falls back to pre-encrypted token when plain-token encryption fails", async () => {

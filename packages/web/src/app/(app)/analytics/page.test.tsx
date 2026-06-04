@@ -197,17 +197,20 @@ describe("AnalyticsPage", () => {
 
     renderPage();
 
+    // The per-user table is collapsed by default — expand it before reading rows.
+    await user.click(screen.getByRole("button", { name: /Per-User Breakdown/i }));
+
     let rows = getUserRows();
     expect(within(rows[0]).getByText("zoe")).toBeInTheDocument();
     expect(within(rows[1]).getByText("anna")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /user/i }));
+    await user.click(screen.getByRole("button", { name: "User" }));
 
     rows = getUserRows();
     expect(within(rows[0]).getByText("anna")).toBeInTheDocument();
     expect(within(rows[1]).getByText("mike")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /user/i }));
+    await user.click(screen.getByRole("button", { name: "User" }));
 
     rows = getUserRows();
     expect(within(rows[0]).getByText("zoe")).toBeInTheDocument();

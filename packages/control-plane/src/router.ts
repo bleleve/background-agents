@@ -967,6 +967,10 @@ async function handleCreateSession(
     actorAvatarUrl?: string;
   };
   const prNumber = typeof body.prNumber === "number" ? body.prNumber : null;
+  const prUrl = typeof body.prUrl === "string" ? body.prUrl : null;
+  const prState = typeof body.prState === "string" ? body.prState : null;
+  const prHeadRef = typeof body.prHeadRef === "string" ? body.prHeadRef : null;
+  const prBaseRef = typeof body.prBaseRef === "string" ? body.prBaseRef : null;
 
   if (!body.repoOwner || !body.repoName) {
     return error("repoOwner and repoName are required");
@@ -1081,6 +1085,10 @@ async function handleCreateSession(
     repoOwner,
     repoName,
     prNumber,
+    prUrl,
+    prState,
+    prHeadRef,
+    prBaseRef,
     repoId,
     defaultBranch,
     branch: body.branch,

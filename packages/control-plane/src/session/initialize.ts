@@ -19,6 +19,15 @@ export interface SessionInitInput {
   repoName: string;
   /** GitHub PR number this session reviews/acts on (github-bot sessions only). */
   prNumber?: number | null;
+  /**
+   * PR descriptor (github-bot sessions). Threaded to the DO so init can seed a
+   * `pr` artifact, which is what surfaces the PR link in the web UI for sessions
+   * that review an existing PR rather than opening one.
+   */
+  prUrl?: string | null;
+  prState?: string | null;
+  prHeadRef?: string | null;
+  prBaseRef?: string | null;
   repoId?: number | null;
   defaultBranch?: string;
   branch?: string;
@@ -122,6 +131,11 @@ export async function initializeSession(
           sessionName: input.sessionId,
           repoOwner: input.repoOwner,
           repoName: input.repoName,
+          prNumber: input.prNumber,
+          prUrl: input.prUrl,
+          prState: input.prState,
+          prHeadRef: input.prHeadRef,
+          prBaseRef: input.prBaseRef,
           repoId: input.repoId,
           defaultBranch: input.defaultBranch,
           branch: input.branch,

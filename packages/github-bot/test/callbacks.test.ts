@@ -131,7 +131,7 @@ describe("handleCompleteCallback — verdict guarantee", () => {
     expect(prNumber).toBe(42);
     // The fallback must be marker-anchored (re-review anchor) and self-labeled.
     expect(body).toContain(REEF_VERDICT_MARKER);
-    expect(body).toContain("Review verdict");
+    expect(body).toContain("Reef Review");
     expect(body).toContain("fallback");
     // Footer links back to the session.
     expect(body).toContain("[session](https://reef.test/session/s1)");

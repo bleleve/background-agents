@@ -69,12 +69,16 @@ function isPrReviewContext(context: unknown): context is GitHubCallbackContext {
  */
 function buildFallbackVerdict(success: boolean, sessionUrl?: string): string {
   const line = success
-    ? "**Overall risk:** not assessed — the automated reviewer completed but did not emit a structured verdict. See any inline comments on this PR."
-    : "**Overall risk:** unknown — the automated review did not finish.";
+    ? "Risk not assessed — the automated reviewer completed but did not emit a structured verdict. See any inline comments on this PR."
+    : "Risk unknown — the automated review did not finish.";
   const sessionLink = sessionUrl ? ` · [session](${sessionUrl})` : "";
   return `${REEF_VERDICT_MARKER}
-## Review verdict
-${line}
+## ⚪ Reef Review — risk not assessed
+
+---
+
+### Summary
+> ${line}
 
 <sub>Posted by Reef as a fallback so the verdict always exists.${sessionLink}</sub>`;
 }

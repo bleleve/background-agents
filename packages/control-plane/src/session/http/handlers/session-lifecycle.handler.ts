@@ -21,6 +21,12 @@ interface InitRequest {
   sessionName: string;
   repoOwner: string;
   repoName: string;
+  /** PR descriptor for github-bot sessions; seeds a `pr` artifact so the web UI links to the PR. */
+  prNumber?: number | null;
+  prUrl?: string | null;
+  prState?: string | null;
+  prHeadRef?: string | null;
+  prBaseRef?: string | null;
   repoId?: number;
   defaultBranch?: string;
   branch?: string;
@@ -46,7 +52,10 @@ interface InitRequest {
 }
 
 export interface SessionLifecycleHandlerDeps {
-  repository: Pick<SessionRepository, "upsertSession" | "createSandbox" | "createParticipant">;
+  repository: Pick<
+    SessionRepository,
+    "upsertSession" | "createSandbox" | "createParticipant" | "createArtifact"
+  >;
   getDurableObjectId: () => string;
   tokenEncryptionKey?: string;
   encryptToken: (token: string, encryptionKey: string) => Promise<string>;
@@ -191,6 +200,26 @@ export function createSessionLifecycleHandler(
         role: "owner",
         joinedAt: now,
       });
+
+      // Seed a `pr` artifact for sessions that act on an existing PR (github-bot
+      // review/comment sessions). Build sessions create this artifact when they
+      // open a PR; review sessions never open one, so without this they'd have no
+      // artifact and the web UI couldn't link the session to its PR. Same shape as
+      // SessionPullRequestService so the client maps it identically.
+      if (typeof body.prNumber === "number" && body.prUrl) {
+        deps.repository.createArtifact({
+          id: deps.generateId(),
+          type: "pr",
+          url: body.prUrl,
+          metadata: JSON.stringify({
+            number: body.prNumber,
+            state: body.prState ?? "open",
+            head: body.prHeadRef ?? null,
+            base: body.prBaseRef ?? null,
+          }),
+          createdAt: now,
+        });
+      }
 
       deps.getLog().info("Triggering sandbox spawn for new session");
       deps.scheduleWarmSandbox();
