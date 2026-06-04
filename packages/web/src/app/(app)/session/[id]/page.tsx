@@ -1191,6 +1191,7 @@ function SessionContent({
               sessionStatus={sessionState?.status || ""}
               artifacts={artifacts}
               reviewPrNumber={parseReviewSessionPrNumber(sessionState?.title)}
+              isProcessing={isProcessing}
               onArchive={handleArchive}
               onUnarchive={handleUnarchive}
             />

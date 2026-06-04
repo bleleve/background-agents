@@ -32,6 +32,11 @@ interface ActionBarProps {
    * "Re-run review" action; left undefined for build/comment sessions.
    */
   reviewPrNumber?: number | null;
+  /**
+   * Whether the agent is currently executing (thinking/streaming). When true,
+   * the "Re-run review" action is disabled to avoid racing an in-flight review.
+   */
+  isProcessing?: boolean;
   onArchive?: () => void | Promise<void>;
   onUnarchive?: () => void | Promise<void>;
 }
@@ -41,6 +46,7 @@ export function ActionBar({
   sessionStatus,
   artifacts,
   reviewPrNumber,
+  isProcessing = false,
   onArchive,
   onUnarchive,
 }: ActionBarProps) {
@@ -147,7 +153,12 @@ export function ActionBar({
             variant="outline"
             size="sm"
             onClick={handleRerunReview}
-            disabled={isRerunningReview}
+            disabled={isRerunningReview || isProcessing}
+            title={
+              isProcessing
+                ? "Wait for the current run to finish before re-running the review"
+                : undefined
+            }
             className="gap-1.5"
           >
             <RefreshIcon className="w-4 h-4" />
