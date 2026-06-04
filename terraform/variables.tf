@@ -75,7 +75,12 @@ variable "modal_workspace" {
 variable "modal_environment" {
   description = "Modal environment name. Derived from the GitHub environment in CI: production → 'main', all others use the environment name directly (e.g. staging, dev01)."
   type        = string
-  default     = ""
+  default     = "main"
+
+  validation {
+    condition     = var.sandbox_provider != "modal" || (length(trimspace(var.modal_environment)) > 0 && can(regex("^[^:/\\\\]+$", var.modal_environment)))
+    error_message = "modal_environment must be set and must not contain colons, slashes, or backslashes when sandbox_provider = 'modal'."
+  }
 }
 
 variable "modal_environment_web_suffix" {
@@ -373,7 +378,7 @@ variable "app_short_name" {
 }
 
 variable "app_icon_url" {
-  description = "Optional URL (absolute or root-relative) to a custom logo image for the command menu and browser favicon. Leave empty to use the built-in icon."
+  description = "Optional URL (absolute or root-relative) to a custom logo image for the command menu and browser favicon. Leave empty to use the built-in favicon and default in-app icon."
   type        = string
   default     = ""
 }

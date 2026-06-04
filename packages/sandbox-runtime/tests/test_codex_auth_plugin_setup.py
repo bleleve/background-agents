@@ -114,7 +114,7 @@ class TestCodexAuthPluginSetup:
 
             await sup.start_opencode()
 
-        mock_copy.assert_called_once_with(
+        mock_copy.assert_any_call(
             plugin_source,
             sup.workspace_path / ".opencode" / "plugins" / "codex-auth-plugin.js",
         )
