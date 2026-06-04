@@ -21,6 +21,19 @@ export interface GitHubLabel {
   name: string;
 }
 
+/**
+ * Adding this label to a PR re-runs the full code review; the bot removes it
+ * once the review completes, so re-adding it re-triggers. The name is an action
+ * (you "ask for review" by applying it), matched case-insensitively in
+ * `handlePullRequestLabeled`.
+ */
+export const ASK_FOR_REVIEW_LABEL = "ask-for-review";
+
+/** Whether `name` is the re-review trigger label (case-insensitive). */
+export function isAskForReviewLabel(name: string): boolean {
+  return name.trim().toLowerCase() === ASK_FOR_REVIEW_LABEL;
+}
+
 // `model` and `build` are interchangeable for the impl-model override.
 const PREFIXES_IMPL_MODEL = ["build", "model"] as const;
 

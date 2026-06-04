@@ -7,6 +7,7 @@ vi.mock("../src/github-auth", () => ({
   generateInstallationToken: vi.fn().mockResolvedValue("test-installation-token"),
   findIssueCommentByMarker: vi.fn(),
   createIssueComment: vi.fn(),
+  removeIssueLabel: vi.fn().mockResolvedValue(true),
 }));
 
 import {
@@ -18,8 +19,10 @@ import {
   generateInstallationToken,
   findIssueCommentByMarker,
   createIssueComment,
+  removeIssueLabel,
 } from "../src/github-auth";
 import { REEF_VERDICT_MARKER } from "../src/prompts";
+import { ASK_FOR_REVIEW_LABEL } from "../src/label-resolution";
 
 const SECRET = "test-callback-secret";
 
@@ -65,6 +68,7 @@ beforeEach(() => {
   vi.mocked(generateInstallationToken).mockClear().mockResolvedValue("test-installation-token");
   vi.mocked(findIssueCommentByMarker).mockReset();
   vi.mocked(createIssueComment).mockReset();
+  vi.mocked(removeIssueLabel).mockReset().mockResolvedValue(true);
 });
 
 describe("verifyCallbackSignature", () => {
@@ -132,6 +136,30 @@ describe("handleCompleteCallback — verdict guarantee", () => {
     // Footer links back to the session.
     expect(body).toContain("[session](https://reef.test/session/s1)");
     expect(log.info).toHaveBeenCalledWith("verdict.repaired", expect.any(Object));
+  });
+
+  it("clears the ask-for-review label so re-adding it re-triggers", async () => {
+    vi.mocked(findIssueCommentByMarker).mockResolvedValue(null);
+    vi.mocked(createIssueComment).mockResolvedValue(1);
+
+    await handleCompleteCallback(createMockEnv(), createMockLogger(), {
+      sessionId: "s1",
+      messageId: "m1",
+      success: true,
+      timestamp: 0,
+      context: prReviewContext,
+      signature: "x",
+    });
+
+    // The trigger label is removed (best-effort) so re-adding it re-triggers.
+    expect(removeIssueLabel).toHaveBeenCalledWith(
+      "test-installation-token",
+      "acme",
+      "widgets",
+      42,
+      ASK_FOR_REVIEW_LABEL,
+      expect.any(String)
+    );
   });
 
   it("does NOT post when the agent already posted its own verdict", async () => {

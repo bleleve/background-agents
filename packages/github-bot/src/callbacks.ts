@@ -4,9 +4,10 @@
  *
  * The one we care about is review completion: it lets the bot *guarantee* that
  * every reviewed PR ends up with a verdict comment. The agent posts a rich
- * verdict on the happy path (see buildVerdictWorkflow in prompts.ts); if it
- * didn't, the bot posts a minimal, clearly-labeled fallback so the re-review
- * anchor always exists and the skip is visible rather than silent.
+ * verdict on the happy path (see buildVerdictWorkflow in prompts.ts) — deleting
+ * any prior verdict and posting a fresh one on a re-review; if it didn't, the
+ * bot posts a minimal, clearly-labeled fallback so the skip is visible rather
+ * than silent.
  */
 
 import { computeHmacHex, timingSafeEqual, resolveAppName } from "@open-inspect/shared";
@@ -15,8 +16,10 @@ import {
   generateInstallationToken,
   findIssueCommentByMarker,
   createIssueComment,
+  removeIssueLabel,
 } from "./github-auth";
 import { REEF_VERDICT_MARKER } from "./prompts";
+import { ASK_FOR_REVIEW_LABEL } from "./label-resolution";
 import type { Env } from "./types";
 import type { Logger } from "./logger";
 
@@ -60,9 +63,9 @@ function isPrReviewContext(context: unknown): context is GitHubCallbackContext {
 }
 
 /**
- * The fallback verdict body. Carries the marker so re-reviews find and update
- * it in place, and is explicit that it's a fallback (risk not assessed) so it's
- * never mistaken for the agent's own analysis.
+ * The fallback verdict body. Carries the marker so a re-review can find and
+ * delete it before posting the fresh verdict, and is explicit that it's a
+ * fallback (risk not assessed) so it's never mistaken for the agent's analysis.
  */
 function buildFallbackVerdict(success: boolean, sessionUrl?: string): string {
   const line = success
@@ -73,7 +76,7 @@ function buildFallbackVerdict(success: boolean, sessionUrl?: string): string {
 ## Review verdict
 ${line}
 
-<sub>Posted by Reef as a fallback so the re-review anchor always exists.${sessionLink}</sub>`;
+<sub>Posted by Reef as a fallback so the verdict always exists.${sessionLink}</sub>`;
 }
 
 /**
@@ -107,6 +110,14 @@ export async function handleCompleteCallback(
     userAgent,
   });
 
+  // Clear the `ask-for-review` trigger label (best-effort) so re-adding it
+  // re-triggers. Unconditional: a no-op (404) when the review wasn't
+  // label-triggered, and it also clears a label left behind by a crashed run.
+  removeIssueLabel(token, owner, repo, prNumber, ASK_FOR_REVIEW_LABEL, userAgent).then(
+    (ok) => log.debug(ok ? "review_label.cleared" : "review_label.clear_failed", meta),
+    () => log.debug("review_label.clear_failed", meta)
+  );
+
   const existing = await findIssueCommentByMarker(
     token,
     owner,
@@ -116,8 +127,9 @@ export async function handleCompleteCallback(
     userAgent
   );
   if (existing !== null) {
-    // The agent posted its own verdict — happy path. Recorded so the
-    // agent-posted vs bot-repaired ratio is queryable from logs.
+    // The agent posted its own verdict — happy path. On a re-review the agent
+    // deletes the prior verdict and posts a fresh one, so this is the new
+    // comment. Recorded so the agent-posted vs bot-repaired ratio is queryable.
     log.info("verdict.present", { ...meta, comment_id: existing });
     return { status: "present" };
   }

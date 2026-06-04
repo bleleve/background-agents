@@ -50,6 +50,13 @@ module "web_app" {
       sensitive = false
     },
     {
+      # On Vercel there is no service binding — github-bot is reached by URL.
+      key       = "GITHUB_BOT_URL"
+      value     = local.github_bot_url
+      targets   = ["production", "preview"]
+      sensitive = false
+    },
+    {
       key       = "NEXT_PUBLIC_WS_URL"
       value     = local.ws_url
       targets   = ["production", "preview"]

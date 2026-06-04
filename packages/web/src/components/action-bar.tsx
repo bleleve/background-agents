@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArchiveSessionDialog } from "@/components/archive-session-dialog";
 import type { Artifact } from "@/types/session";
@@ -11,6 +12,7 @@ import {
   MoreIcon,
   LinkIcon,
   GitHubIcon,
+  RefreshIcon,
 } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,6 +27,11 @@ interface ActionBarProps {
   sessionId: string;
   sessionStatus: string;
   artifacts: Artifact[];
+  /**
+   * Set for PR-review sessions only (the reviewed PR number). Shows the
+   * "Re-run review" action; left undefined for build/comment sessions.
+   */
+  reviewPrNumber?: number | null;
   onArchive?: () => void | Promise<void>;
   onUnarchive?: () => void | Promise<void>;
 }
@@ -33,11 +40,14 @@ export function ActionBar({
   sessionId,
   sessionStatus,
   artifacts,
+  reviewPrNumber,
   onArchive,
   onUnarchive,
 }: ActionBarProps) {
+  const router = useRouter();
   const [isArchiving, setIsArchiving] = useState(false);
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
+  const [isRerunningReview, setIsRerunningReview] = useState(false);
 
   const prArtifact = artifacts.find((a) => a.type === "pr");
   const previewArtifact = artifacts.find((a) => a.type === "preview");
@@ -73,6 +83,32 @@ export function ActionBar({
     }
   };
 
+  const handleRerunReview = async () => {
+    if (reviewPrNumber === undefined || reviewPrNumber === null) return;
+    setIsRerunningReview(true);
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/rerun-review`, {
+        method: "POST",
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        sessionId?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        toast.error(data.error || "Failed to re-run review");
+        return;
+      }
+      toast.success("Review re-triggered");
+      if (data.sessionId && data.sessionId !== sessionId) {
+        router.push(`/session/${data.sessionId}`);
+      }
+    } catch {
+      toast.error("Failed to re-run review");
+    } finally {
+      setIsRerunningReview(false);
+    }
+  };
+
   const handleCopyLink = async () => {
     const url = `${window.location.origin}/session/${sessionId}`;
     await navigator.clipboard.writeText(url);
@@ -102,6 +138,20 @@ export function ActionBar({
               <GitPrIcon className="w-4 h-4" />
               <span>View PR</span>
             </a>
+          </Button>
+        )}
+
+        {/* Re-run automated review (review sessions only) */}
+        {reviewPrNumber !== undefined && reviewPrNumber !== null && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRerunReview}
+            disabled={isRerunningReview}
+            className="gap-1.5"
+          >
+            <RefreshIcon className="w-4 h-4" />
+            <span>{isRerunningReview ? "Re-running…" : "Re-run review"}</span>
           </Button>
         )}
 

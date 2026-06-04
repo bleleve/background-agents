@@ -93,8 +93,8 @@ function buildInlineSuggestionWorkflow(params: {
 }
 
 // Hidden HTML marker that prefixes the review-verdict comment body. Invisible when
-// rendered as markdown, it lets the agent find and edit its own prior verdict on a
-// re-review instead of posting a new comment each time (single re-review anchor).
+// rendered as markdown, it lets the agent find its own prior verdict on a re-review
+// so it can delete it before posting the fresh one.
 export const REEF_VERDICT_MARKER = "<!-- reef-verdict -->";
 
 function buildVerdictWorkflow(params: {
@@ -107,8 +107,8 @@ function buildVerdictWorkflow(params: {
   const footer = sessionUrl
     ? `<sub>🤖 Reef automated review · [session](${sessionUrl})</sub>`
     : `<sub>🤖 Reef automated review</sub>`;
-  return `7. Post a single **review verdict** comment. **This is your final action and it is mandatory — post it regardless of your conclusion.** Even when the PR is clean and you posted no inline suggestions, you MUST still post the verdict, with the overall risk set accordingly. "Nothing to flag" is itself a verdict, not a reason to skip this step. It is one editable top-level PR comment that serves as the re-review anchor; on a re-review, update it in place instead of posting a new one.
-- The body MUST begin with this exact marker line (invisible when rendered; it lets you find the comment again):
+  return `7. Post a single **review verdict** comment. **This is your final action and it is mandatory — post it regardless of your conclusion.** Even when the PR is clean and you posted no inline suggestions, you MUST still post the verdict, with the overall risk set accordingly. "Nothing to flag" is itself a verdict, not a reason to skip this step. On a re-review, delete the prior verdict comment and post a fresh one (a new comment notifies subscribers; an in-place edit would be silent).
+- The body MUST begin with this exact marker line (invisible when rendered; it lets you find a prior verdict to delete):
 
    ${REEF_VERDICT_MARKER}
 
@@ -119,9 +119,11 @@ function buildVerdictWorkflow(params: {
    - **Reviewed, no concerns:** one terse line naming the areas/files you checked that had nothing notable.
    - Footer line, exactly: \`${footer}\`.
    - Do not invent findings to justify a verdict. A clean PR is just the 🟢 lead line + the "Reviewed" line + the footer (no "Worth a look" section).
-- Find any prior verdict comment, then create or update in place, printing the comment URL so you can confirm it landed:
+- Delete any prior verdict comment(s), then post the new verdict as a fresh comment, printing the comment URL so you can confirm it landed:
 
-   EXISTING="$(gh api --paginate "repos/${owner}/${repo}/issues/${number}/comments" --jq '.[] | select(.body | startswith("${REEF_VERDICT_MARKER}")) | .id' | head -n1)"
+   for id in $(gh api --paginate "repos/${owner}/${repo}/issues/${number}/comments" --jq '.[] | select(.body | startswith("${REEF_VERDICT_MARKER}")) | .id'); do
+     gh api -X DELETE "repos/${owner}/${repo}/issues/comments/$id" >/dev/null 2>&1 || true
+   done
    cat >/tmp/pr-verdict.md <<'EOF'
    ${REEF_VERDICT_MARKER}
    **<🟢|🟡|🔴> Reef verdict — <Low|Medium|High> risk** · <one-sentence summary>
@@ -136,11 +138,7 @@ function buildVerdictWorkflow(params: {
 
    ${footer}
    EOF
-   if [ -n "$EXISTING" ]; then
-     gh api -X PATCH "repos/${owner}/${repo}/issues/comments/$EXISTING" -F body=@/tmp/pr-verdict.md --jq '.html_url'
-   else
-     gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" -F body=@/tmp/pr-verdict.md --jq '.html_url'
-   fi
+   gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" -F body=@/tmp/pr-verdict.md --jq '.html_url'
 - Confirm the command printed the comment's \`html_url\`. If it printed nothing or errored, the verdict did NOT post — fix the call and retry until a URL comes back. Do not end the review without a posted verdict.
 - Set the PR's risk label to match the verdict — exactly one of \`low-risk\`, \`medium-risk\`, or \`high-risk\` — replacing any prior risk label so only the current one remains:
 

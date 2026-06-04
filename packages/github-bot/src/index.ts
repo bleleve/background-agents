@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import type {
   Env,
   PullRequestOpenedPayload,
+  PullRequestLabeledPayload,
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
@@ -20,16 +21,20 @@ import { createLogger, parseLogLevel } from "./logger";
 import { verifyWebhookSignature } from "./verify";
 import {
   handlePullRequestOpened,
+  handlePullRequestLabeled,
   handleReviewRequested,
   handleIssueComment,
   handleReviewComment,
   handleReviewThreadResolved,
   handleCheckSuiteCompleted,
+  handleReviewRequestInternal,
   type HandlerResult,
+  type InternalReviewRequest,
 } from "./handlers";
 import {
   normalizeGitHubEvent,
   buildInternalAuthHeaders,
+  verifyInternalToken,
   createKvCacheStore,
 } from "@open-inspect/shared";
 import {
@@ -92,6 +97,46 @@ app.post("/callbacks/complete", async (c) => {
 // routed to github-bot for github-sourced sessions, but the bot has nothing to
 // do with them. Acknowledge so the control-plane neither retries nor logs errors.
 app.post("/callbacks/*", (c) => c.json({ ok: true }));
+
+// Re-run a PR review on demand from the Reef web UI. HMAC-authenticated with
+// the same INTERNAL_CALLBACK_SECRET used for control-plane traffic.
+app.post("/internal/reviews", async (c) => {
+  const traceId = c.req.header("x-trace-id") ?? crypto.randomUUID();
+  const log = createLogger(
+    "internal-review",
+    { trace_id: traceId },
+    parseLogLevel(c.env.LOG_LEVEL)
+  );
+
+  const authed = await verifyInternalToken(
+    c.req.header("Authorization") ?? null,
+    c.env.INTERNAL_CALLBACK_SECRET
+  );
+  if (!authed) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+
+  let body: InternalReviewRequest;
+  try {
+    body = await c.req.json<InternalReviewRequest>();
+  } catch {
+    return c.json({ error: "invalid json" }, 400);
+  }
+  if (
+    typeof body?.owner !== "string" ||
+    typeof body?.repo !== "string" ||
+    typeof body?.prNumber !== "number" ||
+    typeof body?.requestedBy?.login !== "string"
+  ) {
+    return c.json({ error: "missing required fields" }, 400);
+  }
+
+  const result = await handleReviewRequestInternal(c.env, log, body, traceId);
+  if (result.ok) {
+    return c.json({ sessionId: result.sessionId }, 201);
+  }
+  return c.json({ error: result.error }, result.status as 403 | 404 | 500);
+});
 
 app.post("/webhooks/github", async (c) => {
   const log = createLogger("webhook", {}, parseLogLevel(c.env.LOG_LEVEL));
@@ -286,6 +331,9 @@ function dispatchHandler(
       }
       if (p.action === "review_requested") {
         return handleReviewRequested(env, log, payload as ReviewRequestedPayload, traceId);
+      }
+      if (p.action === "labeled") {
+        return handlePullRequestLabeled(env, log, payload as PullRequestLabeledPayload, traceId);
       }
       return Promise.resolve({
         outcome: "skipped",

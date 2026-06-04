@@ -102,6 +102,27 @@ export function parsePlanCommand(body: string): PlanCommand | null {
 }
 
 /**
+ * Canonical title for a github-bot PR-review session. Shared so the bot (which
+ * sets it) and the web UI (which detects review sessions from it, to show the
+ * "Re-run review" action) can't drift. A build/coding session or a comment
+ * action uses a different title, so this doubles as the review-session marker.
+ */
+export function reviewSessionTitle(prNumber: number): string {
+  return `GitHub: Review PR #${prNumber}`;
+}
+
+const REVIEW_SESSION_TITLE_RE = /^GitHub: Review PR #(\d+)$/;
+
+/**
+ * If `title` is a review-session title, return the reviewed PR number; else
+ * null. Used to gate the "Re-run review" action to review sessions only.
+ */
+export function parseReviewSessionPrNumber(title: string | null | undefined): number | null {
+  const match = title?.match(REVIEW_SESSION_TITLE_RE);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+/**
  * Reasoning effort levels supported across providers.
  *
  * - "none": No reasoning (OpenAI only)

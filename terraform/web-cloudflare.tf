@@ -83,6 +83,7 @@ resource "local_file" "web_app_wrangler_production" {
     GITHUB_CLIENT_ID = "${var.github_client_id}"
     NEXTAUTH_URL = "${local.web_app_url}"
     CONTROL_PLANE_URL = "${local.control_plane_url}"
+    GITHUB_BOT_URL = "${local.github_bot_url}"
     NEXT_PUBLIC_WS_URL = "${local.ws_url}"
     NEXT_PUBLIC_SANDBOX_PROVIDER = "${var.sandbox_provider}"
     NEXT_PUBLIC_APP_NAME = "${var.app_name}"
@@ -99,6 +100,11 @@ resource "local_file" "web_app_wrangler_production" {
     [[services]]
     binding = "CONTROL_PLANE_WORKER"
     service = "open-inspect-control-plane-${local.name_suffix}"
+    %{if var.enable_github_bot}
+    [[services]]
+    binding = "GITHUB_BOT_WORKER"
+    service = "open-inspect-github-bot-${local.name_suffix}"
+    %{endif}
   TOML
 }
 
@@ -123,6 +129,7 @@ resource "null_resource" "web_app_cloudflare_deploy" {
   depends_on = [
     null_resource.web_app_cloudflare_build,
     module.control_plane_worker,
+    module.github_bot_worker,
     local_file.web_app_wrangler_production,
   ]
 }

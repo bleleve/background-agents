@@ -174,7 +174,7 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).not.toContain("APPROVE|REQUEST_CHANGES");
   });
 
-  it("instructs the agent to post an editable risk-map verdict anchored by a hidden marker", () => {
+  it("instructs the agent to post a risk-map verdict marked by a hidden marker", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
     // Old silent behavior must be gone
     expect(prompt).not.toContain("do not submit a review or a general PR comment");
@@ -185,12 +185,13 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("Worth a look");
     expect(prompt).toContain("Reviewed, no concerns");
     expect(prompt).toContain("Reef automated review");
-    // Re-review anchor: find prior verdict (paginated so it survives PRs with >30 comments),
-    // then create OR update in place
+    // Re-review: find prior verdict by marker (paginated so it survives PRs with
+    // >30 comments), DELETE it, then POST a fresh comment (so re-reviews notify).
     expect(prompt).toContain(`select(.body | startswith("${REEF_VERDICT_MARKER}"))`);
     expect(prompt).toContain("gh api --paginate");
-    expect(prompt).toContain('gh api -X PATCH "repos/acme/widgets/issues/comments/$EXISTING"');
+    expect(prompt).toContain('gh api -X DELETE "repos/acme/widgets/issues/comments/$id"');
     expect(prompt).toContain('gh api -X POST "repos/acme/widgets/issues/42/comments"');
+    expect(prompt).not.toContain("-X PATCH");
   });
 
   it("sets a risk label matching the verdict, replacing any prior one", () => {
@@ -217,6 +218,19 @@ describe("buildCodeReviewPrompt", () => {
     const withoutUrl = buildCodeReviewPrompt(baseParams);
     expect(withoutUrl).toContain("🤖 Reef automated review</sub>");
     expect(withoutUrl).not.toContain("[session](");
+  });
+
+  it("deletes any prior verdict, then posts a fresh comment (re-reviews notify)", () => {
+    const prompt = buildCodeReviewPrompt({
+      ...baseParams,
+      sessionUrl: "https://reef.example.com/s",
+    });
+    // No in-place edit / timestamp machinery anymore.
+    expect(prompt).not.toContain("__REVIEWED_AT__");
+    expect(prompt).not.toContain("-X PATCH");
+    // Delete prior verdict(s) by marker, then POST a new one.
+    expect(prompt).toContain('gh api -X DELETE "repos/acme/widgets/issues/comments/$id"');
+    expect(prompt).toContain('gh api -X POST "repos/acme/widgets/issues/42/comments"');
   });
 
   it("makes the verdict mandatory and self-verified so a clean PR still gets one", () => {

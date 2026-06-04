@@ -154,6 +154,39 @@ export async function postReaction(
   }
 }
 
+/**
+ * Remove a label from a PR. Best-effort: returns true on success, false on any
+ * failure (including 404 when the label isn't present — a no-op we treat as
+ * success-equivalent for the caller's purposes). Never throws.
+ */
+export async function removeIssueLabel(
+  token: string,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  label: string,
+  userAgent: string = DEFAULT_APP_NAME
+): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}/labels/${encodeURIComponent(label)}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": userAgent,
+        },
+      }
+    );
+    // 404 means the label wasn't on the PR — nothing to do, not an error.
+    return response.ok || response.status === 404;
+  } catch {
+    return false;
+  }
+}
+
 // Page size and page cap for the verdict-comment lookup. 100 is GitHub's max
 // per_page; 10 pages (1000 comments) is far more than any real PR thread, and
 // the loop short-circuits the moment it finds the marker.

@@ -8,6 +8,9 @@ locals {
   control_plane_url  = "https://${local.control_plane_host}"
   ws_url             = "wss://${local.control_plane_host}"
 
+  github_bot_host = "open-inspect-github-bot-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev"
+  github_bot_url  = "https://${local.github_bot_host}"
+
   cloudflare_web_app_custom_url          = trimsuffix(trimspace(var.cloudflare_web_app_url), "/")
   has_cloudflare_web_app_custom_domain   = local.cloudflare_web_app_custom_url != ""
   cloudflare_web_app_custom_host         = trimsuffix(trimprefix(local.cloudflare_web_app_custom_url, "https://"), "/")

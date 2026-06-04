@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 /// <reference types="@testing-library/jest-dom" />
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { ActionBar } from "./action-bar";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
 
 expect.extend(matchers);
 
@@ -89,5 +93,19 @@ describe("ActionBar", () => {
     render(<ActionBar sessionId="session-1" sessionStatus="active" artifacts={[]} />);
 
     expect(screen.queryByText(/Media/)).not.toBeInTheDocument();
+  });
+
+  it("renders Re-run review only for review sessions (reviewPrNumber set)", () => {
+    render(
+      <ActionBar sessionId="session-1" sessionStatus="active" artifacts={[]} reviewPrNumber={42} />
+    );
+
+    expect(screen.getByRole("button", { name: /re-run review/i })).toBeInTheDocument();
+  });
+
+  it("does not render Re-run review for non-review sessions", () => {
+    render(<ActionBar sessionId="session-1" sessionStatus="active" artifacts={[]} />);
+
+    expect(screen.queryByRole("button", { name: /re-run review/i })).not.toBeInTheDocument();
   });
 });

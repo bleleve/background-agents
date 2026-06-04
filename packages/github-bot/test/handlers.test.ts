@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type {
   Env,
   PullRequestOpenedPayload,
+  PullRequestLabeledPayload,
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
@@ -52,11 +53,13 @@ const defaultConfig: ResolvedGitHubConfig = {
 
 import {
   handlePullRequestOpened,
+  handlePullRequestLabeled,
   handleReviewRequested,
   handleIssueComment,
   handleReviewComment,
   handleReviewThreadResolved,
   handleCheckSuiteCompleted,
+  handleReviewRequestInternal,
 } from "../src/handlers";
 import { generateInstallationToken, postReaction, checkSenderPermission } from "../src/github-auth";
 import { getGitHubConfig } from "../src/utils/integration-config";
@@ -1747,5 +1750,167 @@ describe("privateReposOnly", () => {
 
     expect(result.outcome).toBe("processed");
     expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(2);
+  });
+});
+
+const pullRequestLabeledPayload: PullRequestLabeledPayload = {
+  action: "labeled",
+  label: { name: "ask-for-review" },
+  pull_request: {
+    number: 42,
+    title: "Add caching",
+    body: "Adds Redis caching",
+    user: { login: "alice" },
+    head: { ref: "feature/cache", sha: "abc123" },
+    base: { ref: "main" },
+    draft: false,
+    labels: [{ name: "ask-for-review" }],
+  },
+  repository: { owner: { login: "acme" }, name: "widgets", private: false },
+  sender: { login: "bob", id: 1002, avatar_url: "https://avatars.githubusercontent.com/u/1002" },
+};
+
+describe("handlePullRequestLabeled", () => {
+  it("re-runs a full code review when the ask-for-review label is added", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handlePullRequestLabeled(env, log, pullRequestLabeledPayload, "trace-lbl");
+
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "rereview",
+    });
+
+    const cpFetch = getControlPlaneFetch(env);
+    expect(cpFetch).toHaveBeenCalledTimes(2);
+
+    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(sessionBody.title).toContain("Review PR #42");
+    expect(sessionBody.scmLogin).toBe("bob");
+
+    // It sends the full review prompt (not a comment action) with the pr_review
+    // callback context, so the verdict guarantee + label removal fire on completion.
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain("Pull Request #42");
+    expect(promptBody.callbackContext).toEqual({
+      source: "github",
+      kind: "pr_review",
+      owner: "acme",
+      repo: "widgets",
+      prNumber: 42,
+      isPublic: true,
+    });
+  });
+
+  it("never auto-approves, even when autoApproveOnOpen is enabled", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoApproveOnOpen: true });
+
+    await handlePullRequestLabeled(env, log, pullRequestLabeledPayload, "trace-lbl");
+
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain("Do not submit a pull request review.");
+  });
+
+  it("skips when the added label is not ask-for-review", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: PullRequestLabeledPayload = {
+      ...pullRequestLabeledPayload,
+      label: { name: "bug" },
+    };
+
+    const result = await handlePullRequestLabeled(env, log, payload, "trace-lbl");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "not_review_label" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("skips draft PRs", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: PullRequestLabeledPayload = {
+      ...pullRequestLabeledPayload,
+      pull_request: { ...pullRequestLabeledPayload.pull_request, draft: true },
+    };
+
+    const result = await handlePullRequestLabeled(env, log, payload, "trace-lbl");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "draft_pr" });
+  });
+});
+
+describe("handleReviewRequestInternal", () => {
+  const internalRequest = {
+    owner: "acme",
+    repo: "widgets",
+    prNumber: 42,
+    requestedBy: { login: "alice", id: 1001, avatarUrl: "https://avatars.example/alice" },
+  };
+
+  it("creates a review session from PR details fetched via the GitHub API", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    // PR-details fetch returns title/body/author/branches + repo visibility.
+    // Use mockImplementation so each call gets a fresh Response (the endpoint is
+    // fetched twice — once here, once by isLargeDiff — and a body reads once).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              number: 42,
+              title: "Add caching",
+              body: "Adds Redis caching",
+              user: { login: "alice" },
+              head: { ref: "feature/cache", sha: "abc123" },
+              base: { ref: "main", repo: { private: false } },
+              additions: 1,
+              deletions: 1,
+            }),
+            { status: 200 }
+          )
+        )
+      )
+    );
+
+    const result = await handleReviewRequestInternal(env, log, internalRequest, "trace-int");
+
+    expect(result).toEqual({ ok: true, sessionId: "session-123" });
+    const cpFetch = getControlPlaneFetch(env);
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.callbackContext).toMatchObject({ kind: "pr_review", prNumber: 42 });
+    expect(promptBody.authorId).toBe("github:1001");
+  });
+
+  it("returns 404 when the PR cannot be fetched", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 404 })));
+
+    const result = await handleReviewRequestInternal(env, log, internalRequest, "trace-int");
+
+    expect(result).toEqual({ ok: false, status: 404, error: "pull_request_not_found" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when the repo is not enabled", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      enabledRepos: ["acme/other"],
+    });
+
+    const result = await handleReviewRequestInternal(env, log, internalRequest, "trace-int");
+
+    expect(result).toEqual({ ok: false, status: 403, error: "repo_not_enabled" });
   });
 });
