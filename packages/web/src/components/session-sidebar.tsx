@@ -27,6 +27,7 @@ import {
 } from "@/lib/session-list";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { useIsMobile } from "@/hooks/use-media-query";
+import { useSidebarContext } from "@/components/sidebar-context";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   MoreIcon,
@@ -55,7 +56,6 @@ export type SessionItem = Session;
 
 export const MOBILE_LONG_PRESS_MS = 450;
 const MOBILE_LONG_PRESS_MOVE_THRESHOLD_PX = 10;
-type SessionCreatorFilter = "all" | "mine";
 
 export function buildSessionHref(session: SessionItem) {
   return {
@@ -76,10 +76,10 @@ interface SessionSidebarProps {
 
 export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: SessionSidebarProps) {
   const { data: authSession } = useSession();
+  const { creatorFilter, setCreatorFilter } = useSidebarContext();
   const pathname = usePathname();
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
-  const [sessionCreatorFilter, setSessionCreatorFilter] = useState<SessionCreatorFilter>("all");
   const [extraSessions, setExtraSessions] = useState<SessionItem[]>([]);
   const [hasMorePages, setHasMorePages] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -95,9 +95,9 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
 
     return buildSessionsPageKey({
       excludeStatus: "archived",
-      createdBy: sessionCreatorFilter === "mine" ? [CURRENT_USER_CREATED_BY] : undefined,
+      createdBy: creatorFilter === "mine" ? [CURRENT_USER_CREATED_BY] : undefined,
     });
-  }, [authSession, sessionCreatorFilter]);
+  }, [authSession, creatorFilter]);
 
   const {
     data,
@@ -143,7 +143,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
       const response = await fetch(
         buildSessionsPageKey({
           excludeStatus: "archived",
-          createdBy: sessionCreatorFilter === "mine" ? [CURRENT_USER_CREATED_BY] : undefined,
+          createdBy: creatorFilter === "mine" ? [CURRENT_USER_CREATED_BY] : undefined,
           offset: offsetRef.current,
         })
       );
@@ -171,7 +171,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
         setLoadingMore(false);
       }
     }
-  }, [authSession, sessionCreatorFilter, sidebarSessionsKey]);
+  }, [authSession, creatorFilter, sidebarSessionsKey]);
 
   const maybeLoadMoreSessions = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -263,7 +263,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
   const hasSessionListError = sessionsError;
   const emptyMessage = hasSessionListError
     ? "Unable to load sessions"
-    : sessionCreatorFilter === "mine"
+    : creatorFilter === "mine"
       ? "No sessions started by you"
       : "No sessions yet";
 
@@ -357,6 +357,33 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
         </div>
       </div>
 
+      <div className="px-3 pt-2">
+        <ToggleGroup
+          type="single"
+          value={creatorFilter}
+          onValueChange={(value) => {
+            if (value === "all" || value === "mine") {
+              setCreatorFilter(value);
+            }
+          }}
+          className="grid grid-cols-2 rounded-md border border-border-muted bg-muted p-0.5"
+          aria-label="Content owner filter"
+        >
+          <ToggleGroupItem
+            value="all"
+            className="h-7 rounded-sm text-xs data-[state=on]:bg-background data-[state=on]:text-foreground"
+          >
+            All
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            value="mine"
+            className="h-7 rounded-sm text-xs data-[state=on]:bg-background data-[state=on]:text-foreground"
+          >
+            Mine
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </div>
+
       {/* Nav links */}
       <div className="px-3 pt-2 pb-1 flex flex-col gap-0.5">
         <Link
@@ -383,33 +410,6 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
           <DataControlsIcon className="w-4 h-4" />
           Analytics
         </Link>
-      </div>
-
-      <div className="px-3 pt-2">
-        <ToggleGroup
-          type="single"
-          value={sessionCreatorFilter}
-          onValueChange={(value) => {
-            if (value === "all" || value === "mine") {
-              setSessionCreatorFilter(value);
-            }
-          }}
-          className="grid grid-cols-2 rounded-md border border-border-muted bg-muted p-0.5"
-          aria-label="Session owner filter"
-        >
-          <ToggleGroupItem
-            value="all"
-            className="h-7 rounded-sm text-xs data-[state=on]:bg-background data-[state=on]:text-foreground"
-          >
-            All
-          </ToggleGroupItem>
-          <ToggleGroupItem
-            value="mine"
-            className="h-7 rounded-sm text-xs data-[state=on]:bg-background data-[state=on]:text-foreground"
-          >
-            Mine
-          </ToggleGroupItem>
-        </ToggleGroup>
       </div>
 
       {/* Search */}

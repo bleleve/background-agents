@@ -3,7 +3,12 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { controlPlaneFetch } from "@/lib/control-plane";
-import { buildControlPlanePath } from "@/lib/control-plane-query";
+import {
+  AUTOMATION_CONTROL_PLANE_QUERY_PARAMS,
+  buildControlPlanePath,
+} from "@/lib/control-plane-query";
+import { resolveCurrentUserId } from "@/lib/current-user";
+import { CURRENT_USER_CREATED_BY } from "@/lib/automation-list";
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -11,9 +16,31 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const path = buildControlPlanePath("/automations", request.nextUrl.searchParams);
-
   try {
+    const searchParams = new URLSearchParams(request.nextUrl.searchParams);
+
+    const createdByValues = searchParams.getAll("createdBy");
+    if (createdByValues.includes(CURRENT_USER_CREATED_BY)) {
+      const resolved = await resolveCurrentUserId(session.user);
+      if (!resolved.ok) {
+        return NextResponse.json(resolved.body, { status: resolved.status });
+      }
+
+      searchParams.delete("createdBy");
+      for (const value of createdByValues) {
+        searchParams.append(
+          "createdBy",
+          value === CURRENT_USER_CREATED_BY ? resolved.userId : value
+        );
+      }
+    }
+
+    const path = buildControlPlanePath(
+      "/automations",
+      searchParams,
+      AUTOMATION_CONTROL_PLANE_QUERY_PARAMS
+    );
+
     const response = await controlPlaneFetch(path);
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });

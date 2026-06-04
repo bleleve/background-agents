@@ -11,7 +11,7 @@ import { SidebarIcon, PlusIcon } from "@/components/ui/icons";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 
 export default function AutomationsPage() {
-  const { isOpen, toggle } = useSidebarContext();
+  const { isOpen, toggle, creatorFilter } = useSidebarContext();
   const { automations, loading, mutate } = useAutomations();
 
   const [actionError, setActionError] = useState<string | null>(null);
@@ -80,6 +80,12 @@ export default function AutomationsPage() {
           ) : (
             <AutomationsList
               automations={automations}
+              {...(creatorFilter === "mine"
+                ? {
+                    emptyMessage: "No automations created by you",
+                    emptyDescription: "",
+                  }
+                : {})}
               onPause={(id) => handleAction(id, "pause")}
               onResume={(id) => handleAction(id, "resume")}
               onTrigger={(id) => handleAction(id, "trigger")}

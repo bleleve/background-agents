@@ -1,35 +1,22 @@
 "use client";
 
-import { createContext, useCallback, useContext, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { SessionSidebar } from "./session-sidebar";
 import { GlobalCommandMenu } from "./global-command-menu";
+import { SidebarContext } from "./sidebar-context";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useIsMobile } from "@/hooks/use-media-query";
 import { useGlobalShortcuts } from "@/hooks/use-global-shortcuts";
 import { SIDEBAR_SESSIONS_KEY, type SessionListResponse } from "@/lib/session-list";
+import type { CreatorFilter } from "@/lib/creator-filter";
 import { Button } from "@/components/ui/button";
 import { GitHubIcon } from "@/components/ui/icons";
 import { APP_NAME } from "@/lib/site-config";
 
-interface SidebarContextValue {
-  isOpen: boolean;
-  toggle: () => void;
-  open: () => void;
-  close: () => void;
-}
-
-const SidebarContext = createContext<SidebarContextValue | null>(null);
-
-export function useSidebarContext() {
-  const context = useContext(SidebarContext);
-  if (!context) {
-    throw new Error("useSidebarContext must be used within a SidebarLayout");
-  }
-  return context;
-}
+export { useSidebarContext } from "./sidebar-context";
 
 interface SidebarLayoutProps {
   children: React.ReactNode;
@@ -41,6 +28,16 @@ export function SidebarLayout({ children }: SidebarLayoutProps) {
   const sidebar = useSidebar();
   const isMobile = useIsMobile();
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+  const [creatorFilter, setCreatorFilter] = useState<CreatorFilter>("all");
+
+  const sidebarContextValue = useMemo(
+    () => ({
+      ...sidebar,
+      creatorFilter,
+      setCreatorFilter,
+    }),
+    [sidebar, creatorFilter]
+  );
 
   const { data: sessionsResponse } = useSWR<SessionListResponse>(
     status === "authenticated" && Boolean(session) && isCommandMenuOpen
@@ -103,7 +100,7 @@ export function SidebarLayout({ children }: SidebarLayoutProps) {
   }
 
   return (
-    <SidebarContext.Provider value={sidebar}>
+    <SidebarContext.Provider value={sidebarContextValue}>
       <div className="flex h-dvh overflow-hidden">
         {/* Mobile: overlay backdrop */}
         {isMobile && (

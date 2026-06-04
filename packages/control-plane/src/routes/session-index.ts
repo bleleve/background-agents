@@ -1,6 +1,13 @@
-import { isCanonicalUserId, type SessionStatus } from "@open-inspect/shared";
+import { type SessionStatus } from "@open-inspect/shared";
 import { SessionIndexStore } from "../db/session-index";
-import { error, json, parsePattern, type RequestContext, type Route } from "./shared";
+import {
+  error,
+  json,
+  parseCreatedByFilters,
+  parsePattern,
+  type RequestContext,
+  type Route,
+} from "./shared";
 import type { Env } from "../types";
 
 const SESSION_STATUSES: SessionStatus[] = [
@@ -15,25 +22,6 @@ const SESSION_STATUSES: SessionStatus[] = [
 function parseSessionStatus(value: string | null): SessionStatus | undefined {
   if (!value) return undefined;
   return SESSION_STATUSES.includes(value as SessionStatus) ? (value as SessionStatus) : undefined;
-}
-
-function parseCreatedByFilters(searchParams: URLSearchParams): string[] | Response {
-  const values = searchParams.getAll("createdBy");
-  const userIds: string[] = [];
-  const seen = new Set<string>();
-
-  for (const value of values) {
-    if (!isCanonicalUserId(value)) {
-      return error("Invalid createdBy", 400);
-    }
-
-    if (!seen.has(value)) {
-      seen.add(value);
-      userIds.push(value);
-    }
-  }
-
-  return userIds;
 }
 
 function parsePaginationLimit(value: string | null): number {

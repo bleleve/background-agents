@@ -175,7 +175,34 @@ describe("automation route handlers", () => {
       expect(mockStore.list).toHaveBeenCalledWith({
         repoOwner: "acme",
         repoName: "web-app",
+        createdByUserIds: [],
       });
+    });
+
+    it("passes validated creator filters through to the store", async () => {
+      mockStore.list.mockResolvedValue({ automations: [], total: 0 });
+
+      await callRoute("GET", "/automations", {
+        query: {
+          createdBy: "0123456789abcdef0123456789abcdef",
+        },
+      });
+
+      expect(mockStore.list).toHaveBeenCalledWith({
+        repoOwner: undefined,
+        repoName: undefined,
+        createdByUserIds: ["0123456789abcdef0123456789abcdef"],
+      });
+    });
+
+    it("rejects invalid creator filters before querying the store", async () => {
+      const res = await callRoute("GET", "/automations", {
+        query: { createdBy: "me" },
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({ error: "Invalid createdBy" });
+      expect(mockStore.list).not.toHaveBeenCalled();
     });
   });
 

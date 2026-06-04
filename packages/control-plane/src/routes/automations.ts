@@ -27,6 +27,7 @@ import {
   parsePattern,
   json,
   error,
+  parseCreatedByFilters,
   parseJsonBody,
   resolveRepoOrError,
 } from "./shared";
@@ -77,9 +78,14 @@ async function handleListAutomations(
   const url = new URL(request.url);
   const repoOwner = url.searchParams.get("repoOwner") ?? undefined;
   const repoName = url.searchParams.get("repoName") ?? undefined;
+  const createdByUserIds = parseCreatedByFilters(url.searchParams);
+
+  if (createdByUserIds instanceof Response) {
+    return createdByUserIds;
+  }
 
   const store = new AutomationStore(env.DB);
-  const result = await store.list({ repoOwner, repoName });
+  const result = await store.list({ repoOwner, repoName, createdByUserIds });
 
   return json({
     automations: result.automations.map(toAutomation),

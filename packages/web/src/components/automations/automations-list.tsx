@@ -11,6 +11,8 @@ import { formatRelativeTime } from "@/lib/time";
 
 interface AutomationsListProps {
   automations: Automation[];
+  emptyMessage?: string;
+  emptyDescription?: string;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onTrigger: (id: string) => void;
@@ -56,6 +58,8 @@ function describeTrigger(automation: Automation): string {
 
 export function AutomationsList({
   automations,
+  emptyMessage = "No automations yet.",
+  emptyDescription = "Create one to run tasks on a schedule or in response to events.",
   onPause,
   onResume,
   onTrigger,
@@ -66,10 +70,10 @@ export function AutomationsList({
   if (automations.length === 0) {
     return (
       <div className="border border-border-muted rounded-md bg-card p-8 text-center">
-        <p className="text-muted-foreground">No automations yet.</p>
-        <p className="text-sm text-muted-foreground mt-1">
-          Create one to run tasks on a schedule or in response to events.
-        </p>
+        <p className="text-muted-foreground">{emptyMessage}</p>
+        {emptyDescription ? (
+          <p className="text-sm text-muted-foreground mt-1">{emptyDescription}</p>
+        ) : null}
       </div>
     );
   }

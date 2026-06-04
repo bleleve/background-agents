@@ -2,6 +2,7 @@
  * Shared route primitives used by all route modules.
  */
 
+import { isCanonicalUserId } from "@open-inspect/shared";
 import type { CorrelationContext } from "../logger";
 import type { RequestMetrics } from "../db/instrumented-d1";
 import type { Env } from "../types";
@@ -59,6 +60,25 @@ export function json(data: unknown, status = 200): Response {
  */
 export function error(message: string, status = 400): Response {
   return json({ error: message }, status);
+}
+
+export function parseCreatedByFilters(searchParams: URLSearchParams): string[] | Response {
+  const values = searchParams.getAll("createdBy");
+  const userIds: string[] = [];
+  const seen = new Set<string>();
+
+  for (const value of values) {
+    if (!isCanonicalUserId(value)) {
+      return error("Invalid createdBy", 400);
+    }
+
+    if (!seen.has(value)) {
+      seen.add(value);
+      userIds.push(value);
+    }
+  }
+
+  return userIds;
 }
 
 /**

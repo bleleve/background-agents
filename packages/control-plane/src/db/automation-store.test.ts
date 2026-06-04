@@ -202,6 +202,35 @@ describe("AutomationStore", () => {
       expect(result.total).toBe(1);
       expect(result.automations).toHaveLength(1);
     });
+
+    it("filters by createdByUserIds", async () => {
+      const { db, statements } = createFakeD1({
+        allResults: [sampleRow],
+      });
+      const store = new AutomationStore(db);
+      await store.list({
+        createdByUserIds: ["0123456789abcdef0123456789abcdef"],
+      });
+
+      expect(statements[0].sql).toContain("user_id IN (?)");
+      expect(statements[0].params).toContain("0123456789abcdef0123456789abcdef");
+    });
+
+    it("filters by multiple createdByUserIds", async () => {
+      const { db, statements } = createFakeD1({
+        allResults: [sampleRow],
+      });
+      const store = new AutomationStore(db);
+      await store.list({
+        createdByUserIds: ["0123456789abcdef0123456789abcdef", "ffffffffffffffffffffffffffffffff"],
+      });
+
+      expect(statements[0].sql).toContain("user_id IN (?, ?)");
+      expect(statements[0].params).toEqual([
+        "0123456789abcdef0123456789abcdef",
+        "ffffffffffffffffffffffffffffffff",
+      ]);
+    });
   });
 
   describe("softDelete", () => {
