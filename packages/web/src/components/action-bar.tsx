@@ -147,23 +147,30 @@ export function ActionBar({
           </Button>
         )}
 
-        {/* Re-run automated review (review sessions only) */}
+        {/* Re-run automated review (review sessions only). The title lives on a
+            wrapper span, not the Button: a disabled Button has
+            `pointer-events-none`, so it never receives the hover that triggers a
+            native title tooltip — the span does. */}
         {reviewPrNumber !== undefined && reviewPrNumber !== null && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRerunReview}
-            disabled={isRerunningReview || isProcessing}
+          <span
+            className="inline-flex"
             title={
               isProcessing
                 ? "Wait for the current run to finish before re-running the review"
                 : undefined
             }
-            className="gap-1.5"
           >
-            <RefreshIcon className="w-4 h-4" />
-            <span>{isRerunningReview ? "Re-running…" : "Re-run review"}</span>
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRerunReview}
+              disabled={isRerunningReview || isProcessing}
+              className="gap-1.5"
+            >
+              <RefreshIcon className="w-4 h-4" />
+              <span>{isRerunningReview ? "Re-running…" : "Re-run review"}</span>
+            </Button>
+          </span>
         )}
 
         {/* Archive/Unarchive */}
