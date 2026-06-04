@@ -880,6 +880,8 @@ export interface Automation {
   lastRunAt: number | null;
   eventType: string | null;
   triggerConfig: TriggerConfig | null;
+  /** Present on API responses when the request includes actor context. */
+  canDelete?: boolean;
 }
 
 export interface CreateAutomationRequest {

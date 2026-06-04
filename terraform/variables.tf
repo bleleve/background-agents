@@ -462,6 +462,12 @@ variable "allowed_email_domains" {
   default     = ""
 }
 
+variable "automation_delete_admins" {
+  description = "Comma-separated GitHub usernames allowed to delete any automation (soft-delete). Creators may always delete their own automations."
+  type        = string
+  default     = ""
+}
+
 variable "langfuse_public_key" {
   description = "Langfuse public key for OpenCode tracing in sandboxes (optional)"
   type        = string

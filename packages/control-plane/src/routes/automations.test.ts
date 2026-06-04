@@ -557,6 +557,14 @@ describe("automation route handlers", () => {
       expect(res.status).toBe(404);
       expect(mockStore.softDelete).not.toHaveBeenCalled();
     });
+
+    it("returns 404 when soft delete affects no rows", async () => {
+      mockStore.softDelete.mockResolvedValue(false);
+
+      const res = await callRoute("DELETE", "/automations/auto-1", { body: deleteActorBody });
+      expect(res.status).toBe(404);
+      expect(mockStore.softDelete).not.toHaveBeenCalled();
+    });
   });
 
   describe("POST /automations/:id/pause", () => {
