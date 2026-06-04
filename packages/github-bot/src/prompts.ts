@@ -122,7 +122,6 @@ function buildVerdictWorkflow(params: {
 
 - Structure the body as a scannable risk map — a titled header, then a Summary that counts what you found, then the detail sections. Keep it tight; signal over ceremony:
    - **Header:** a level-2 heading with a risk badge: \`## <🟢|🟡|🔴> Reef Review — <Low|Medium|High> risk\`. Badge: 🟢 low · 🟡 medium · 🔴 high.
-   - **\`---\`** horizontal rule under the header.
    - **\`### Summary\`** — a one-sentence verdict as a blockquote (\`> …\`), then a count line: \`**<N> finding(s)**\` with a per-risk parenthetical (e.g. \`(1 medium, 1 high)\`) when there are findings, then \` · <M> areas reviewed, no concerns.\`. When nothing survived, write \`**No findings.**\` instead of a count.
    - **\`### Worth a look\`** — only if findings survived the quality bar, highest-risk first. One bullet per finding: \`<🟡|🔴> \`path:line\` — <the concrete risk in a few words> → [inline](<html_url of the inline comment you posted in step 6>)\`. Omit this whole section when nothing survived.
    - **\`### Docs\`** — only if the pr-doc-sentinel returned findings, one bullet each: \`📝 \`path\` — <what diverged>\`. Omit this section entirely when there is no doc drift.
@@ -137,8 +136,6 @@ function buildVerdictWorkflow(params: {
    cat >/tmp/pr-verdict.md <<'EOF'
    ${REEF_VERDICT_MARKER}
    ## <🟢|🟡|🔴> Reef Review — <Low|Medium|High> risk
-
-   ---
 
    ### Summary
    > <one-sentence verdict>
