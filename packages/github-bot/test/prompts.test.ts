@@ -180,10 +180,14 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).not.toContain("do not submit a review or a general PR comment");
     expect(prompt).toContain("review verdict");
     expect(prompt).toContain(REEF_VERDICT_MARKER);
-    // Compact prioritized format: risk badge + "Worth a look" findings + collapsed all-clear + footer
+    // Visual-QA-style structure: titled header + rule + Summary with a finding count, then
+    // the detail sections (Worth a look / Docs / Reviewed) and the footer.
+    expect(prompt).toContain("## <🟢|🟡|🔴> Reef Review — <Low|Medium|High> risk");
     expect(prompt).toContain("🟢 low");
-    expect(prompt).toContain("Worth a look");
-    expect(prompt).toContain("Reviewed, no concerns");
+    expect(prompt).toContain("### Summary");
+    expect(prompt).toContain("finding(s)");
+    expect(prompt).toContain("### Worth a look");
+    expect(prompt).toContain("### Reviewed, no concerns");
     expect(prompt).toContain("Reef automated review");
     // Re-review: find prior verdict by marker (paginated so it survives PRs with
     // >30 comments), DELETE it, then POST a fresh comment (so re-reviews notify).

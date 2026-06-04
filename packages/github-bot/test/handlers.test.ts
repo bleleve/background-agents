@@ -123,6 +123,8 @@ const pullRequestOpenedPayload: PullRequestOpenedPayload = {
     number: 42,
     title: "Add caching",
     body: "Adds Redis caching",
+    html_url: "https://github.com/acme/widgets/pull/42",
+    state: "open",
     user: { login: "alice" },
     head: { ref: "feature/cache", sha: "abc123" },
     base: { ref: "main" },
@@ -138,6 +140,8 @@ const pullRequestReadyForReviewPayload: PullRequestOpenedPayload = {
     number: 42,
     title: "Add caching",
     body: "Adds Redis caching",
+    html_url: "https://github.com/acme/widgets/pull/42",
+    state: "open",
     user: { login: "alice" },
     head: { ref: "feature/cache", sha: "abc123" },
     base: { ref: "main" },
@@ -154,6 +158,8 @@ const reviewRequestedPayload: ReviewRequestedPayload = {
     number: 42,
     title: "Add caching",
     body: "Adds Redis caching",
+    html_url: "https://github.com/acme/widgets/pull/42",
+    state: "open",
     user: { login: "alice" },
     head: { ref: "feature/cache", sha: "abc123" },
     base: { ref: "main" },
@@ -168,6 +174,8 @@ const issueCommentPayload: IssueCommentPayload = {
   issue: {
     number: 42,
     title: "Add caching",
+    html_url: "https://github.com/acme/widgets/pull/42",
+    state: "open",
     pull_request: { url: "https://api.github.com/repos/acme/widgets/pulls/42" },
   },
   comment: {
@@ -184,6 +192,8 @@ const reviewCommentPayload: ReviewCommentPayload = {
   pull_request: {
     number: 42,
     title: "Add caching",
+    html_url: "https://github.com/acme/widgets/pull/42",
+    state: "open",
     head: { ref: "feature/cache", sha: "abc123" },
     base: { ref: "main" },
   },
@@ -778,6 +788,12 @@ describe("handleReviewRequested", () => {
     expect(sessionBody.scmUserId).toBe("1001");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1001");
     expect(sessionBody.spawnSource).toBe("github-bot");
+    // PR descriptor is forwarded so the control plane can link the session to the PR.
+    expect(sessionBody.prNumber).toBe(42);
+    expect(sessionBody.prUrl).toBe("https://github.com/acme/widgets/pull/42");
+    expect(sessionBody.prState).toBe("open");
+    expect(sessionBody.prHeadRef).toBe("feature/cache");
+    expect(sessionBody.prBaseRef).toBe("main");
 
     // Verify prompt sending
     const promptCall = cpFetch.mock.calls[1];
@@ -1179,6 +1195,37 @@ describe("review suggestion tracking (C2)", () => {
     });
     // No session/prompt for the bot's own comment
     expect(cpFetch).not.toHaveBeenCalledWith("https://internal/sessions", expect.anything());
+  });
+
+  it("extracts the hidden reef-risk marker into riskScore for analytics", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const payload: ReviewCommentPayload = {
+      ...botReviewCommentPayload,
+      comment: {
+        ...botReviewCommentPayload.comment,
+        id: 558,
+        body: "<!-- reef-risk: high -->\nThis can throw on null.\n```suggestion\nfix\n```",
+      },
+    };
+
+    const result = await handleReviewComment(env, log, payload, "trace-risk");
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "recorded_bot_suggestion" });
+
+    const body = JSON.parse(getControlPlaneFetch(env).mock.calls[0][1].body);
+    expect(body.riskScore).toBe("high");
+  });
+
+  it("records riskScore: null when the comment has no reef-risk marker", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handleReviewComment(env, log, botReviewCommentPayload, "trace-norisk");
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "recorded_bot_suggestion" });
+
+    const body = JSON.parse(getControlPlaneFetch(env).mock.calls[0][1].body);
+    expect(body.riskScore).toBeNull();
   });
 
   it("records line: null (not the deprecated position offset) when the comment has no line", async () => {

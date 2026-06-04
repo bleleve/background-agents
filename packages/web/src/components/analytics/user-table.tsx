@@ -1,7 +1,8 @@
+import { useState } from "react";
 import type { AnalyticsBreakdownEntry, AnalyticsBreakdownResponse } from "@open-inspect/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronDownIcon, ChevronUpIcon } from "@/components/ui/icons";
+import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon } from "@/components/ui/icons";
 import {
   formatAnalyticsCount,
   formatAnalyticsDuration,
@@ -120,6 +121,10 @@ export function AnalyticsUserTable({
   sortDirection,
   onSort,
 }: UserTableProps) {
+  // The per-user table can grow long enough to bury the review-suggestion
+  // analytics below it, so it collapses to just its header by default.
+  const [expanded, setExpanded] = useState(false);
+
   function getAriaSort(column: AnalyticsUserSortKey): "ascending" | "descending" | "none" {
     if (sortKey !== column) {
       return "none";
@@ -151,135 +156,155 @@ export function AnalyticsUserTable({
 
   return (
     <div className="rounded-md border border-border-muted bg-card">
-      <div className="border-b border-border-muted px-5 py-4">
-        <h2 className="text-lg font-semibold text-foreground">Per-User Breakdown</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Sortable usage metrics without ranking or gamification.
-        </p>
-      </div>
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+        aria-label="Per-User Breakdown"
+        className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-muted/50"
+      >
+        {expanded ? (
+          <ChevronDownIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRightIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+        )}
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-foreground">Per-User Breakdown</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Sortable usage metrics without ranking or gamification.
+          </p>
+        </div>
+        <Badge variant="default" className="ml-auto shrink-0">
+          {formatAnalyticsCount(entries.length)} {entries.length === 1 ? "user" : "users"}
+        </Badge>
+      </button>
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full border-collapse text-sm">
-          <thead className="bg-card">
-            <tr className="border-b border-border-muted text-left text-secondary-foreground">
-              <th className="px-5 py-3" aria-sort={getAriaSort("user")}>
-                <SortButton
-                  label="User"
-                  sortKey="user"
-                  activeKey={sortKey}
-                  direction={sortDirection}
-                  onClick={onSort}
-                />
-              </th>
-              <th className="px-5 py-3" aria-sort={getAriaSort("sessions")}>
-                <SortButton
-                  label="Sessions"
-                  sortKey="sessions"
-                  activeKey={sortKey}
-                  direction={sortDirection}
-                  onClick={onSort}
-                />
-              </th>
-              <th className="px-5 py-3 text-right" aria-sort={getAriaSort("completionRate")}>
-                <SortButton
-                  label="Completion Rate"
-                  sortKey="completionRate"
-                  activeKey={sortKey}
-                  direction={sortDirection}
-                  onClick={onSort}
-                  align="right"
-                />
-              </th>
-              <th className="px-5 py-3 text-right" aria-sort={getAriaSort("prs")}>
-                <SortButton
-                  label="PRs"
-                  sortKey="prs"
-                  activeKey={sortKey}
-                  direction={sortDirection}
-                  onClick={onSort}
-                  align="right"
-                />
-              </th>
-              <th className="px-5 py-3 text-right" aria-sort={getAriaSort("messageCount")}>
-                <SortButton
-                  label="Messages"
-                  sortKey="messageCount"
-                  activeKey={sortKey}
-                  direction={sortDirection}
-                  onClick={onSort}
-                  align="right"
-                />
-              </th>
-              <th className="px-5 py-3 text-right" aria-sort={getAriaSort("cost")}>
-                <SortButton
-                  label="Total Cost"
-                  sortKey="cost"
-                  activeKey={sortKey}
-                  direction={sortDirection}
-                  onClick={onSort}
-                  align="right"
-                />
-              </th>
-              <th className="px-5 py-3 text-right" aria-sort={getAriaSort("avgDuration")}>
-                <SortButton
-                  label="Avg Duration"
-                  sortKey="avgDuration"
-                  activeKey={sortKey}
-                  direction={sortDirection}
-                  onClick={onSort}
-                  align="right"
-                />
-              </th>
-              <th className="px-5 py-3 text-right" aria-sort={getAriaSort("lastActive")}>
-                <SortButton
-                  label="Last Active"
-                  sortKey="lastActive"
-                  activeKey={sortKey}
-                  direction={sortDirection}
-                  onClick={onSort}
-                  align="right"
-                />
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr
-                key={entry.key}
-                className="border-b border-border-muted last:border-b-0 hover:bg-muted/50"
-              >
-                <td className="px-5 py-4">
-                  <UserCell entry={entry} />
-                </td>
-                <td className="px-5 py-4">
-                  <SessionsCell entry={entry} />
-                </td>
-                <td className="px-5 py-4 text-right">
-                  <CompletionRateCell entry={entry} />
-                </td>
-                <td className="px-5 py-4 text-right text-foreground">
-                  {formatAnalyticsCount(entry.prs)}
-                </td>
-                <td className="px-5 py-4 text-right text-foreground">
-                  {formatAnalyticsCount(entry.messageCount)}
-                </td>
-                <td className="px-5 py-4 text-right text-foreground">
-                  {formatSessionCost(entry.cost)}
-                </td>
-                <td className="px-5 py-4 text-right text-foreground">
-                  {entry.avgDuration > 0 ? formatAnalyticsDuration(entry.avgDuration) : "—"}
-                </td>
-                <td className="px-5 py-4 text-right text-muted-foreground">
-                  {formatRelativeTime(entry.lastActive)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="border-t border-border-muted px-5 py-3 text-xs text-muted-foreground">
-        Click any column heading to change the sort order.
-      </div>
+      {!expanded ? null : (
+        <>
+          <div className="overflow-x-auto border-t border-border-muted">
+            <table className="min-w-full border-collapse text-sm">
+              <thead className="bg-card">
+                <tr className="border-b border-border-muted text-left text-secondary-foreground">
+                  <th className="px-5 py-3" aria-sort={getAriaSort("user")}>
+                    <SortButton
+                      label="User"
+                      sortKey="user"
+                      activeKey={sortKey}
+                      direction={sortDirection}
+                      onClick={onSort}
+                    />
+                  </th>
+                  <th className="px-5 py-3" aria-sort={getAriaSort("sessions")}>
+                    <SortButton
+                      label="Sessions"
+                      sortKey="sessions"
+                      activeKey={sortKey}
+                      direction={sortDirection}
+                      onClick={onSort}
+                    />
+                  </th>
+                  <th className="px-5 py-3 text-right" aria-sort={getAriaSort("completionRate")}>
+                    <SortButton
+                      label="Completion Rate"
+                      sortKey="completionRate"
+                      activeKey={sortKey}
+                      direction={sortDirection}
+                      onClick={onSort}
+                      align="right"
+                    />
+                  </th>
+                  <th className="px-5 py-3 text-right" aria-sort={getAriaSort("prs")}>
+                    <SortButton
+                      label="PRs"
+                      sortKey="prs"
+                      activeKey={sortKey}
+                      direction={sortDirection}
+                      onClick={onSort}
+                      align="right"
+                    />
+                  </th>
+                  <th className="px-5 py-3 text-right" aria-sort={getAriaSort("messageCount")}>
+                    <SortButton
+                      label="Messages"
+                      sortKey="messageCount"
+                      activeKey={sortKey}
+                      direction={sortDirection}
+                      onClick={onSort}
+                      align="right"
+                    />
+                  </th>
+                  <th className="px-5 py-3 text-right" aria-sort={getAriaSort("cost")}>
+                    <SortButton
+                      label="Total Cost"
+                      sortKey="cost"
+                      activeKey={sortKey}
+                      direction={sortDirection}
+                      onClick={onSort}
+                      align="right"
+                    />
+                  </th>
+                  <th className="px-5 py-3 text-right" aria-sort={getAriaSort("avgDuration")}>
+                    <SortButton
+                      label="Avg Duration"
+                      sortKey="avgDuration"
+                      activeKey={sortKey}
+                      direction={sortDirection}
+                      onClick={onSort}
+                      align="right"
+                    />
+                  </th>
+                  <th className="px-5 py-3 text-right" aria-sort={getAriaSort("lastActive")}>
+                    <SortButton
+                      label="Last Active"
+                      sortKey="lastActive"
+                      activeKey={sortKey}
+                      direction={sortDirection}
+                      onClick={onSort}
+                      align="right"
+                    />
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((entry) => (
+                  <tr
+                    key={entry.key}
+                    className="border-b border-border-muted last:border-b-0 hover:bg-muted/50"
+                  >
+                    <td className="px-5 py-4">
+                      <UserCell entry={entry} />
+                    </td>
+                    <td className="px-5 py-4">
+                      <SessionsCell entry={entry} />
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <CompletionRateCell entry={entry} />
+                    </td>
+                    <td className="px-5 py-4 text-right text-foreground">
+                      {formatAnalyticsCount(entry.prs)}
+                    </td>
+                    <td className="px-5 py-4 text-right text-foreground">
+                      {formatAnalyticsCount(entry.messageCount)}
+                    </td>
+                    <td className="px-5 py-4 text-right text-foreground">
+                      {formatSessionCost(entry.cost)}
+                    </td>
+                    <td className="px-5 py-4 text-right text-foreground">
+                      {entry.avgDuration > 0 ? formatAnalyticsDuration(entry.avgDuration) : "—"}
+                    </td>
+                    <td className="px-5 py-4 text-right text-muted-foreground">
+                      {formatRelativeTime(entry.lastActive)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="border-t border-border-muted px-5 py-3 text-xs text-muted-foreground">
+            Click any column heading to change the sort order.
+          </div>
+        </>
+      )}
     </div>
   );
 }
