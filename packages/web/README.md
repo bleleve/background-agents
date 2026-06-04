@@ -93,6 +93,10 @@ UNSAFE_ALLOW_ALL_USERS=false               # Set true to explicitly allow all us
 # Control Plane
 CONTROL_PLANE_URL=http://localhost:8787
 NEXT_PUBLIC_WS_URL=ws://localhost:8787
+
+# GitHub Bot — required only when the github-bot is deployed (powers the
+# "Re-run review" button). Authenticated with INTERNAL_CALLBACK_SECRET.
+GITHUB_BOT_URL=http://localhost:8788
 ```
 
 > **Access Control**: If both `ALLOWED_USERS` and `ALLOWED_EMAIL_DOMAINS` are empty, sign-in is

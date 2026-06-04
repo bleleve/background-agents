@@ -30,6 +30,7 @@ App or deploying the bot worker, start with
 | Workflow                  | How it works                                                               |
 | ------------------------- | -------------------------------------------------------------------------- |
 | Auto-review new PRs       | Review non-draft PRs when they are opened, if auto-review is enabled       |
+| Re-run a review           | Re-trigger a review via the `ask-for-review` label or the web app button   |
 | Respond to PR comments    | Mention the bot in a PR conversation comment                               |
 | Respond to review threads | Mention the bot in an inline review comment                                |
 | Post back to GitHub       | Submit a PR review, reply to a review thread, or post a PR summary comment |
@@ -62,8 +63,37 @@ follow-up after a draft becomes ready, mention the bot in a PR comment.
 
 ### What It Posts
 
-The agent can submit a general review comment, approve the PR, request changes, or add inline review
-comments when useful.
+The agent posts its findings as inline `suggestion` comments on the relevant lines, plus a single
+**review verdict** comment that always lands — even on a clean PR. The verdict is a structured risk
+map:
+
+- A header with a risk badge and one-line summary: `## 🟢 Reef Review — Low risk` (🟢 low · 🟡
+  medium · 🔴 high).
+- A **Summary** section: the verdict in one sentence and a count of findings by risk.
+- **Worth a look** — the findings that survived the quality bar, each linking back to its inline
+  comment (omitted when there are none).
+- **Docs** — any documentation that drifted from the change (omitted when there is none).
+- **Reviewed, no concerns** — the areas that were checked and had nothing notable.
+
+The bot also sets a matching `low-risk` / `medium-risk` / `high-risk` label on the PR and links the
+originating Open-Inspect session in the verdict footer. See
+[Re-running a Review](#re-running-a-review) for how a re-review replaces the previous verdict.
+
+---
+
+## Re-running a Review
+
+A completed review can be re-run two ways. On a re-review the bot replaces its previous verdict — it
+deletes the prior verdict comment and posts a fresh one, so subscribers get a new notification
+rather than a silent in-place edit.
+
+- **`ask-for-review` label** — add the `ask-for-review` label to a PR to re-run the full review. The
+  bot removes the label again once the review completes, so re-adding it triggers another run.
+- **"Re-run review" button** — open the PR's review session in the Open-Inspect web app and use the
+  **Re-run review** button. The re-run is attributed to you and runs the same review.
+
+Re-running honors the same repository scope, visibility, and trigger-user gates as the original
+review.
 
 ---
 
@@ -111,9 +141,8 @@ GitHub rejects the reaction, the session can still start.
 
 ### GitHub Output
 
-For auto-review workflows, the agent posts the review result back to the PR. Depending on what it
-finds, that may be a general review comment, an approval, a request for changes, or inline review
-comments.
+For auto-review workflows, the agent posts inline `suggestion` comments plus the structured review
+verdict described in [What It Posts](#what-it-posts), and sets the matching risk label on the PR.
 
 For `@mention` workflows, the agent posts a PR comment summarizing its response or answering the
 question. If the request came from an inline review thread, the agent may also reply in that thread.
