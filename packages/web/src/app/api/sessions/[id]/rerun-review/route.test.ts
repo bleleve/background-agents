@@ -71,6 +71,8 @@ describe("rerun-review API route", () => {
         owner: "acme",
         repo: "widgets",
         prNumber: 42,
+        // Re-runs in the current session rather than creating a new one.
+        sessionId: "sess-1",
         requestedBy: {
           login: "ada",
           id: "12345",

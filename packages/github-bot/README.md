@@ -123,18 +123,21 @@ All events are processed asynchronously via `executionCtx.waitUntil()`. The webh
 
 ### Re-triggering a review
 
-A completed review can be re-run two ways, both reusing the same review machinery. On a re-review
-the agent finds the prior verdict by its `<!-- reef-verdict -->` marker, **deletes it, and posts a
-fresh verdict comment** — a new comment notifies subscribers, whereas an in-place edit would be
-silent.
+A completed review can be re-run two ways, both reusing the same review machinery. A re-trigger
+**re-runs in the PR's existing review session** (a fresh turn) rather than spawning a new one, so
+the thread stays in one place; the resumed prompt tells the agent to sync the worktree to the latest
+PR head first. On a re-review the agent finds the prior verdict by its `<!-- reef-verdict -->`
+marker, **deletes it, and posts a fresh verdict comment** — a new comment notifies subscribers,
+whereas an in-place edit would be silent.
 
-- **`ask-for-review` label** — add the label to a PR to re-run the full review. The bot removes the
-  label again once the review completes, so re-adding it re-triggers. (No extra GitHub App config —
-  the `labeled` action ships with the already-subscribed `Pull request` event.)
+- **`ask-for-review` label** — add the label to a PR to re-run the full review. The bot reuses the
+  PR's existing review session (looked up in KV, `review-session:<repo>:<pr>`) when there is one. It
+  removes the label again once the review completes, so re-adding it re-triggers. (No extra GitHub
+  App config — the `labeled` action ships with the already-subscribed `Pull request` event.)
 - **Web UI** — the "Re-run review" button on a PR-review session calls the bot's internal
-  `POST /internal/reviews` endpoint (HMAC-authenticated with `INTERNAL_CALLBACK_SECRET`), which runs
-  the same review attributed to the requesting user. Requires `GITHUB_BOT_URL` set on the web app
-  (and the `GITHUB_BOT_WORKER` service binding on Cloudflare).
+  `POST /internal/reviews` endpoint (HMAC-authenticated with `INTERNAL_CALLBACK_SECRET`) with the
+  current session id, so the review re-runs in that session. Requires `GITHUB_BOT_URL` set on the
+  web app (and the `GITHUB_BOT_WORKER` service binding on Cloudflare).
 
 ### Handler Flows
 
