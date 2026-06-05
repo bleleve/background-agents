@@ -202,8 +202,8 @@ export class ModalClient {
     }
     this.secret = secret;
     const baseUrl = getModalBaseUrl(workspace, environmentWebSuffix);
-    this.createSandboxUrl = `${baseUrl}-api-create-sandbox.modal.run`;
-    this.warmSandboxUrl = `${baseUrl}-api-warm-sandbox.modal.run`;
+    this.createSandboxUrl = `${baseUrl}-api-create.modal.run`;
+    this.warmSandboxUrl = `${baseUrl}-api-warm.modal.run`;
     this.healthUrl = `${baseUrl}-api-health.modal.run`;
     this.snapshotSandboxUrl = `${baseUrl}-api-snapshot.modal.run`;
     this.restoreSandboxUrl = `${baseUrl}-api-restore.modal.run`;
