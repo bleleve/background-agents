@@ -157,6 +157,14 @@ async function handleCreateSession(
     codeServerEnabled,
     sandboxSettings,
     spawnSource: body.spawnSource,
+    // PR descriptor for sessions that act on an existing PR (github-bot
+    // review/comment sessions). Threaded to the DO so it seeds a `pr` artifact
+    // at init — that artifact is what surfaces the "View PR" link in the web UI.
+    prNumber: body.prNumber,
+    prUrl: body.prUrl,
+    prState: body.prState,
+    prHeadRef: body.prHeadRef,
+    prBaseRef: body.prBaseRef,
   };
 
   try {
