@@ -563,7 +563,7 @@ describe("automation route handlers", () => {
 
       const res = await callRoute("DELETE", "/automations/auto-1", { body: deleteActorBody });
       expect(res.status).toBe(404);
-      expect(mockStore.softDelete).not.toHaveBeenCalled();
+      expect(mockStore.softDelete).toHaveBeenCalledWith("auto-1");
     });
   });
 

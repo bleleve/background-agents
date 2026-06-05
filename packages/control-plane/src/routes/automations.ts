@@ -143,10 +143,6 @@ async function handleListAutomations(
     ? await Promise.all(result.automations.map((row) => toAutomationResponse(env, row, actor)))
     : result.automations.map(toAutomation);
 
-  const automations = hasActorContext
-    ? await Promise.all(result.automations.map((row) => toAutomationResponse(env, row, actor)))
-    : result.automations.map(toAutomation);
-
   return json({
     automations,
     total: result.total,
