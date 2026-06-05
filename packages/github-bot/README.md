@@ -164,8 +164,7 @@ people to request the GitHub App bot through the PR reviewer picker.
 **Pull Request Labeled (re-review):**
 
 1. Check the added `label.name` is `ask-for-review` — skip otherwise
-2. Skip drafts and closed/merged PRs; apply repo-enablement, visibility, the `autoReviewOnOpen`
-   setting, and caller gating
+2. Skip drafts; apply repo-enablement, visibility, and caller gating
 3. Post eyes reaction; reuse the PR's existing review session from KV (`review-session:<repo>:<pr>`)
    when present, else create one; send the code review prompt
 4. On completion, the bot removes the `ask-for-review` label (see `handleCompleteCallback`)
