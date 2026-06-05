@@ -123,6 +123,12 @@ All events are processed asynchronously via `executionCtx.waitUntil()`. The webh
 
 ### Re-triggering a review
 
+**Gating:** every review trigger — the auto-review on open, a requested review, the `ask-for-review`
+label, and the web "Re-run review" button — is gated by the repo's auto-review setting
+(`autoReviewOnOpen`). When it's off, none of them run. The bot also does nothing on a **closed or
+merged PR**: all handlers skip when `state !== "open"`, so no review or comment action posts after a
+PR is merged.
+
 A completed review can be re-run two ways, both reusing the same review machinery. A re-trigger
 **re-runs in the PR's existing review session** (a fresh turn) rather than spawning a new one, so
 the thread stays in one place; the resumed prompt tells the agent to sync the worktree to the latest

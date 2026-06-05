@@ -680,6 +680,22 @@ export async function handleReviewRequested(
     return { outcome: "skipped", skip_reason: "public_repo_skipped" };
   }
 
+  if (pr.state !== "open") {
+    log.debug("handler.pr_not_open", {
+      trace_id: traceId,
+      pull_number: pr.number,
+      pr_state: pr.state,
+    });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
+  }
+
+  // Reviews (including this requested-review trigger) are gated by the same
+  // auto-review setting as the open path — if it's off, no review runs.
+  if (!config.autoReviewOnOpen) {
+    log.debug("handler.auto_review_disabled", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "auto_review_disabled" };
+  }
+
   const gating = await resolveCallerGating(
     env,
     config,
@@ -746,6 +762,15 @@ export async function handlePullRequestOpened(
   if (pr.draft) {
     log.debug("handler.draft_pr_skipped", { trace_id: traceId, pull_number: pr.number });
     return { outcome: "skipped", skip_reason: "draft_pr" };
+  }
+
+  if (pr.state !== "open") {
+    log.debug("handler.pr_not_open", {
+      trace_id: traceId,
+      pull_number: pr.number,
+      pr_state: pr.state,
+    });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
   }
 
   if (pr.user.login === env.GITHUB_BOT_USERNAME) {
@@ -848,6 +873,15 @@ export async function handlePullRequestLabeled(
     return { outcome: "skipped", skip_reason: "draft_pr" };
   }
 
+  if (pr.state !== "open") {
+    log.debug("handler.pr_not_open", {
+      trace_id: traceId,
+      pull_number: pr.number,
+      pr_state: pr.state,
+    });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
+  }
+
   const config = await getGitHubConfig(env, repoFullName, log);
 
   if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
@@ -858,6 +892,13 @@ export async function handlePullRequestLabeled(
   if (config.privateReposOnly && !repo.private) {
     log.debug("handler.public_repo_skipped", { trace_id: traceId, repo: repoFullName });
     return { outcome: "skipped", skip_reason: "public_repo_skipped" };
+  }
+
+  // Re-triggering a review via the label is gated by the same auto-review
+  // setting as the open path — if reviews are off, the label does nothing.
+  if (!config.autoReviewOnOpen) {
+    log.debug("handler.auto_review_disabled", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "auto_review_disabled" };
   }
 
   const gating = await resolveCallerGating(
@@ -957,6 +998,13 @@ export async function handleReviewRequestInternal(
     return { ok: false, status: 403, error: "repo_not_enabled" };
   }
 
+  // The web "Re-run review" button is gated by the same auto-review setting as
+  // the open path — if reviews are off for this repo, re-running is not allowed.
+  if (!config.autoReviewOnOpen) {
+    log.info("internal_review.auto_review_disabled", meta);
+    return { ok: false, status: 403, error: "auto_review_disabled" };
+  }
+
   const userAgent = resolveAppName(env);
   const [ghToken, headers] = await Promise.all([
     generateInstallationToken({
@@ -972,6 +1020,11 @@ export async function handleReviewRequestInternal(
   if (!details) {
     log.info("internal_review.pr_not_found", meta);
     return { ok: false, status: 404, error: "pull_request_not_found" };
+  }
+
+  if (details.state !== "open") {
+    log.info("internal_review.pr_not_open", { ...meta, pr_state: details.state });
+    return { ok: false, status: 409, error: "pull_request_not_open" };
   }
 
   // Default to private when visibility can't be determined — the safe choice for
@@ -1184,6 +1237,15 @@ export async function handleIssueComment(
     return { outcome: "skipped", skip_reason: "not_a_pr" };
   }
 
+  if (issue.state !== "open") {
+    log.debug("handler.pr_not_open", {
+      trace_id: traceId,
+      issue_number: issue.number,
+      pr_state: issue.state,
+    });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
+  }
+
   if (!hasAnyMention(comment.body, getTriggerMentions(env))) {
     log.debug("handler.no_mention", {
       trace_id: traceId,
@@ -1393,6 +1455,15 @@ export async function handleReviewComment(
       sender: sender.login,
     });
     return { outcome: "skipped", skip_reason: "no_mention" };
+  }
+
+  if (pr.state !== "open") {
+    log.debug("handler.pr_not_open", {
+      trace_id: traceId,
+      pull_number: pr.number,
+      pr_state: pr.state,
+    });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
   }
 
   const config = await getGitHubConfig(env, repoFullName, log);
