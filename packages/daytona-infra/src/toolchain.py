@@ -11,6 +11,8 @@ CODE_SERVER_VERSION = "4.109.5"
 AGENT_BROWSER_VERSION = "0.21.2"
 RTK_VERSION = "0.35.0"
 # Bump when changing image contents to invalidate the Daytona snapshot.
+# daytona-v3: install the SCM credential-helper shim and configure
+# git system-wide so per-request token brokerage matches the Modal base image.
 SANDBOX_VERSION = "daytona-v3-rtk-0.35.0"
 
 
