@@ -96,6 +96,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
     updateMessageToProcessing: vi.fn(),
     getParticipantById: vi.fn(() => createParticipant()),
     updateParticipantCoalesce: vi.fn(),
+    updateParticipantRole: vi.fn(),
     updateMessageCompletion: vi.fn(),
     upsertExecutionCompleteEvent: vi.fn(),
     getCurrentPlan: vi.fn(
@@ -203,6 +204,28 @@ describe("SessionMessageQueue", () => {
     await h.queue.handlePromptMessage({} as WebSocket, { content: "hello" });
 
     expect(h.setSessionStatus).toHaveBeenCalledWith("active");
+  });
+
+  it("promotes a viewer to member when they send a prompt", async () => {
+    const h = buildQueue();
+    h.participantService.getByUserId.mockReturnValue(
+      createParticipant({ id: "viewer-1", role: "viewer" })
+    );
+
+    await h.queue.handlePromptMessage({} as WebSocket, { content: "hello" });
+
+    expect(h.repository.updateParticipantRole).toHaveBeenCalledWith("viewer-1", "member");
+  });
+
+  it("does not change role for an existing member sending a prompt", async () => {
+    const h = buildQueue();
+    h.participantService.getByUserId.mockReturnValue(
+      createParticipant({ id: "member-1", role: "member" })
+    );
+
+    await h.queue.handlePromptMessage({} as WebSocket, { content: "hello" });
+
+    expect(h.repository.updateParticipantRole).not.toHaveBeenCalled();
   });
 
   it("dispatches prompt command when sandbox socket exists", async () => {

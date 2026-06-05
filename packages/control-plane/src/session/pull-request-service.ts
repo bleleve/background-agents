@@ -258,14 +258,19 @@ export class SessionPullRequestService {
 
   /**
    * Collects the SCM usernames of the human engineers who took part in the session,
-   * used to assign them and request their review on the created PR. Participants
-   * without an SCM login (e.g. bot integrations) are skipped, and duplicates are
-   * removed. GitHub caps assignees at 10, so the list is truncated to that limit.
+   * used to assign them and request their review on the created PR. "Viewers" (users
+   * who only opened the session page, see WsTokenHandler) are excluded — merely
+   * viewing a session must not make someone a reviewer/assignee. Participants without
+   * an SCM login (e.g. bot integrations) are skipped, and duplicates are removed.
+   * GitHub caps assignees at 10, so the list is truncated to that limit.
    */
   private resolveParticipantLogins(participants: ParticipantRow[]): string[] {
     const MAX_PARTICIPANTS = 10;
     const logins = new Set<string>();
     for (const participant of participants) {
+      if (participant.role === "viewer") {
+        continue;
+      }
       const login = participant.scm_login?.trim();
       if (login) {
         logins.add(login);
