@@ -99,6 +99,53 @@ describe("ModalClient OpenCode config payload", () => {
   });
 });
 
+describe("ModalClient endpoint URLs", () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("posts createSandbox to the api-create endpoint (not api-create-sandbox)", async () => {
+    const client = createModalClient("secret", "acme", "staging");
+    fetchSpy.mockResolvedValue(
+      jsonResponse({
+        success: true,
+        data: { sandbox_id: "sb-1", status: "warming", created_at: Date.now() },
+      })
+    );
+
+    await client.createSandbox({
+      sessionId: "session-1",
+      sandboxId: "sb-1",
+      repoOwner: "owner",
+      repoName: "repo",
+      controlPlaneUrl: "https://control-plane.example.com",
+      sandboxAuthToken: "token",
+    });
+
+    expect(fetchSpy.mock.calls[0][0]).toBe(
+      "https://acme-staging--open-inspect-api-create.modal.run"
+    );
+  });
+
+  it("posts warmSandbox to the api-warm endpoint (not api-warm-sandbox)", async () => {
+    const client = createModalClient("secret", "acme", "staging");
+    fetchSpy.mockResolvedValue(
+      jsonResponse({ success: true, data: { sandbox_id: "sb-1", status: "warming" } })
+    );
+
+    await client.warmSandbox({ repoOwner: "owner", repoName: "repo" });
+
+    expect(fetchSpy.mock.calls[0][0]).toBe("https://acme-staging--open-inspect-api-warm.modal.run");
+  });
+});
+
 describe("buildModalSandboxDashboardUrl", () => {
   it("builds a Modal dashboard URL for a sandbox object", () => {
     expect(
