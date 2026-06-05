@@ -1891,6 +1891,30 @@ describe("handlePullRequestLabeled", () => {
 
     expect(result).toEqual({ outcome: "skipped", skip_reason: "draft_pr" });
   });
+
+  it("re-runs in the existing review session when one is mapped (no new session)", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    // KV maps this PR to a prior review session.
+    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-existing");
+
+    const result = await handlePullRequestLabeled(env, log, pullRequestLabeledPayload, "trace-lbl");
+
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "sess-existing",
+      message_id: "msg-456",
+      handler_action: "rereview",
+    });
+
+    const cpFetch = getControlPlaneFetch(env);
+    // Only the prompt is sent — no session is created.
+    expect(cpFetch).toHaveBeenCalledTimes(1);
+    expect(cpFetch.mock.calls[0][0]).toBe("https://internal/sessions/sess-existing/prompt");
+    // The resumed prompt tells the agent to sync the worktree to the latest head.
+    const promptBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(promptBody.content).toContain("RE-REVIEW in an existing session");
+  });
 });
 
 describe("handleReviewRequestInternal", () => {
@@ -1935,6 +1959,46 @@ describe("handleReviewRequestInternal", () => {
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.callbackContext).toMatchObject({ kind: "pr_review", prNumber: 42 });
     expect(promptBody.authorId).toBe("github:1001");
+  });
+
+  it("re-runs in the given session (web button) instead of creating a new one", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              number: 42,
+              title: "Add caching",
+              body: "Adds Redis caching",
+              user: { login: "alice" },
+              head: { ref: "feature/cache", sha: "abc123" },
+              base: { ref: "main", repo: { private: false } },
+              additions: 1,
+              deletions: 1,
+            }),
+            { status: 200 }
+          )
+        )
+      )
+    );
+
+    const result = await handleReviewRequestInternal(
+      env,
+      log,
+      { ...internalRequest, sessionId: "sess-from-ui" },
+      "trace-int"
+    );
+
+    expect(result).toEqual({ ok: true, sessionId: "sess-from-ui" });
+    const cpFetch = getControlPlaneFetch(env);
+    // No session creation — only the prompt, sent to the session from the UI.
+    expect(cpFetch).toHaveBeenCalledTimes(1);
+    expect(cpFetch.mock.calls[0][0]).toBe("https://internal/sessions/sess-from-ui/prompt");
+    const promptBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(promptBody.callbackContext).toMatchObject({ kind: "pr_review", prNumber: 42 });
   });
 
   it("returns 404 when the PR cannot be fetched", async () => {

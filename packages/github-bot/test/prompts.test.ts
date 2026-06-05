@@ -224,6 +224,19 @@ describe("buildCodeReviewPrompt", () => {
     expect(withoutUrl).not.toContain("[session](");
   });
 
+  it("tells a resumed (re-review) session to sync the worktree to the latest head", () => {
+    const fresh = buildCodeReviewPrompt(baseParams);
+    expect(fresh).toContain("The repository has been cloned and you are on the PR head branch.");
+    expect(fresh).not.toContain("RE-REVIEW in an existing session");
+
+    const resumed = buildCodeReviewPrompt({ ...baseParams, resumed: true });
+    expect(resumed).toContain("RE-REVIEW in an existing session");
+    expect(resumed).toContain("gh pr checkout 42 --force");
+    expect(resumed).not.toContain(
+      "The repository has been cloned and you are on the PR head branch."
+    );
+  });
+
   it("deletes any prior verdict, then posts a fresh comment (re-reviews notify)", () => {
     const prompt = buildCodeReviewPrompt({
       ...baseParams,

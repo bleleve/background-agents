@@ -222,6 +222,37 @@ async function lookupPrSession(
   return env.GITHUB_KV.get(getPrSessionKey(repoFullName, prNumber));
 }
 
+// ─── PR → review-session mapping (KV) ────────────────────────────────────────
+// Records the latest review session for a PR so a re-trigger (the `ask-for-review`
+// label) re-runs in the existing session instead of spawning a new one. Separate
+// key from the plan-mode mapping above. The web "Re-run review" button passes the
+// session id directly and does not need this.
+
+const REVIEW_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+function getReviewSessionKey(repoFullName: string, prNumber: number): string {
+  return `review-session:${repoFullName}:${prNumber}`;
+}
+
+async function rememberReviewSession(
+  env: Env,
+  repoFullName: string,
+  prNumber: number,
+  sessionId: string
+): Promise<void> {
+  await env.GITHUB_KV.put(getReviewSessionKey(repoFullName, prNumber), sessionId, {
+    expirationTtl: REVIEW_SESSION_TTL_SECONDS,
+  });
+}
+
+async function lookupReviewSession(
+  env: Env,
+  repoFullName: string,
+  prNumber: number
+): Promise<string | null> {
+  return env.GITHUB_KV.get(getReviewSessionKey(repoFullName, prNumber));
+}
+
 // ─── Plan approve/reject parsing ─────────────────────────────────────────────
 // parsePlanCommand lives in @open-inspect/shared so command syntax stays in
 // sync between Linear and GitHub. See its docstring for the recognized forms.
@@ -509,14 +540,21 @@ interface RunCodeReviewParams {
   scmUserId: string;
   scmAvatarUrl: string;
   actionLabel: ReviewActionLabel;
+  /**
+   * When set, re-run the review in this existing session (a fresh prompt/turn)
+   * instead of creating a new one. Used by the re-trigger paths so a re-review
+   * stays in the same session/thread.
+   */
+  existingSessionId?: string | null;
   meta: Record<string, unknown>;
 }
 
 /**
- * Shared core for every full code review: create a session, detect a large
- * diff, build the review prompt, and send it with the `pr_review` completion
- * callback context. Used by the auto-review-on-open, review-requested,
- * `reef-review` label, and web-triggered re-review paths so they stay in sync.
+ * Shared core for every full code review: resolve the target session (reuse the
+ * existing one on a re-trigger, else create), detect a large diff, build the
+ * review prompt, and send it with the `pr_review` completion callback context.
+ * Used by the auto-review-on-open, review-requested, `ask-for-review` label, and
+ * web-triggered re-review paths so they stay in sync.
  */
 async function runCodeReview(
   env: Env,
@@ -525,27 +563,44 @@ async function runCodeReview(
   headers: Record<string, string>,
   params: RunCodeReviewParams
 ): Promise<HandlerResult> {
-  const sessionId = await createSession(env.CONTROL_PLANE, headers, {
-    repoOwner: params.owner,
-    repoName: params.repoName,
-    title: reviewSessionTitle(params.prNumber),
-    model: params.model,
-    reasoningEffort: params.reasoningEffort,
-    scmLogin: params.scmLogin,
-    scmUserId: params.scmUserId,
-    scmAvatarUrl: params.scmAvatarUrl,
-    prNumber: params.prNumber,
-    prUrl: params.prUrl,
-    prState: params.prState,
-    prHeadRef: params.prHeadRef,
-    prBaseRef: params.prBaseRef,
-  });
-  log.info("session.created", {
-    ...params.meta,
-    session_id: sessionId,
-    action: params.actionLabel,
-    review_model: params.model,
-  });
+  const repoFullName = `${params.owner}/${params.repoName}`.toLowerCase();
+  const reused = Boolean(params.existingSessionId);
+
+  let sessionId: string;
+  if (params.existingSessionId) {
+    sessionId = params.existingSessionId;
+    log.info("session.reused", {
+      ...params.meta,
+      session_id: sessionId,
+      action: params.actionLabel,
+      review_model: params.model,
+    });
+  } else {
+    sessionId = await createSession(env.CONTROL_PLANE, headers, {
+      repoOwner: params.owner,
+      repoName: params.repoName,
+      title: reviewSessionTitle(params.prNumber),
+      model: params.model,
+      reasoningEffort: params.reasoningEffort,
+      scmLogin: params.scmLogin,
+      scmUserId: params.scmUserId,
+      scmAvatarUrl: params.scmAvatarUrl,
+      prNumber: params.prNumber,
+      prUrl: params.prUrl,
+      prState: params.prState,
+      prHeadRef: params.prHeadRef,
+      prBaseRef: params.prBaseRef,
+    });
+    // Remember it so a later re-trigger (the `ask-for-review` label) re-runs in
+    // this session instead of spawning a new one.
+    await rememberReviewSession(env, repoFullName, params.prNumber, sessionId);
+    log.info("session.created", {
+      ...params.meta,
+      session_id: sessionId,
+      action: params.actionLabel,
+      review_model: params.model,
+    });
+  }
 
   const largeDiff = await isLargeDiff(ghToken, params.owner, params.repoName, params.prNumber);
 
@@ -562,6 +617,7 @@ async function runCodeReview(
     codeReviewInstructions: params.codeReviewInstructions,
     autoApproveOnOpen: params.autoApproveOnOpen,
     largeDiff,
+    resumed: reused,
     sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
   });
 
@@ -827,6 +883,9 @@ export async function handlePullRequestLabeled(
   );
 
   const reviewModel = extractReviewModelFromLabels(pr.labels ?? []) ?? config.model;
+  // Re-run in the PR's existing review session when we have one, so a re-review
+  // stays in the same thread instead of spawning a new session.
+  const existingSessionId = await lookupReviewSession(env, repoFullName, pr.number);
 
   return runCodeReview(env, log, ghToken, headers, {
     owner,
@@ -851,6 +910,7 @@ export async function handlePullRequestLabeled(
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
     actionLabel: "rereview",
+    existingSessionId,
     meta,
   });
 }
@@ -862,6 +922,11 @@ export interface InternalReviewRequest {
   prNumber: number;
   /** The Reef user who clicked "Re-run review" — attributed as the session author. */
   requestedBy: { login: string; id: string | number; avatarUrl?: string | null };
+  /**
+   * The review session the button was clicked from. The re-review re-runs in
+   * this session (a fresh turn) instead of spawning a new one.
+   */
+  sessionId?: string;
   /** Optional model override; defaults to the repo's configured review model. */
   model?: string;
 }
@@ -939,6 +1004,8 @@ export async function handleReviewRequestInternal(
     scmUserId: String(req.requestedBy.id),
     scmAvatarUrl: req.requestedBy.avatarUrl ?? "",
     actionLabel: "rereview",
+    // Re-run in the session the button was clicked from (no new session).
+    existingSessionId: req.sessionId,
     meta,
   });
 

@@ -48,6 +48,8 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
         owner: sessionData.repoOwner,
         repo: sessionData.repoName,
         prNumber,
+        // Re-run in THIS session (a fresh turn) rather than spawning a new one.
+        sessionId: id,
         requestedBy: {
           login: user.login || user.name || "reef-web",
           id: user.id || user.email || "reef-web",

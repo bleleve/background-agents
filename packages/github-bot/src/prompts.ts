@@ -190,6 +190,8 @@ export function buildCodeReviewPrompt(params: {
   codeReviewInstructions?: string | null;
   autoApproveOnOpen?: boolean;
   largeDiff?: boolean;
+  /** True when re-running in an existing session — the worktree may be stale. */
+  resumed?: boolean;
   sessionUrl?: string;
 }): string {
   const {
@@ -205,6 +207,7 @@ export function buildCodeReviewPrompt(params: {
     codeReviewInstructions,
     autoApproveOnOpen,
     largeDiff,
+    resumed,
     sessionUrl,
   } = params;
 
@@ -244,8 +247,12 @@ export function buildCodeReviewPrompt(params: {
 
   const largeDiffSection = largeDiff ? `\n${buildLookoutDiverGuidance()}\n` : "";
 
+  const worktreeNote = resumed
+    ? `This is a RE-REVIEW in an existing session — the PR may have new commits since your last pass. Before reviewing, sync the worktree to the latest PR head: \`gh pr checkout ${number} --force\` (or \`git fetch origin && git reset --hard "origin/${head}"\`). Do not rely on inline suggestions you posted earlier; re-evaluate the current diff from scratch.`
+    : `The repository has been cloned and you are on the PR head branch.`;
+
   return `You are reviewing Pull Request #${number} in ${owner}/${repo}.
-The repository has been cloned and you are on the PR head branch.
+${worktreeNote}
 
 ## PR Details
 - **Title**:
