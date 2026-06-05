@@ -116,6 +116,12 @@ export class SessionMessageQueue {
     let participant = this.deps.participantService.getByUserId(client.userId);
     if (!participant) {
       participant = this.deps.participantService.create(client.userId, client.name);
+    } else if (participant.role === "viewer") {
+      // Sending a prompt is the explicit action that turns a passive viewer
+      // (created when they opened the page, see WsTokenHandler) into a real
+      // participant — and thus a PR reviewer/assignee.
+      this.deps.repository.updateParticipantRole(participant.id, "member");
+      participant = { ...participant, role: "member" };
     }
 
     let messageModel: string | null = null;

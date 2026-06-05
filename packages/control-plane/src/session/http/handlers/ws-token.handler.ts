@@ -73,6 +73,10 @@ export function createWsTokenHandler(deps: WsTokenHandlerDeps): WsTokenHandler {
           scmTokenExpiresAt: shouldUpdateTokens ? clientExpiresAt : null,
         });
       } else {
+        // Created as a "viewer", not a "member": fetching a WS token only means
+        // the user opened the session page. The row exists solely to anchor the
+        // WS auth token. Viewers are excluded from PR reviewers/assignees; sending
+        // a prompt promotes them to "member" (see SessionMessageQueue).
         const id = deps.generateId();
         deps.repository.createParticipant({
           id,
@@ -84,7 +88,7 @@ export function createWsTokenHandler(deps: WsTokenHandlerDeps): WsTokenHandler {
           scmAccessTokenEncrypted: body.scmTokenEncrypted ?? null,
           scmRefreshTokenEncrypted: body.scmRefreshTokenEncrypted ?? null,
           scmTokenExpiresAt: body.scmTokenExpiresAt ?? null,
-          role: "member",
+          role: "viewer",
           joinedAt: now,
         });
         participant = deps.getParticipantByUserId(body.userId)!;

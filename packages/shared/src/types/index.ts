@@ -52,7 +52,11 @@ export type EventType =
   | "plan_rejected";
 export type PlanApprovalStatus = "awaiting_approval" | "approved" | "rejected";
 export type PlanSource = "api" | "agent" | "web";
-export type ParticipantRole = "owner" | "member";
+// "viewer" — opened the session in the web UI but has not taken any action.
+// Viewers exist only to hold a WebSocket auth token; they are NOT counted as
+// having participated, so they are excluded from PR reviewers/assignees. Sending
+// a prompt promotes a viewer to "member".
+export type ParticipantRole = "owner" | "member" | "viewer";
 export type SpawnSource =
   | "user"
   | "agent"

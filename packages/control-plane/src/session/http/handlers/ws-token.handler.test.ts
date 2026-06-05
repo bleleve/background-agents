@@ -160,7 +160,7 @@ describe("createWsTokenHandler", () => {
     });
   });
 
-  it("creates a new participant when one does not exist", async () => {
+  it("creates a new participant as a viewer when one does not exist", async () => {
     const { handler, repository, getParticipantByUserId, generateId } = createHandler();
     const createdParticipant = createParticipant({ id: "participant-new" });
     getParticipantByUserId.mockReturnValueOnce(null).mockReturnValueOnce(createdParticipant);
@@ -198,7 +198,7 @@ describe("createWsTokenHandler", () => {
       scmAccessTokenEncrypted: "enc-access",
       scmRefreshTokenEncrypted: "enc-refresh",
       scmTokenExpiresAt: 2000,
-      role: "member",
+      role: "viewer",
       joinedAt: 1234,
     });
     expect(repository.updateParticipantWsToken).toHaveBeenCalledWith(
