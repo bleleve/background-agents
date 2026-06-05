@@ -131,15 +131,15 @@ Endpoint URLs follow the pattern: `https://{workspace}--open-inspect-{endpoint}.
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `api-health` | GET | No | Health check |
-| `api-create-sandbox` | POST | Yes | Create a new sandbox |
-| `api-warm-sandbox` | POST | Yes | Pre-warm a sandbox |
-| `api-snapshot-sandbox` | POST | Yes | Take filesystem snapshot |
-| `api-restore-sandbox` | POST | Yes | Restore sandbox from snapshot |
+| `api-create` | POST | Yes | Create a new sandbox |
+| `api-warm` | POST | Yes | Pre-warm a sandbox |
+| `api-snapshot` | POST | Yes | Take filesystem snapshot |
+| `api-restore` | POST | Yes | Restore sandbox from snapshot |
 
 ### Example: Create Sandbox
 
 ```bash
-curl -X POST "https://${WORKSPACE}--open-inspect-api-create-sandbox.modal.run" \
+curl -X POST "https://${WORKSPACE}--open-inspect-api-create.modal.run" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -177,7 +177,7 @@ Set via Modal secrets:
 |-----------|-------------|
 | App deploys successfully | `modal deploy deploy.py` completes without errors |
 | Health endpoint responds | `curl https://{workspace}--open-inspect-api-health.modal.run` |
-| Sandbox creation works | POST to `api-create-sandbox` returns success |
+| Sandbox creation works | POST to `api-create` returns success |
 | Git sync completes | Verify HEAD matches origin after sandbox start |
 | Snapshot/restore works | Take snapshot, restore, verify workspace state |
 
