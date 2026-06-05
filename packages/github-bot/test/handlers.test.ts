@@ -898,6 +898,94 @@ describe("handleIssueComment", () => {
     expect(promptBody.authorId).toBe("github:1002");
   });
 
+  it("runs the FULL review (not a comment action) for a review-request comment", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    // Full PR details for the review prompt (fetched + by isLargeDiff → fresh Response each).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              number: 42,
+              title: "Add caching",
+              body: "Adds Redis caching",
+              html_url: "https://github.com/acme/widgets/pull/42",
+              state: "open",
+              user: { login: "alice" },
+              head: { ref: "feature/cache", sha: "abc123" },
+              base: { ref: "main", repo: { private: false } },
+              additions: 1,
+              deletions: 1,
+            }),
+            { status: 200 }
+          )
+        )
+      )
+    );
+    const payload: IssueCommentPayload = {
+      ...issueCommentPayload,
+      comment: { ...issueCommentPayload.comment, body: "@test-bot[bot] can you review again?" },
+    };
+
+    const result = await handleIssueComment(env, log, payload, "trace-review-comment");
+
+    expect(result.outcome).toBe("processed");
+    if (result.outcome === "processed") {
+      expect(result.handler_action).toBe("rereview");
+    }
+
+    const cpFetch = getControlPlaneFetch(env);
+    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(sessionBody.title).toBe("GitHub: Review PR #42");
+
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    // The full review prompt, not the comment-action prompt.
+    expect(promptBody.content).toContain("You are reviewing Pull Request #42");
+    expect(promptBody.callbackContext).toMatchObject({ kind: "pr_review", prNumber: 42 });
+  });
+
+  it("reuses the PR's existing review session for a review-request comment", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-existing");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              number: 42,
+              title: "Add caching",
+              body: null,
+              html_url: "https://github.com/acme/widgets/pull/42",
+              state: "open",
+              user: { login: "alice" },
+              head: { ref: "feature/cache", sha: "abc123" },
+              base: { ref: "main", repo: { private: false } },
+              additions: 1,
+              deletions: 1,
+            }),
+            { status: 200 }
+          )
+        )
+      )
+    );
+    const payload: IssueCommentPayload = {
+      ...issueCommentPayload,
+      comment: { ...issueCommentPayload.comment, body: "@test-bot[bot] review" },
+    };
+
+    const result = await handleIssueComment(env, log, payload, "trace-review-reuse");
+
+    expect(result).toMatchObject({ outcome: "processed", session_id: "sess-existing" });
+    const cpFetch = getControlPlaneFetch(env);
+    // No session creation — only the prompt, to the existing session.
+    expect(cpFetch).toHaveBeenCalledTimes(1);
+    expect(cpFetch.mock.calls[0][0]).toBe("https://internal/sessions/sess-existing/prompt");
+  });
+
   it("treats @mention of app slug without [bot] as a bot mention", async () => {
     const env = createMockEnv();
     const log = createMockLogger();

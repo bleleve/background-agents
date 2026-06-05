@@ -4,6 +4,7 @@ import {
   resolveAppName,
   parsePlanCommand,
   reviewSessionTitle,
+  isReviewRequestComment,
   type PlanCommand,
   type GitHubCallbackContext,
 } from "@open-inspect/shared";
@@ -1268,6 +1269,58 @@ export async function handleIssueComment(
       message_id: "",
       handler_action: planCommand.command === "approve" ? "plan_approve" : "plan_reject",
     };
+  }
+
+  // Natural-language review request (e.g. "@reef can you review it?",
+  // "review again", "please re-review") → run the FULL code review, identical to
+  // the auto-review (verdict + risk markers), reusing the PR's existing review
+  // session when there is one. Falls through to the comment-action path otherwise.
+  if (isReviewRequestComment(rawCommentBody)) {
+    const meta = { trace_id: traceId, repo: repoFullName, pull_number: issue.number };
+    fireAndForgetReaction(
+      log,
+      ghToken,
+      `https://api.github.com/repos/${owner}/${repoName}/issues/comments/${comment.id}/reactions`,
+      resolveAppName(env),
+      meta
+    );
+
+    // issue_comment carries no PR branches/body — fetch the PR for the review prompt.
+    const details = await fetchPullRequestDetails(ghToken, owner, repoName, issue.number);
+    if (!details) {
+      log.info("review_request.pr_not_found", meta);
+      return { outcome: "skipped", skip_reason: "pull_request_not_found" };
+    }
+
+    const reviewModel = extractReviewModelFromLabels(issue.labels ?? []) ?? config.model;
+    const existingSessionId = await lookupReviewSession(env, repoFullName, issue.number);
+
+    return runCodeReview(env, log, ghToken, headers, {
+      owner,
+      repoName,
+      prNumber: issue.number,
+      prUrl: details.html_url,
+      prState: details.state,
+      prHeadRef: details.head.ref,
+      prBaseRef: details.base.ref,
+      title: details.title,
+      body: details.body,
+      author: details.user.login,
+      base: details.base.ref,
+      head: details.head.ref,
+      isPublic: !repo.private,
+      model: reviewModel,
+      reasoningEffort: config.reasoningEffort,
+      codeReviewInstructions: config.codeReviewInstructions,
+      // A comment-triggered re-review never auto-approves.
+      autoApproveOnOpen: false,
+      scmLogin: sender.login,
+      scmUserId: String(sender.id),
+      scmAvatarUrl: sender.avatar_url,
+      actionLabel: "rereview",
+      existingSessionId,
+      meta,
+    });
   }
 
   // Label-based plan / model overrides (dash-separated, unified with Linear).
