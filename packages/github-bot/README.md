@@ -163,9 +163,11 @@ This handler is retained for webhook compatibility. The user-facing GitHub workf
 people to request the GitHub App bot through the PR reviewer picker.
 
 1. Check `requested_reviewer.login` matches `GITHUB_BOT_USERNAME` — return early if not
-2. Post eyes reaction on the PR (fire-and-forget)
-3. Create session via control plane
-4. Send code review prompt (includes PR metadata + `gh` CLI instructions)
+2. Skip closed/merged PRs; apply repo-enablement, visibility, the `autoReviewOnOpen` setting, and
+   caller gating
+3. Post eyes reaction on the PR (fire-and-forget)
+4. Create session via control plane
+5. Send code review prompt (includes PR metadata + `gh` CLI instructions)
 
 **Pull Request Labeled (re-review):**
 
