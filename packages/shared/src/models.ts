@@ -122,45 +122,6 @@ export function parseReviewSessionPrNumber(title: string | null | undefined): nu
   return match ? Number.parseInt(match[1], 10) : null;
 }
 
-// Leading politeness/request wrappers peeled before checking for the review verb,
-// e.g. "can you", "could u", "please", "do a". Applied repeatedly.
-const REVIEW_REQUEST_PREFIX_RE =
-  /^(?:hey|hi|yo|can|could|would|will|you|u|please|pls|kindly|do|run|give|take|perform|a|an|another)\b/;
-
-// After peeling, the remainder must be a review verb optionally followed by a
-// short object — "review", "re-review this pr", "review again please".
-const REVIEW_REQUEST_CORE_RE =
-  /^(?:re[-\s]?)?review(?:\s+(?:it|this|that|again|this pr|the pr|the changes?|the code|once more|one more time|now|please|pls|for me))*$/;
-
-/**
- * Detect a natural-language "please review (again)" request in a PR comment
- * (after the bot @mention has been stripped) — e.g. "can you review it?",
- * "review again", "please re-review". When true, the github-bot runs the full
- * code review (identical to the auto-review) instead of a generic comment action.
- *
- * Matches only when the whole comment is essentially a review request, so a
- * comment that merely contains the word "review" inside a larger instruction
- * ("address the review comments") falls through to the comment-action path.
- */
-export function isReviewRequestComment(body: string): boolean {
-  let text = body
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .replace(/[?.!,\s]+$/g, "")
-    .trim();
-  if (!text) return false;
-
-  let changed = true;
-  while (changed) {
-    const next = text.replace(REVIEW_REQUEST_PREFIX_RE, "").trim();
-    changed = next !== text;
-    text = next;
-  }
-
-  return REVIEW_REQUEST_CORE_RE.test(text);
-}
-
 /**
  * Reasoning effort levels supported across providers.
  *
