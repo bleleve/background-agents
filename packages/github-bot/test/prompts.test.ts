@@ -187,8 +187,10 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("### Summary");
     expect(prompt).toContain("finding(s)");
     expect(prompt).toContain("### Worth a look");
-    // "Reviewed, no concerns" is collapsed by default in a <details> block.
+    // "Reviewed, no concerns" is collapsed by default in a <details> block, with the
+    // <summary> as its only title — no `###` heading (that would render the title twice).
     expect(prompt).toContain("<summary>Reviewed, no concerns</summary>");
+    expect(prompt).toContain("no `###` heading");
     expect(prompt).toContain("Reef automated review");
     // The final UI reply is standardized to one line with a link to the verdict.
     expect(prompt).toContain("Final reply (mandatory, exact format)");

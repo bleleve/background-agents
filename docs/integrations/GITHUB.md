@@ -53,6 +53,7 @@ non-draft PRs in enabled repositories. The agent inspects the PR diff and posts 
 Auto-review is skipped when:
 
 - The PR is a draft
+- The PR is closed or merged
 - The PR was opened by the GitHub App bot itself
 - The repository is outside the configured GitHub Bot scope
 - The PR opener is not allowed to trigger the bot
@@ -95,7 +96,9 @@ rather than a silent in-place edit.
   **Re-run review** button. The re-run is attributed to you and runs the same review.
 
 Re-running honors the same repository scope, visibility, and trigger-user gates as the original
-review.
+review. It also requires auto-review to be enabled: when **Auto-review new PRs** is off, every
+re-trigger path — the `ask-for-review` label and the "Re-run review" button — is blocked. Closed or
+merged PRs are dropped as well, so re-triggering a review on one does nothing.
 
 ---
 
