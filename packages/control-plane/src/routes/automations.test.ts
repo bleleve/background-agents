@@ -34,6 +34,7 @@ vi.mock("../db/automation-store", () => ({
 
 const mockUserStore = {
   resolveOrCreateUser: vi.fn().mockResolvedValue({ id: "resolved-user-1", isNew: false }),
+  getIdentity: vi.fn(),
 };
 vi.mock("../db/user-store", () => ({
   UserStore: vi.fn().mockImplementation(() => mockUserStore),
@@ -138,9 +139,20 @@ const sampleRow = {
   next_run_at: now,
   consecutive_failures: 0,
   created_by: "user-1",
+  user_id: "user-alice",
   created_at: now,
   updated_at: now,
   deleted_at: null,
+  event_type: null,
+  trigger_config: null,
+  trigger_auth_data: null,
+  last_run_at: null,
+};
+
+const deleteActorBody = {
+  scmUserId: "gh-alice",
+  scmLogin: "alice",
+  userId: "user-1",
 };
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -175,6 +187,8 @@ describe("automation route handlers", () => {
       expect(mockStore.list).toHaveBeenCalledWith({
         repoOwner: "acme",
         repoName: "web-app",
+        sortBy: "created_at",
+        sortOrder: "desc",
         createdByUserIds: [],
       });
     });
@@ -191,6 +205,8 @@ describe("automation route handlers", () => {
       expect(mockStore.list).toHaveBeenCalledWith({
         repoOwner: undefined,
         repoName: undefined,
+        sortBy: "created_at",
+        sortOrder: "desc",
         createdByUserIds: ["0123456789abcdef0123456789abcdef"],
       });
     });
@@ -202,6 +218,38 @@ describe("automation route handlers", () => {
 
       expect(res.status).toBe(400);
       await expect(res.json()).resolves.toEqual({ error: "Invalid createdBy" });
+      expect(mockStore.list).not.toHaveBeenCalled();
+    });
+
+    it("passes sort params to store", async () => {
+      mockStore.list.mockResolvedValue({ automations: [], total: 0 });
+
+      await callRoute("GET", "/automations", {
+        query: { sortBy: "last_run_at", sortOrder: "asc" },
+      });
+
+      expect(mockStore.list).toHaveBeenCalledWith({
+        repoOwner: undefined,
+        repoName: undefined,
+        sortBy: "last_run_at",
+        sortOrder: "asc",
+        createdByUserIds: [],
+      });
+    });
+
+    it("returns 400 for invalid sortBy", async () => {
+      const res = await callRoute("GET", "/automations", {
+        query: { sortBy: "name" },
+      });
+      expect(res.status).toBe(400);
+      expect(mockStore.list).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for invalid sortOrder", async () => {
+      const res = await callRoute("GET", "/automations", {
+        query: { sortOrder: "up" },
+      });
+      expect(res.status).toBe(400);
       expect(mockStore.list).not.toHaveBeenCalled();
     });
   });
@@ -476,21 +524,38 @@ describe("automation route handlers", () => {
   });
 
   describe("DELETE /automations/:id", () => {
-    it("soft-deletes automation", async () => {
+    beforeEach(() => {
+      mockStore.getById.mockResolvedValue(sampleRow);
+      mockUserStore.getIdentity.mockResolvedValue({ userId: "user-alice" });
+    });
+
+    it("soft-deletes automation when actor is allowed", async () => {
       mockStore.softDelete.mockResolvedValue(true);
 
-      const res = await callRoute("DELETE", "/automations/auto-1");
+      const res = await callRoute("DELETE", "/automations/auto-1", { body: deleteActorBody });
       expect(res.status).toBe(200);
 
       const body = await res.json<{ status: string }>();
       expect(body.status).toBe("deleted");
+      expect(mockStore.softDelete).toHaveBeenCalledWith("auto-1");
     });
 
-    it("returns 404 when not found", async () => {
-      mockStore.softDelete.mockResolvedValue(false);
+    it("returns 403 when actor is not allowed", async () => {
+      mockUserStore.getIdentity.mockResolvedValue({ userId: "user-bob" });
 
-      const res = await callRoute("DELETE", "/automations/missing");
+      const res = await callRoute("DELETE", "/automations/auto-1", {
+        body: { scmUserId: "gh-bob", scmLogin: "bob", userId: "bob" },
+      });
+      expect(res.status).toBe(403);
+      expect(mockStore.softDelete).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when automation not found", async () => {
+      mockStore.getById.mockResolvedValue(null);
+
+      const res = await callRoute("DELETE", "/automations/missing", { body: deleteActorBody });
       expect(res.status).toBe(404);
+      expect(mockStore.softDelete).not.toHaveBeenCalled();
     });
   });
 

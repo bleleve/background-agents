@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildControlPlanePath, SESSION_CONTROL_PLANE_QUERY_PARAMS } from "./control-plane-query";
+import {
+  AUTOMATION_CONTROL_PLANE_QUERY_PARAMS,
+  buildControlPlanePath,
+  SESSION_CONTROL_PLANE_QUERY_PARAMS,
+} from "./control-plane-query";
 
 describe("buildControlPlanePath", () => {
   it("forwards allowed query parameters in allowlist order", () => {
@@ -14,6 +18,16 @@ describe("buildControlPlanePath", () => {
     const searchParams = new URLSearchParams("repoOwner=open-inspect&trace=1");
 
     expect(buildControlPlanePath("/automations", searchParams)).toBe("/automations");
+  });
+
+  it("forwards automation list query parameters", () => {
+    const searchParams = new URLSearchParams(
+      "sortBy=last_run_at&sortOrder=asc&repoOwner=acme&repoName=api&debug=true"
+    );
+
+    expect(
+      buildControlPlanePath("/automations", searchParams, AUTOMATION_CONTROL_PLANE_QUERY_PARAMS)
+    ).toBe("/automations?repoOwner=acme&repoName=api&sortBy=last_run_at&sortOrder=asc");
   });
 
   it("preserves empty allowed values", () => {

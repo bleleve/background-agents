@@ -101,6 +101,7 @@ const sampleRow: AutomationRow = {
   event_type: null,
   trigger_config: null,
   trigger_auth_data: null,
+  last_run_at: null,
 };
 
 const sampleRunRow: AutomationRunRow = {
@@ -136,6 +137,7 @@ describe("toAutomation", () => {
     expect(automation.triggerConfig).toBeNull();
     expect(automation.consecutiveFailures).toBe(0);
     expect(automation.createdBy).toBe("user-1");
+    expect(automation.lastRunAt).toBeNull();
   });
 
   it("converts enabled=0 to false", () => {
@@ -230,6 +232,27 @@ describe("AutomationStore", () => {
         "0123456789abcdef0123456789abcdef",
         "ffffffffffffffffffffffffffffffff",
       ]);
+    });
+
+    it("orders by created_at DESC by default", async () => {
+      const { db, statements } = createFakeD1({ allResults: [sampleRow] });
+      const store = new AutomationStore(db);
+      await store.list();
+      expect(statements[0].sql).toContain("ORDER BY created_at DESC");
+    });
+
+    it("orders by last_run_at DESC with nulls last", async () => {
+      const { db, statements } = createFakeD1({ allResults: [sampleRow] });
+      const store = new AutomationStore(db);
+      await store.list({ sortBy: "last_run_at", sortOrder: "desc" });
+      expect(statements[0].sql).toContain("ORDER BY last_run_at IS NULL, last_run_at DESC");
+    });
+
+    it("orders by last_run_at ASC with nulls first", async () => {
+      const { db, statements } = createFakeD1({ allResults: [sampleRow] });
+      const store = new AutomationStore(db);
+      await store.list({ sortBy: "last_run_at", sortOrder: "asc" });
+      expect(statements[0].sql).toContain("ORDER BY last_run_at IS NULL DESC, last_run_at ASC");
     });
   });
 
@@ -415,6 +438,9 @@ describe("AutomationStore", () => {
       expect(statements[0].sql).toContain("status = ?");
       expect(statements[0].sql).toContain("session_id = ?");
       expect(statements[0].sql).toContain("started_at = ?");
+      expect(statements[1].sql).toContain("UPDATE automations SET last_run_at");
+      expect(statements[1].params[0]).toBe(now);
+      expect(statements[1].params[2]).toBe("run_test1");
     });
 
     it("skips update when no fields provided", async () => {

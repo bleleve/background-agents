@@ -6,15 +6,29 @@ import type {
   ListAutomationRunsResponse,
 } from "@open-inspect/shared";
 import { useSidebarContext } from "@/components/sidebar-context";
-import { buildAutomationsListKey, CURRENT_USER_CREATED_BY } from "@/lib/automation-list";
+import {
+  buildAutomationsListKey,
+  CURRENT_USER_CREATED_BY,
+  type AutomationListSortBy,
+  type AutomationListSortOrder,
+} from "@/lib/automation-list";
 
-export function useAutomations() {
+export type { AutomationListSortBy, AutomationListSortOrder };
+
+export interface UseAutomationsOptions {
+  sortBy?: AutomationListSortBy;
+  sortOrder?: AutomationListSortOrder;
+}
+
+export function useAutomations(options?: UseAutomationsOptions) {
   const { data: session } = useSession();
   const { creatorFilter } = useSidebarContext();
 
   const key = session
     ? buildAutomationsListKey({
         createdBy: creatorFilter === "mine" ? [CURRENT_USER_CREATED_BY] : undefined,
+        sortBy: options?.sortBy,
+        sortOrder: options?.sortOrder,
       })
     : null;
 

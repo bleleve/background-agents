@@ -36,6 +36,7 @@ function makeAutomation(overrides?: Partial<AutomationRow>): AutomationRow {
     event_type: null,
     trigger_config: null,
     trigger_auth_data: null,
+    last_run_at: null,
     ...overrides,
   };
 }
@@ -206,6 +207,50 @@ describe("AutomationStore (D1 integration)", () => {
       const result = await store.list();
       expect(result.automations[0].id).toBe("auto-new");
       expect(result.automations[1].id).toBe("auto-old");
+    });
+
+    it("orders by last_run_at DESC with never-run automations last", async () => {
+      const store = new AutomationStore(env.DB);
+      const base = Date.now();
+      await store.create(makeAutomation({ id: "auto-never" }));
+      await store.create(makeAutomation({ id: "auto-older-run" }));
+      await store.create(makeAutomation({ id: "auto-recent-run" }));
+
+      await store.insertRun(makeRun("auto-older-run", { id: "run-old" }));
+      await store.insertRun(makeRun("auto-recent-run", { id: "run-new" }));
+      await store.updateRun("run-old", {
+        status: "running",
+        session_id: "sess-old",
+        started_at: base - 5000,
+      });
+      await store.updateRun("run-new", {
+        status: "running",
+        session_id: "sess-new",
+        started_at: base - 1000,
+      });
+
+      const result = await store.list({ sortBy: "last_run_at", sortOrder: "desc" });
+      expect(result.automations.map((a) => a.id)).toEqual([
+        "auto-recent-run",
+        "auto-older-run",
+        "auto-never",
+      ]);
+    });
+
+    it("sets last_run_at when updateRun sets started_at", async () => {
+      const store = new AutomationStore(env.DB);
+      await store.create(makeAutomation({ id: "auto-touch" }));
+      await store.insertRun(makeRun("auto-touch", { id: "run-touch" }));
+
+      const startedAt = Date.now();
+      await store.updateRun("run-touch", {
+        status: "running",
+        session_id: "sess-touch",
+        started_at: startedAt,
+      });
+
+      const row = await store.getById("auto-touch");
+      expect(row!.last_run_at).toBe(startedAt);
     });
   });
 

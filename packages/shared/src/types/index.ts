@@ -877,6 +877,7 @@ export interface Automation {
   createdAt: number;
   updatedAt: number;
   deletedAt: number | null;
+  lastRunAt: number | null;
   eventType: string | null;
   triggerConfig: TriggerConfig | null;
 }
