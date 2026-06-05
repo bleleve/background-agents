@@ -125,9 +125,9 @@ function buildVerdictWorkflow(params: {
    - **\`### Summary\`** — a one-sentence verdict as a blockquote (\`> …\`), then a count line: \`**<N> finding(s)**\` with a per-risk parenthetical (e.g. \`(1 medium, 1 high)\`) when there are findings, then \` · <M> areas reviewed, no concerns.\`. When nothing survived, write \`**No findings.**\` instead of a count.
    - **\`### Worth a look\`** — only if findings survived the quality bar, highest-risk first. One bullet per finding: \`<🟡|🔴> \`path:line\` — <the concrete risk in a few words> → [inline](<html_url of the inline comment you posted in step 6>)\`. Omit this whole section when nothing survived.
    - **\`### Docs\`** — only if the pr-doc-sentinel returned findings, one bullet each: \`📝 \`path\` — <what diverged>\`. Omit this section entirely when there is no doc drift.
-   - **\`### Reviewed, no concerns\`** — one terse line naming the areas/files you checked that had nothing notable.
+   - **Reviewed, no concerns** — collapsed by default so it doesn't bury the summary. Use a \`<details>\` block (keep the blank line after \`</summary>\` so the body renders): a \`<summary>Reviewed, no concerns</summary>\` followed by one terse line naming the areas/files you checked that had nothing notable.
    - Footer line, exactly: \`${footer}\`.
-   - Do not invent findings to justify a verdict. A clean PR is just the 🟢 header + the \`### Summary\` (with \`**No findings.**\`) + the \`### Reviewed, no concerns\` line + the footer (no "Worth a look" section).
+   - Do not invent findings to justify a verdict. A clean PR is just the 🟢 header + the \`### Summary\` (with \`**No findings.**\`) + the collapsed "Reviewed, no concerns" \`<details>\` + the footer (no "Worth a look" section).
 - Delete any prior verdict comment(s), then post the new verdict as a fresh comment, printing the comment URL so you can confirm it landed:
 
    for id in $(gh api --paginate "repos/${owner}/${repo}/issues/${number}/comments" --jq '.[] | select(.body | startswith("${REEF_VERDICT_MARKER}")) | .id'); do
@@ -148,21 +148,31 @@ function buildVerdictWorkflow(params: {
    ### Docs
    - 📝 \`<path>\` — <what diverged>
 
-   ### Reviewed, no concerns
+   <details>
+   <summary>Reviewed, no concerns</summary>
+
    <comma-separated areas>
+   </details>
 
    ${footer}
    EOF
    gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" -F body=@/tmp/pr-verdict.md --jq '.html_url'
 - Confirm the command printed the comment's \`html_url\`. If it printed nothing or errored, the verdict did NOT post — fix the call and retry until a URL comes back. Do not end the review without a posted verdict.
-- Set the PR's risk label to match the verdict — exactly one of \`low-risk\`, \`medium-risk\`, or \`high-risk\` — replacing any prior risk label so only the current one remains:
+- Set the PR's risk label to match the verdict, replacing any prior risk label so only the current one remains. **Derive the level mechanically from the header you just wrote — do not re-judge the risk here**, so the label can never drift from the badge in the verdict you posted:
 
+   RISK="$(grep -m1 'Reef Review' /tmp/pr-verdict.md | grep -oiE 'low|medium|high' | head -1 | tr 'A-Z' 'a-z')"
+   case "$RISK" in low|medium|high) ;; *) echo "could not parse risk from verdict header — skipping label"; RISK="" ;; esac
    gh label create low-risk    --repo ${owner}/${repo} --color 0E8A16 --description "Reef: low risk"    >/dev/null 2>&1 || true
    gh label create medium-risk --repo ${owner}/${repo} --color FBCA04 --description "Reef: medium risk" >/dev/null 2>&1 || true
    gh label create high-risk   --repo ${owner}/${repo} --color D93F0B --description "Reef: high risk"   >/dev/null 2>&1 || true
    gh pr edit ${number} --repo ${owner}/${repo} --remove-label low-risk --remove-label medium-risk --remove-label high-risk 2>/dev/null || true
-   gh pr edit ${number} --repo ${owner}/${repo} --add-label "<low|medium|high>-risk"
-- The verdict prioritizes; it does not reopen the door to speculative findings. Do not list anything here that did not survive the quality bar above.`;
+   [ -n "$RISK" ] && gh pr edit ${number} --repo ${owner}/${repo} --add-label "$RISK-risk"
+- The verdict prioritizes; it does not reopen the door to speculative findings. Do not list anything here that did not survive the quality bar above.
+- **Final reply (mandatory, exact format).** Your last message this turn is what the user sees in the Reef UI, so it must be consistent every run — no preamble, no recap of steps, no restating the verdict body. Emit EXACTLY one line, nothing else:
+
+   <🟢|🟡|🔴> <Low|Medium|High> risk — <the one-sentence summary from the verdict> · [View verdict](<the verdict comment html_url printed above>)
+
+   Always include the \`[View verdict]\` link to the comment you just posted. Do not add any other text before or after this line.`;
 }
 
 // For large diffs, attention dilutes if you try to review everything at full

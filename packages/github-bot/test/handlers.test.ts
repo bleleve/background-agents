@@ -861,6 +861,23 @@ describe("handleReviewRequested", () => {
     expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
     expect(log.debug).toHaveBeenCalledWith("handler.repo_not_enabled", expect.anything());
   });
+
+  it("skips a closed/merged PR before fetching config", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: ReviewRequestedPayload = {
+      ...reviewRequestedPayload,
+      pull_request: { ...reviewRequestedPayload.pull_request, state: "closed" },
+    };
+
+    const result = await handleReviewRequested(env, log, payload, "trace-closed");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "pr_closed_or_merged" });
+    // State is checked before the config fetch, matching handlePullRequestOpened /
+    // handlePullRequestLabeled — a closed PR short-circuits without the round-trip.
+    expect(getGitHubConfig).not.toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
 });
 
 describe("handleIssueComment", () => {
@@ -1810,6 +1827,7 @@ const pullRequestLabeledPayload: PullRequestLabeledPayload = {
     user: { login: "alice" },
     head: { ref: "feature/cache", sha: "abc123" },
     base: { ref: "main" },
+    state: "open",
     draft: false,
     labels: [{ name: "ask-for-review" }],
   },
@@ -1892,6 +1910,31 @@ describe("handlePullRequestLabeled", () => {
     expect(result).toEqual({ outcome: "skipped", skip_reason: "draft_pr" });
   });
 
+  it("skips when the PR is closed/merged", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: PullRequestLabeledPayload = {
+      ...pullRequestLabeledPayload,
+      pull_request: { ...pullRequestLabeledPayload.pull_request, state: "closed" },
+    };
+
+    const result = await handlePullRequestLabeled(env, log, payload, "trace-lbl");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "pr_closed_or_merged" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("skips when auto-review is disabled for the repo", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoReviewOnOpen: false });
+
+    const result = await handlePullRequestLabeled(env, log, pullRequestLabeledPayload, "trace-lbl");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "auto_review_disabled" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
   it("re-runs in the existing review session when one is mapped (no new session)", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
@@ -1942,6 +1985,7 @@ describe("handleReviewRequestInternal", () => {
               body: "Adds Redis caching",
               user: { login: "alice" },
               head: { ref: "feature/cache", sha: "abc123" },
+              state: "open",
               base: { ref: "main", repo: { private: false } },
               additions: 1,
               deletions: 1,
@@ -1975,6 +2019,7 @@ describe("handleReviewRequestInternal", () => {
               body: "Adds Redis caching",
               user: { login: "alice" },
               head: { ref: "feature/cache", sha: "abc123" },
+              state: "open",
               base: { ref: "main", repo: { private: false } },
               additions: 1,
               deletions: 1,
@@ -2023,5 +2068,44 @@ describe("handleReviewRequestInternal", () => {
     const result = await handleReviewRequestInternal(env, log, internalRequest, "trace-int");
 
     expect(result).toEqual({ ok: false, status: 403, error: "repo_not_enabled" });
+  });
+
+  it("returns 403 when auto-review is disabled for the repo", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoReviewOnOpen: false });
+
+    const result = await handleReviewRequestInternal(env, log, internalRequest, "trace-int");
+
+    expect(result).toEqual({ ok: false, status: 403, error: "auto_review_disabled" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when the PR is closed/merged", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            number: 42,
+            title: "Add caching",
+            body: null,
+            html_url: "https://github.com/acme/widgets/pull/42",
+            state: "closed",
+            user: { login: "alice" },
+            head: { ref: "feature/cache", sha: "abc123" },
+            base: { ref: "main", repo: { private: false } },
+          }),
+          { status: 200 }
+        )
+      )
+    );
+
+    const result = await handleReviewRequestInternal(env, log, internalRequest, "trace-int");
+
+    expect(result).toEqual({ ok: false, status: 409, error: "pull_request_not_open" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
   });
 });

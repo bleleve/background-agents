@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS participants (
   scm_login TEXT,                                   -- SCM username
   scm_email TEXT,                                   -- For git commit attribution
   scm_name TEXT,                                    -- Display name for git commits
-  role TEXT NOT NULL DEFAULT 'member',              -- 'owner', 'member'
+  role TEXT NOT NULL DEFAULT 'member',              -- 'owner', 'member', 'viewer'
   -- Token storage (AES-GCM encrypted)
   scm_access_token_encrypted TEXT,
   scm_refresh_token_encrypted TEXT,
@@ -437,6 +437,26 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     id: 34,
     description: "Add plan_cost_snapshot to session for plan/build cost breakdown",
     run: `ALTER TABLE session ADD COLUMN plan_cost_snapshot REAL`,
+  },
+  {
+    id: 35,
+    description: "Backfill: demote member participants who never sent a prompt to viewer",
+    run: (sql) => {
+      // Before the "viewer" role existed, fetching a WS token — i.e. merely
+      // opening the session page in the web UI — created a participant with role
+      // "member", which made every viewer a PR reviewer/assignee. Those viewers
+      // never authored a message. Demote them to "viewer" so they stop being
+      // assigned. Owners, the system user, and anyone who authored a prompt
+      // (their participant id appears in messages.author_id) are left untouched.
+      // Idempotent: re-running only ever demotes the same already-passive rows.
+      sql.exec(
+        `UPDATE participants
+            SET role = 'viewer'
+          WHERE role = 'member'
+            AND user_id != 'system'
+            AND id NOT IN (SELECT author_id FROM messages WHERE author_id IS NOT NULL)`
+      );
+    },
   },
 ];
 

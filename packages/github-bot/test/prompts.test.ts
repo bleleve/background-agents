@@ -187,8 +187,12 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("### Summary");
     expect(prompt).toContain("finding(s)");
     expect(prompt).toContain("### Worth a look");
-    expect(prompt).toContain("### Reviewed, no concerns");
+    // "Reviewed, no concerns" is collapsed by default in a <details> block.
+    expect(prompt).toContain("<summary>Reviewed, no concerns</summary>");
     expect(prompt).toContain("Reef automated review");
+    // The final UI reply is standardized to one line with a link to the verdict.
+    expect(prompt).toContain("Final reply (mandatory, exact format)");
+    expect(prompt).toContain("[View verdict]");
     // Re-review: find prior verdict by marker (paginated so it survives PRs with
     // >30 comments), DELETE it, then POST a fresh comment (so re-reviews notify).
     expect(prompt).toContain(`select(.body | startswith("${REEF_VERDICT_MARKER}"))`);
@@ -198,7 +202,7 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).not.toContain("-X PATCH");
   });
 
-  it("sets a risk label matching the verdict, replacing any prior one", () => {
+  it("sets a risk label derived from the verdict header, replacing any prior one", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
     expect(prompt).toContain("gh label create low-risk");
     expect(prompt).toContain("gh label create medium-risk");
@@ -207,7 +211,13 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain(
       "--remove-label low-risk --remove-label medium-risk --remove-label high-risk"
     );
-    expect(prompt).toContain('--add-label "<low|medium|high>-risk"');
+    // The label must be parsed mechanically from the verdict header (single source
+    // of truth) rather than re-judged — otherwise the badge and the label can drift.
+    expect(prompt).toContain("grep -m1 'Reef Review' /tmp/pr-verdict.md");
+    expect(prompt).toContain('--add-label "$RISK-risk"');
+    expect(prompt).toContain("do not re-judge the risk here");
+    // The old free-choice placeholder must be gone — it let the label diverge from the badge.
+    expect(prompt).not.toContain('--add-label "<low|medium|high>-risk"');
   });
 
   it("links the session in the verdict footer when a sessionUrl is provided", () => {

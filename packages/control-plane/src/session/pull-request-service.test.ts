@@ -436,6 +436,21 @@ describe("SessionPullRequestService", () => {
     );
   });
 
+  it("excludes viewers (users who only opened the session) from reviewers/assignees", async () => {
+    harness.setParticipants([
+      createParticipant({ id: "p1", user_id: "user-1", scm_login: "alice", role: "owner" }),
+      createParticipant({ id: "p2", user_id: "user-2", scm_login: "bob", role: "member" }),
+      createParticipant({ id: "p3", user_id: "user-3", scm_login: "carol", role: "viewer" }),
+    ]);
+
+    await harness.service.createPullRequest(createInput());
+
+    expect(harness.provider.createPullRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ assignees: ["alice", "bob"], reviewers: ["alice", "bob"] })
+    );
+  });
+
   it("skips participants without an SCM login and dedupes logins", async () => {
     harness.setParticipants([
       createParticipant({ id: "p1", user_id: "user-1", scm_login: "alice" }),
