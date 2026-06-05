@@ -1330,6 +1330,7 @@ export async function handleIssueComment(
     commenter: sender.login,
     isPublic: !repo.private,
     commentActionInstructions: config.commentActionInstructions,
+    sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
@@ -1462,6 +1463,7 @@ export async function handleReviewComment(
     diffHunk: comment.diff_hunk,
     commentId: comment.id,
     commentActionInstructions: config.commentActionInstructions,
+    sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {

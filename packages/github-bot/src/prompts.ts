@@ -307,6 +307,8 @@ export function buildCommentActionPrompt(params: {
   diffHunk?: string;
   commentId?: number;
   commentActionInstructions?: string | null;
+  /** Links the session in the verdict footer when the agent chooses a full review. */
+  sessionUrl?: string;
 }): string {
   const {
     owner,
@@ -322,6 +324,7 @@ export function buildCommentActionPrompt(params: {
     diffHunk,
     commentId,
     commentActionInstructions,
+    sessionUrl,
   } = params;
 
   const intro = head
@@ -354,7 +357,7 @@ export function buildCommentActionPrompt(params: {
 
   let replyInstruction = "";
   if (commentId) {
-    replyInstruction = `\n6. If you need to reply to the specific review thread:\n\n   gh api repos/${owner}/${repo}/pulls/${number}/comments/${commentId}/replies \\\n     --method POST \\\n     -f body="<your reply>"`;
+    replyInstruction = `\n   - To reply to the specific review thread:\n\n     gh api repos/${owner}/${repo}/pulls/${number}/comments/${commentId}/replies \\\n       --method POST \\\n       -f body="<your reply>"`;
   }
 
   return `${intro}${prDetails}${codeLocation}
@@ -368,20 +371,31 @@ ${buildUntrustedUserContentBlock({
 
 ${UNTRUSTED_REPO_CONTENT_GUIDANCE}
 
-## Instructions
-1. Run \`gh pr diff ${number}\` if you need to see the current changes
-2. Run \`gh pr view ${number} --comments\` to see prior conversation on this PR
-3. Address the request:
-   - If code changes are needed, make them and push to the current branch
-   - If it's a question, reply in-thread when possible
-4. For code feedback to the PR author, post inline suggestion comments (not top-level PR comments) using this flow:
+## Decide what is being asked
+Read the request above and choose ONE path:
+- **Full PR review** — the commenter is asking you to review or re-review the PR. Judge this from the meaning of their message, in any language or phrasing (e.g. "can you review it?", "review again", "take another look", "PTAL", "re-review please"). Follow **Full PR review** below.
+- **Targeted request** — anything else: a specific code change, a question, or feedback about a specific line. Follow **Targeted request** below, and do NOT post a verdict.
+
+When in doubt between the two, prefer the targeted request — only treat it as a full review when the comment is clearly asking you to review the PR.
+
+## Inline suggestions
+In either path, when you have concrete on-the-diff code feedback, post it as inline suggestion comments (never top-level), using this flow:
 
 ${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
-5. Do not post summary issue comments on the PR.
-${replyInstruction}
+## Targeted request
+1. Run \`gh pr diff ${number}\` for the current changes and \`gh pr view ${number} --comments\` for prior conversation, as needed.
+2. Address the request:
+   - If code changes are needed, make them and push to the current branch
+   - If it's a question, reply in-thread when possible${replyInstruction}
+3. Do not post summary or verdict issue comments on the PR.
+
+## Full PR review
+Only when the request is a (re-)review. Review the whole diff with the same rigor as an automated review — correctness and potential bugs, security, performance, maintainability, deletions that silently change behavior, cross-boundary drift (callers/siblings/other implementations not updated alongside the change), and silent behavior changes (same signature, different behavior). Post inline suggestions (above) for findings that clear the quality bar, then post the verdict:
+
+${buildVerdictWorkflow({ owner, repo, number, sessionUrl })}
 ${buildCustomInstructionsSection(commentActionInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
 }
