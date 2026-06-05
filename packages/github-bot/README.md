@@ -49,8 +49,10 @@ Key design decisions:
 - **Unidirectional service binding**: The bot calls the control plane to create sessions and send
   prompts. There is no reverse binding — the agent posts results to GitHub directly from the
   sandbox.
-- **No session reuse**: Every non-duplicate webhook delivery creates a fresh session. Delivery
-  dedupe is handled separately in KV using `X-GitHub-Delivery`.
+- **Fresh session by default, reuse on re-trigger**: A non-duplicate webhook normally creates a new
+  session (delivery dedupe via KV `X-GitHub-Delivery`). The exception is re-triggering a review —
+  the `ask-for-review` label and the web "Re-run review" button re-run in the PR's existing review
+  session (mapped in KV `review-session:<repo>:<pr>`).
 - **No PR context fetching**: The bot only uses metadata already in the webhook payload. The agent
   gathers additional context (diffs, prior comments, file contents) itself using `gh` CLI.
 
@@ -168,8 +170,10 @@ people to request the GitHub App bot through the PR reviewer picker.
 **Pull Request Labeled (re-review):**
 
 1. Check the added `label.name` is `ask-for-review` — skip otherwise
-2. Skip drafts; apply the usual repo-enablement, visibility, and caller gating
-3. Post eyes reaction, create session, send the code review prompt
+2. Skip drafts and closed/merged PRs; apply repo-enablement, visibility, the `autoReviewOnOpen`
+   setting, and caller gating
+3. Post eyes reaction; reuse the PR's existing review session from KV (`review-session:<repo>:<pr>`)
+   when present, else create one; send the code review prompt
 4. On completion, the bot removes the `ask-for-review` label (see `handleCompleteCallback`)
 
 **Issue Comment:**

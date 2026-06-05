@@ -668,6 +668,15 @@ export async function handleReviewRequested(
     return { outcome: "skipped", skip_reason: "review_not_for_bot" };
   }
 
+  if (pr.state !== "open") {
+    log.debug("handler.pr_not_open", {
+      trace_id: traceId,
+      pull_number: pr.number,
+      pr_state: pr.state,
+    });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
+  }
+
   const config = await getGitHubConfig(env, repoFullName, log);
 
   if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
@@ -678,15 +687,6 @@ export async function handleReviewRequested(
   if (config.privateReposOnly && !repo.private) {
     log.debug("handler.public_repo_skipped", { trace_id: traceId, repo: repoFullName });
     return { outcome: "skipped", skip_reason: "public_repo_skipped" };
-  }
-
-  if (pr.state !== "open") {
-    log.debug("handler.pr_not_open", {
-      trace_id: traceId,
-      pull_number: pr.number,
-      pr_state: pr.state,
-    });
-    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
   }
 
   // Reviews (including this requested-review trigger) are gated by the same

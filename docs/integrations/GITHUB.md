@@ -73,11 +73,13 @@ map:
 - **Worth a look** — the findings that survived the quality bar, each linking back to its inline
   comment (omitted when there are none).
 - **Docs** — any documentation that drifted from the change (omitted when there is none).
-- **Reviewed, no concerns** — the areas that were checked and had nothing notable.
+- **Reviewed, no concerns** — the areas that were checked and had nothing notable, in a collapsed
+  `<details>` block so it stays out of the way of the summary.
 
-The bot also sets a matching `low-risk` / `medium-risk` / `high-risk` label on the PR and links the
-originating Open-Inspect session in the verdict footer. See
-[Re-running a Review](#re-running-a-review) for how a re-review replaces the previous verdict.
+The bot also sets a matching `low-risk` / `medium-risk` / `high-risk` label on the PR — derived from
+the verdict header so it always matches the badge — and links the originating Open-Inspect session
+in the verdict footer. See [Re-running a Review](#re-running-a-review) for how a re-review replaces
+the previous verdict.
 
 ---
 

@@ -861,6 +861,23 @@ describe("handleReviewRequested", () => {
     expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
     expect(log.debug).toHaveBeenCalledWith("handler.repo_not_enabled", expect.anything());
   });
+
+  it("skips a closed/merged PR before fetching config", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: ReviewRequestedPayload = {
+      ...reviewRequestedPayload,
+      pull_request: { ...reviewRequestedPayload.pull_request, state: "closed" },
+    };
+
+    const result = await handleReviewRequested(env, log, payload, "trace-closed");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "pr_closed_or_merged" });
+    // State is checked before the config fetch, matching handlePullRequestOpened /
+    // handlePullRequestLabeled — a closed PR short-circuits without the round-trip.
+    expect(getGitHubConfig).not.toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
 });
 
 describe("handleIssueComment", () => {
