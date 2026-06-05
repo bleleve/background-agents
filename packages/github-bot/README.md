@@ -134,11 +134,6 @@ whereas an in-place edit would be silent.
   PR's existing review session (looked up in KV, `review-session:<repo>:<pr>`) when there is one. It
   removes the label again once the review completes, so re-adding it re-triggers. (No extra GitHub
   App config — the `labeled` action ships with the already-subscribed `Pull request` event.)
-- **Comment** — a PR comment that @mentions the bot and is a natural-language review request (e.g.
-  "@bot can you review it?", "@bot review again", "@bot please re-review") runs the **full review**,
-  identical to the auto-review (verdict + risk markers), rather than the generic comment-action. It
-  reuses the PR's existing review session when there is one. A comment that only mentions "review"
-  inside a larger instruction still goes to the comment-action path.
 - **Web UI** — the "Re-run review" button on a PR-review session calls the bot's internal
   `POST /internal/reviews` endpoint (HMAC-authenticated with `INTERNAL_CALLBACK_SECRET`) with the
   current session id, so the review re-runs in that session. Requires `GITHUB_BOT_URL` set on the
