@@ -158,13 +158,15 @@ function buildVerdictWorkflow(params: {
    EOF
    gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" -F body=@/tmp/pr-verdict.md --jq '.html_url'
 - Confirm the command printed the comment's \`html_url\`. If it printed nothing or errored, the verdict did NOT post — fix the call and retry until a URL comes back. Do not end the review without a posted verdict.
-- Set the PR's risk label to match the verdict — exactly one of \`low-risk\`, \`medium-risk\`, or \`high-risk\` — replacing any prior risk label so only the current one remains:
+- Set the PR's risk label to match the verdict, replacing any prior risk label so only the current one remains. **Derive the level mechanically from the header you just wrote — do not re-judge the risk here**, so the label can never drift from the badge in the verdict you posted:
 
+   RISK="$(grep -m1 'Reef Review' /tmp/pr-verdict.md | grep -oiE 'low|medium|high' | head -1 | tr 'A-Z' 'a-z')"
+   case "$RISK" in low|medium|high) ;; *) echo "could not parse risk from verdict header — skipping label"; RISK="" ;; esac
    gh label create low-risk    --repo ${owner}/${repo} --color 0E8A16 --description "Reef: low risk"    >/dev/null 2>&1 || true
    gh label create medium-risk --repo ${owner}/${repo} --color FBCA04 --description "Reef: medium risk" >/dev/null 2>&1 || true
    gh label create high-risk   --repo ${owner}/${repo} --color D93F0B --description "Reef: high risk"   >/dev/null 2>&1 || true
    gh pr edit ${number} --repo ${owner}/${repo} --remove-label low-risk --remove-label medium-risk --remove-label high-risk 2>/dev/null || true
-   gh pr edit ${number} --repo ${owner}/${repo} --add-label "<low|medium|high>-risk"
+   [ -n "$RISK" ] && gh pr edit ${number} --repo ${owner}/${repo} --add-label "$RISK-risk"
 - The verdict prioritizes; it does not reopen the door to speculative findings. Do not list anything here that did not survive the quality bar above.
 - **Final reply (mandatory, exact format).** Your last message this turn is what the user sees in the Reef UI, so it must be consistent every run — no preamble, no recap of steps, no restating the verdict body. Emit EXACTLY one line, nothing else:
 
