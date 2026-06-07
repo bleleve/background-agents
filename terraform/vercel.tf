@@ -33,7 +33,7 @@ data "external" "vercel_source_hash" {
 
 module "vercel_sandbox_infra" {
   count  = local.use_vercel_backend ? 1 : 0
-  source = "../../modules/vercel-sandbox-infra"
+  source = "./modules/vercel-sandbox-infra"
 
   token              = var.vercel_sandbox_token
   project_id         = var.vercel_sandbox_project_id
