@@ -95,7 +95,7 @@ built for internal use where all employees are trusted and have access to compan
                                  │
                                  ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│               Data Plane (Modal or Daytona)                        │
+│               Data Plane (Modal, Daytona, or Vercel)               │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │                     Session Sandbox                          │  │
 │  │  ┌───────────┐  ┌───────────┐  ┌───────────┐                 │  │
@@ -213,7 +213,7 @@ See **[docs/AUTOMATIONS.md](docs/AUTOMATIONS.md)** for setup instructions.
 
 ### Sandbox Environment
 
-Every session runs in an isolated Modal sandbox with a full development environment:
+Every session runs in an isolated sandbox backend with a full development environment:
 
 - **Pre-installed:** Node.js 22, Python 3.12, Bun, git, GitHub CLI, build-essential
 - **Browser automation:** agent-browser CLI with headless Chromium for screenshots, visual diffs,
@@ -274,6 +274,8 @@ Inspired by [Ramp's Inspect](https://builders.ramp.com/post/why-we-built-our-bac
 built with:
 
 - [Modal](https://modal.com) - Cloud sandbox infrastructure
+- [Daytona](https://www.daytona.io) - Cloud development sandboxes
+- [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) - Cloud sandbox infrastructure
 - [Cloudflare Workers](https://workers.cloudflare.com) - Edge computing
 - [OpenCode](https://opencode.ai) - Coding agent runtime
 - [Next.js](https://nextjs.org) - Web framework
