@@ -1207,7 +1207,7 @@ describe("SandboxLifecycleManager", () => {
       const sandbox = createMockSandbox({
         status: "ready",
         last_heartbeat: now - 10000,
-        last_activity: now - 11 * 60 * 1000,
+        last_activity: now - 16 * 60 * 1000, // 16 minutes ago, past 15 min timeout
       });
       const storage = createMockStorage(createMockSession(), sandbox);
       const wsManager = createMockWebSocketManager(false, 0);
@@ -1250,7 +1250,7 @@ describe("SandboxLifecycleManager", () => {
       const sandbox = createMockSandbox({
         status: "ready",
         last_heartbeat: now - 10000,
-        last_activity: now - 11 * 60 * 1000,
+        last_activity: now - 16 * 60 * 1000, // 16 minutes ago, past 15 min timeout
         code_server_url: "https://code.test",
         code_server_password: "encrypted-password",
       });
