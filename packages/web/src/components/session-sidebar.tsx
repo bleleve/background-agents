@@ -15,7 +15,7 @@ import { useSession, signOut } from "next-auth/react";
 import useSWR, { mutate } from "swr";
 import { ArchiveSessionDialog } from "@/components/archive-session-dialog";
 import { archiveSession } from "@/lib/archive-session";
-import { formatRelativeTime, isInactiveSession } from "@/lib/time";
+import { formatRelativeTime, INACTIVE_SESSION_DAYS, isInactiveSession } from "@/lib/time";
 import {
   applyTitleUpdate,
   buildSessionsPageKey,
@@ -450,12 +450,12 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
               />
             ))}
 
-            {/* Inactive Divider */}
+            {/* "Older" divider — sessions idle for INACTIVE_SESSION_DAYS+ days */}
             {inactiveSessions.length > 0 && (
               <>
                 <div className="px-4 py-2 mt-2">
                   <span className="text-xs font-medium text-secondary-foreground uppercase tracking-wider">
-                    Inactive
+                    Older ({INACTIVE_SESSION_DAYS}+ days)
                   </span>
                 </div>
                 {inactiveSessions.map((session) => (
