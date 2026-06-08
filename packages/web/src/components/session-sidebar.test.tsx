@@ -457,4 +457,116 @@ describe("SessionSidebar", () => {
 
     expect(screen.getByRole("link", { name: /session 1/i })).toBeInTheDocument();
   });
+
+  it("shows a status dot colored by session lifecycle status", async () => {
+    renderSessionSidebar({
+      fallback: {
+        [SIDEBAR_SESSIONS_KEY]: {
+          sessions: [
+            createSession(1, { title: "Active one", status: "active" }),
+            createSession(2, { title: "Done one", status: "completed" }),
+            createSession(3, { title: "Broken one", status: "failed" }),
+          ],
+          hasMore: false,
+        },
+      },
+    });
+
+    expect(await screen.findByText("Active one")).toBeInTheDocument();
+    expect(screen.getByLabelText("Active")).toHaveClass("bg-info");
+    expect(screen.getByLabelText("Completed")).toHaveClass("bg-success");
+    expect(screen.getByLabelText("Failed")).toHaveClass("bg-destructive");
+  });
+
+  it("pulses the dot for active sessions only", async () => {
+    renderSessionSidebar({
+      fallback: {
+        [SIDEBAR_SESSIONS_KEY]: {
+          sessions: [
+            createSession(1, { title: "Live one", status: "active" }),
+            createSession(2, { title: "Done one", status: "completed" }),
+          ],
+          hasMore: false,
+        },
+      },
+    });
+
+    expect(await screen.findByText("Live one")).toBeInTheDocument();
+    expect(screen.getByLabelText("Active")).toHaveClass("animate-pulse");
+    expect(screen.getByLabelText("Completed")).not.toHaveClass("animate-pulse");
+  });
+
+  it("reflects sandbox health on the dot for active sessions", async () => {
+    renderSessionSidebar({
+      fallback: {
+        [SIDEBAR_SESSIONS_KEY]: {
+          sessions: [
+            createSession(1, {
+              title: "Failed sandbox",
+              status: "active",
+              sandboxStatus: "failed",
+            }),
+            createSession(2, { title: "Ready sandbox", status: "active", sandboxStatus: "ready" }),
+            createSession(3, {
+              title: "Warming sandbox",
+              status: "active",
+              sandboxStatus: "warming",
+            }),
+          ],
+          hasMore: false,
+        },
+      },
+    });
+
+    expect(await screen.findByText("Failed sandbox")).toBeInTheDocument();
+    // Failed is a settled problem: red and steady (no pulse).
+    expect(screen.getByLabelText("Sandbox failed")).toHaveClass("bg-destructive");
+    expect(screen.getByLabelText("Sandbox failed")).not.toHaveClass("animate-pulse");
+    // Healthy and coming-up are "live": they pulse. Healthy is blue (green is for completed).
+    expect(screen.getByLabelText("Ready")).toHaveClass("bg-info");
+    expect(screen.getByLabelText("Ready")).toHaveClass("animate-pulse");
+    expect(screen.getByLabelText("Warming")).toHaveClass("bg-warning");
+    expect(screen.getByLabelText("Warming")).toHaveClass("animate-pulse");
+    // An active session with a dead sandbox must not read as "Active".
+    expect(screen.queryByLabelText("Active")).not.toBeInTheDocument();
+  });
+
+  it("keeps the lifecycle status on the dot for terminal sessions", async () => {
+    renderSessionSidebar({
+      fallback: {
+        [SIDEBAR_SESSIONS_KEY]: {
+          sessions: [
+            createSession(1, { title: "Done", status: "completed", sandboxStatus: "failed" }),
+          ],
+          hasMore: false,
+        },
+      },
+    });
+
+    expect(await screen.findByText("Done")).toBeInTheDocument();
+    // Terminal status wins over the (now irrelevant) sandbox state.
+    expect(screen.getByLabelText("Completed")).toHaveClass("bg-success");
+    expect(screen.queryByLabelText("Sandbox failed")).not.toBeInTheDocument();
+  });
+
+  it("renders sub-task status dots as hollow rings", async () => {
+    const parent = createSession(1, { title: "Parent done", status: "completed", updatedAt: 4000 });
+    const child = createSession(2, {
+      title: "Child task",
+      status: "active",
+      parentSessionId: parent.id,
+      spawnSource: "agent",
+      spawnDepth: 1,
+      updatedAt: 3000,
+    });
+
+    renderSessionSidebar({
+      fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: [parent, child], hasMore: false } },
+    });
+
+    expect(await screen.findByText("Child task")).toBeInTheDocument();
+    const childDot = screen.getByLabelText("Active");
+    expect(childDot).toHaveClass("border-info");
+    expect(childDot).not.toHaveClass("bg-info");
+  });
 });

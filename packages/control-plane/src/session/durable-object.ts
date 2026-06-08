@@ -1692,6 +1692,23 @@ export class SessionDO extends DurableObject<Env> {
     );
   }
 
+  private syncSandboxStatusIndex(sandboxStatus: SandboxStatus): void {
+    if (!this.env.DB) return;
+    const session = this.getSession();
+    if (!session) return;
+    const sessionId = this.getPublicSessionId(session);
+    const sessionStore = new SessionIndexStore(this.env.DB);
+    this.ctx.waitUntil(
+      sessionStore.updateSandboxStatus(sessionId, sandboxStatus).catch((error) => {
+        this.log.error("session_index.update_sandbox_status.background_error", {
+          session_id: sessionId,
+          sandbox_status: sandboxStatus,
+          error,
+        });
+      })
+    );
+  }
+
   private syncSessionMetrics(sessionId: string): void {
     if (!this.env.DB) return;
 
@@ -1905,6 +1922,7 @@ export class SessionDO extends DurableObject<Env> {
       baseBranch: session?.base_branch ?? "main",
       branchName: session?.branch_name ?? null,
       status: session?.status ?? "created",
+      spawnSource: session?.spawn_source,
       sandboxStatus: sandbox?.status ?? "pending",
       messageCount,
       createdAt: session?.created_at ?? Date.now(),
@@ -2116,6 +2134,7 @@ export class SessionDO extends DurableObject<Env> {
 
   private updateSandboxStatus(status: string): void {
     this.repository.updateSandboxStatus(status as SandboxStatus);
+    this.syncSandboxStatusIndex(status as SandboxStatus);
   }
 
   // HTTP handlers

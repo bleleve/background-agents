@@ -88,6 +88,13 @@ export interface Session {
   currentSha: string | null;
   opencodeSessionId: string | null;
   status: SessionStatus;
+  /**
+   * Last known sandbox lifecycle status, mirrored onto the session index from
+   * the Durable Object. Null when unknown (rows predating the column, or a
+   * sandbox that never reported). Lets list views show sandbox health without a
+   * per-session WebSocket.
+   */
+  sandboxStatus?: SandboxStatus | null;
   parentSessionId: string | null;
   spawnSource: SpawnSource;
   spawnDepth: number;
@@ -426,6 +433,8 @@ export interface SessionState {
   branchName: string | null;
   status: SessionStatus;
   sandboxStatus: SandboxStatus;
+  /** How the session was created (github-bot, linear-bot, automation, …). */
+  spawnSource?: SpawnSource;
   messageCount: number;
   createdAt: number;
   model?: string;
