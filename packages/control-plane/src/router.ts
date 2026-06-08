@@ -61,6 +61,8 @@ const PUBLIC_ROUTES: RegExp[] = [
   /^\/health$/,
   /^\/webhooks\/sentry\/[^/]+$/,
   /^\/webhooks\/automation\/[^/]+$/,
+  /^\/repo-images\/build-complete$/,
+  /^\/repo-images\/build-failed$/,
 ];
 
 /**

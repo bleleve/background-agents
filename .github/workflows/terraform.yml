@@ -296,6 +296,13 @@ jobs:
           TF_VAR_cf_access_client_secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           TF_VAR_cf_access_token_url: ${{ vars.CF_ACCESS_TOKEN_URL }}
           TF_VAR_reef_alias_enabled: "${{ needs.resolve-target.outputs.deploy_environment == 'production' && 'true' || 'false' }}"
+          TF_VAR_vercel_sandbox_token: ${{ secrets.VERCEL_SANDBOX_TOKEN }}
+          TF_VAR_vercel_sandbox_project_id: ${{ secrets.VERCEL_SANDBOX_PROJECT_ID }}
+          TF_VAR_vercel_sandbox_team_id: ${{ secrets.VERCEL_SANDBOX_TEAM_ID }}
+          TF_VAR_vercel_sandbox_api_base_url: ${{ secrets.VERCEL_SANDBOX_API_BASE_URL }}
+          TF_VAR_vercel_base_snapshot_id: ${{ secrets.VERCEL_BASE_SNAPSHOT_ID }}
+          TF_VAR_vercel_sandbox_runtime: "${{ secrets.VERCEL_SANDBOX_RUNTIME || 'node24' }}"
+          TF_VAR_vercel_snapshot_expiration_ms: "${{ secrets.VERCEL_SNAPSHOT_EXPIRATION_MS || '0' }}"
 
       - name: Post Plan Results
         uses: actions/github-script@v8
@@ -441,6 +448,15 @@ jobs:
           TF_VAR_cf_access_client_secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           TF_VAR_cf_access_token_url: ${{ vars.CF_ACCESS_TOKEN_URL }}
           TF_VAR_reef_alias_enabled: "${{ needs.resolve-target.outputs.deploy_environment == 'production' && 'true' || 'false' }}"
+          TF_VAR_vercel_sandbox_token: ${{ secrets.VERCEL_SANDBOX_TOKEN }}
+          TF_VAR_vercel_sandbox_project_id: ${{ secrets.VERCEL_SANDBOX_PROJECT_ID }}
+          TF_VAR_vercel_sandbox_team_id: ${{ secrets.VERCEL_SANDBOX_TEAM_ID }}
+          TF_VAR_vercel_sandbox_api_base_url: ${{ secrets.VERCEL_SANDBOX_API_BASE_URL }}
+          TF_VAR_vercel_base_snapshot_id: ${{ secrets.VERCEL_BASE_SNAPSHOT_ID }}
+          TF_VAR_vercel_sandbox_runtime: "${{ secrets.VERCEL_SANDBOX_RUNTIME || 'node24' }}"
+          TF_VAR_vercel_snapshot_expiration_ms: "${{ secrets.VERCEL_SNAPSHOT_EXPIRATION_MS || '0' }}"
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
 
       - name: Post Apply Results
         if: always()
