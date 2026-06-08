@@ -89,7 +89,8 @@ The existing GitHub App needs these additions:
 
 **Permissions**: `Pull requests: Read & write`, `Issues: Read & write`
 
-**Event subscriptions**: `Pull request`, `Issue comment`, `Pull request review comment`
+**Event subscriptions**: `Pull request`, `Issue comment`, `Pull request review comment`,
+`Pull request review thread`
 
 **Webhook URL**: `https://open-inspect-github-bot-{suffix}.{account}.workers.dev/webhooks/github`
 
@@ -112,13 +113,14 @@ access model and can authenticate auxiliary private repos on the configured SCM 
 
 ## Webhook Events
 
-| Event                         | Action             | Trigger                      | Handler                    |
-| ----------------------------- | ------------------ | ---------------------------- | -------------------------- |
-| `pull_request`                | `opened`           | Non-draft PR opened          | `handlePullRequestOpened`  |
-| `pull_request`                | `review_requested` | Compatibility event path     | `handleReviewRequested`    |
-| `pull_request`                | `labeled`          | `ask-for-review` label added | `handlePullRequestLabeled` |
-| `issue_comment`               | `created`          | @mention in a PR comment     | `handleIssueComment`       |
-| `pull_request_review_comment` | `created`          | @mention in a review thread  | `handleReviewComment`      |
+| Event                         | Action             | Trigger                      | Handler                      |
+| ----------------------------- | ------------------ | ---------------------------- | ---------------------------- |
+| `pull_request`                | `opened`           | Non-draft PR opened          | `handlePullRequestOpened`    |
+| `pull_request`                | `review_requested` | Compatibility event path     | `handleReviewRequested`      |
+| `pull_request`                | `labeled`          | `ask-for-review` label added | `handlePullRequestLabeled`   |
+| `issue_comment`               | `created`          | @mention in a PR comment     | `handleIssueComment`         |
+| `pull_request_review_comment` | `created`          | @mention in a review thread  | `handleReviewComment`        |
+| `pull_request_review_thread`  | `resolved`         | Review thread resolved       | `handleReviewThreadResolved` |
 
 All events are processed asynchronously via `executionCtx.waitUntil()`. The webhook endpoint returns
 200 immediately after signature verification and delivery dedupe.
