@@ -329,6 +329,10 @@ class SandboxManager:
         boots that clear can race with — and delete — this initial write.  A
         second write ~5 s later lands well within the supervisor's 30-second
         wait window and survives the clear.
+
+        Both write attempts are awaited inline to prevent the second attempt
+        from running after the caller's event loop starts shutting down, which
+        would cause a "can't create new thread at interpreter shutdown" error.
         """
         lines = [f"TUNNEL_{port}={url}" for port, url in sorted(tunnel_urls.items())]
         content = "\n".join(lines) + "\n"
@@ -356,12 +360,9 @@ class SandboxManager:
                     attempt=attempt,
                 )
 
-        async def _write_with_retry() -> None:
-            await _write_once(1)
-            await asyncio.sleep(5)
-            await _write_once(2)
-
-        asyncio.create_task(_write_with_retry())
+        await _write_once(1)
+        await asyncio.sleep(5)
+        await _write_once(2)
 
     @staticmethod
     def _inject_vcs_env_vars(

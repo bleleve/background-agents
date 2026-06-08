@@ -62,7 +62,6 @@ ignore = [
     "ARG002", # unused method argument (common in handlers)
     "PTH110", # os.path.exists - keep for simplicity
     "PTH123", # open() - keep for simplicity
-    "RUF006", # asyncio.create_task return value - intentional fire-and-forget
     "B904",   # raise from - keep for simpler error handling
     "SIM102", # nested if statements - keep for readability
 ]
