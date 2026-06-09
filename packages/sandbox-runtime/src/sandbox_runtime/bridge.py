@@ -564,6 +564,7 @@ class AgentBridge:
                                 "type": "execution_complete",
                                 "messageId": mid,
                                 "success": False,
+                                "cancelled": True,
                                 "error": "Task was cancelled",
                             }
                         )

@@ -282,11 +282,13 @@ class TestHandleStop:
         # inner asyncio.create_task to run
         await asyncio.sleep(0.1)
 
-        # Verify execution_complete was sent with success=False
+        # Verify execution_complete was sent with success=False and the cancelled
+        # flag set, so the session flow renders it as a neutral stop, not a failure.
         exec_complete = [e for e in sent_events if e.get("type") == "execution_complete"]
         assert len(exec_complete) == 1
         assert exec_complete[0]["messageId"] == "msg-cancel-test"
         assert exec_complete[0]["success"] is False
+        assert exec_complete[0]["cancelled"] is True
 
 
 if __name__ == "__main__":

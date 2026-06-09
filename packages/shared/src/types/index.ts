@@ -301,6 +301,8 @@ export type SandboxEvent =
       type: "execution_complete";
       messageId: string;
       success: boolean;
+      // true = deliberate stop/cancel (vs failure). Drives the neutral render in the session flow.
+      cancelled?: boolean;
       error?: string;
       sandboxId: string;
       timestamp: number;
