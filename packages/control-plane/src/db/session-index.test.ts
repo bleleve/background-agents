@@ -378,6 +378,7 @@ describe("SessionIndexStore", () => {
         // Defaults applied for missing optional fields
         prNumber: null,
         sandboxStatus: null,
+        isProcessing: false,
         parentSessionId: null,
         spawnSource: "user",
         spawnDepth: 0,

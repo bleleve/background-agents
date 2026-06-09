@@ -95,6 +95,8 @@ export interface Session {
    * per-session WebSocket.
    */
   sandboxStatus?: SandboxStatus | null;
+  /** Whether the agent is actively processing a turn ("Thinking…"); list-only mirror. */
+  isProcessing?: boolean;
   parentSessionId: string | null;
   spawnSource: SpawnSource;
   spawnDepth: number;

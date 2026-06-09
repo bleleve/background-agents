@@ -1649,6 +1649,12 @@ export class SessionDO extends DurableObject<Env> {
    * Broadcast message to all authenticated clients.
    */
   private broadcast(message: ServerMessage): void {
+    // Mirror "agent is actively working" to the D1 index so the session list can
+    // show a "Working" dot without its own WebSocket. Every processing_status
+    // transition (dispatch, completion, stop, fail) funnels through here.
+    if (message.type === "processing_status") {
+      this.syncIsProcessingIndex(message.isProcessing);
+    }
     this.wsManager.forEachClientSocket("authenticated_only", (ws) => {
       this.wsManager.send(ws, message);
     });
@@ -1703,6 +1709,23 @@ export class SessionDO extends DurableObject<Env> {
         this.log.error("session_index.update_sandbox_status.background_error", {
           session_id: sessionId,
           sandbox_status: sandboxStatus,
+          error,
+        });
+      })
+    );
+  }
+
+  private syncIsProcessingIndex(isProcessing: boolean): void {
+    if (!this.env.DB) return;
+    const session = this.getSession();
+    if (!session) return;
+    const sessionId = this.getPublicSessionId(session);
+    const sessionStore = new SessionIndexStore(this.env.DB);
+    this.ctx.waitUntil(
+      sessionStore.updateIsProcessing(sessionId, isProcessing).catch((error) => {
+        this.log.error("session_index.update_is_processing.background_error", {
+          session_id: sessionId,
+          is_processing: isProcessing,
           error,
         });
       })

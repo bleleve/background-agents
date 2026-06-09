@@ -698,6 +698,11 @@ function dotAppearance(session: SessionItem): {
   if (TERMINAL_STATUSES.has(session.status)) {
     return { ...lifecycleMeta(session.status), pulse: false };
   }
+  // Actively working ("Thinking…") wins over sandbox state: a session mid-turn is
+  // live whether its sandbox reads ready, stopped, or anything else.
+  if (session.isProcessing) {
+    return { fill: "bg-accent", ring: "border-accent", label: "Working", pulse: true };
+  }
   // Active/created with a known sandbox: color + pulse come from the sandbox.
   const sandbox = session.sandboxStatus;
   if (sandbox && SANDBOX_DOT[sandbox]) return SANDBOX_DOT[sandbox];

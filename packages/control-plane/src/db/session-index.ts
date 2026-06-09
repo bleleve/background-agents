@@ -11,6 +11,7 @@ export interface SessionEntry {
   baseBranch: string | null;
   status: SessionStatus;
   sandboxStatus?: SandboxStatus | null;
+  isProcessing?: boolean;
   parentSessionId?: string | null;
   spawnSource?: SpawnSource;
   spawnDepth?: number;
@@ -37,6 +38,7 @@ interface SessionRow {
   base_branch: string | null;
   status: SessionStatus;
   sandbox_status: string | null;
+  is_processing: number;
   parent_session_id: string | null;
   spawn_source: SpawnSource;
   spawn_depth: number;
@@ -80,6 +82,7 @@ function toEntry(row: SessionRow): SessionEntry {
     baseBranch: row.base_branch,
     status: row.status,
     sandboxStatus: (row.sandbox_status as SandboxStatus | null) ?? null,
+    isProcessing: row.is_processing === 1,
     parentSessionId: row.parent_session_id,
     spawnSource: row.spawn_source,
     spawnDepth: row.spawn_depth,
@@ -260,6 +263,18 @@ export class SessionIndexStore {
     await this.db
       .prepare("UPDATE sessions SET sandbox_status = ? WHERE id = ?")
       .bind(sandboxStatus, id)
+      .run();
+  }
+
+  /**
+   * Mirror whether the agent is actively processing a turn onto the session row.
+   * Like updateSandboxStatus, leaves updated_at untouched (a processing toggle
+   * must not reorder the list). Best-effort, last-write-wins.
+   */
+  async updateIsProcessing(id: string, isProcessing: boolean): Promise<void> {
+    await this.db
+      .prepare("UPDATE sessions SET is_processing = ? WHERE id = ?")
+      .bind(isProcessing ? 1 : 0, id)
       .run();
   }
 
