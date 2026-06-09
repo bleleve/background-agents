@@ -1788,6 +1788,15 @@ const EventItem = memo(function EventItem({
       );
 
     case "execution_complete":
+      if (event.success === false && event.cancelled) {
+        return (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="w-2 h-2 rounded-full bg-muted-foreground" />
+            Execution stopped
+            <span className="text-xs text-secondary-foreground">{time}</span>
+          </div>
+        );
+      }
       if (event.success === false) {
         return (
           <div className="flex items-center gap-2 text-sm text-destructive">

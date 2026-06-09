@@ -569,4 +569,47 @@ describe("SessionSidebar", () => {
     expect(childDot).toHaveClass("border-info");
     expect(childDot).not.toHaveClass("bg-info");
   });
+
+  it("shows a pulsing 'Working' dot while the agent is processing, over sandbox state", async () => {
+    renderSessionSidebar({
+      fallback: {
+        [SIDEBAR_SESSIONS_KEY]: {
+          sessions: [
+            createSession(1, {
+              title: "Working, sandbox stopped",
+              status: "active",
+              sandboxStatus: "stopped",
+              isProcessing: true,
+            }),
+            createSession(2, {
+              title: "Working, sandbox ready",
+              status: "active",
+              sandboxStatus: "ready",
+              isProcessing: true,
+            }),
+            createSession(3, {
+              title: "Completed, stale flag",
+              status: "completed",
+              isProcessing: true,
+            }),
+          ],
+          hasMore: false,
+        },
+      },
+    });
+
+    expect(await screen.findByText("Working, sandbox stopped")).toBeInTheDocument();
+    // Processing wins over the sandbox state for both stopped and ready.
+    const working = screen.getAllByLabelText("Working");
+    expect(working).toHaveLength(2);
+    working.forEach((dot) => {
+      expect(dot).toHaveClass("bg-accent");
+      expect(dot).toHaveClass("animate-pulse");
+    });
+    expect(screen.queryByLabelText("Stopped")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Ready")).not.toBeInTheDocument();
+    // A terminal session is never "Working", even with a lingering processing flag.
+    expect(screen.getByLabelText("Completed")).toHaveClass("bg-success");
+    expect(screen.getByLabelText("Completed")).not.toHaveClass("animate-pulse");
+  });
 });

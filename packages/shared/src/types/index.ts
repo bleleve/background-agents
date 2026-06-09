@@ -95,6 +95,8 @@ export interface Session {
    * per-session WebSocket.
    */
   sandboxStatus?: SandboxStatus | null;
+  /** Whether the agent is actively processing a turn ("Thinking…"); list-only mirror. */
+  isProcessing?: boolean;
   parentSessionId: string | null;
   spawnSource: SpawnSource;
   spawnDepth: number;
@@ -299,6 +301,8 @@ export type SandboxEvent =
       type: "execution_complete";
       messageId: string;
       success: boolean;
+      // true = deliberate stop/cancel (vs failure). Drives the neutral render in the session flow.
+      cancelled?: boolean;
       error?: string;
       sandboxId: string;
       timestamp: number;
