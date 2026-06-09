@@ -26,8 +26,12 @@ export interface GitHubLabel {
  * once the review completes, so re-adding it re-triggers. The name is an action
  * (you "ask for review" by applying it), matched case-insensitively in
  * `handlePullRequestLabeled`.
+ *
+ * Namespaced under `reef:` to group with the verdict labels (`reef: low risk`,
+ * etc.). The pre-namespace name `ask-for-review` is converted to this one
+ * in-place by the label-migration step, so no legacy alias is needed here.
  */
-export const ASK_FOR_REVIEW_LABEL = "ask-for-review";
+export const ASK_FOR_REVIEW_LABEL = "reef: ask for review";
 
 /** Whether `name` is the re-review trigger label (case-insensitive). */
 export function isAskForReviewLabel(name: string): boolean {

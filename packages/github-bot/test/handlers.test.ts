@@ -1819,7 +1819,7 @@ describe("privateReposOnly", () => {
 
 const pullRequestLabeledPayload: PullRequestLabeledPayload = {
   action: "labeled",
-  label: { name: "ask-for-review" },
+  label: { name: "reef: ask for review" },
   pull_request: {
     number: 42,
     title: "Add caching",
@@ -1829,14 +1829,14 @@ const pullRequestLabeledPayload: PullRequestLabeledPayload = {
     base: { ref: "main" },
     state: "open",
     draft: false,
-    labels: [{ name: "ask-for-review" }],
+    labels: [{ name: "reef: ask for review" }],
   },
   repository: { owner: { login: "acme" }, name: "widgets", private: false },
   sender: { login: "bob", id: 1002, avatar_url: "https://avatars.githubusercontent.com/u/1002" },
 };
 
 describe("handlePullRequestLabeled", () => {
-  it("re-runs a full code review when the ask-for-review label is added", async () => {
+  it("re-runs a full code review when the reef: ask for review label is added", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
 
@@ -1882,7 +1882,7 @@ describe("handlePullRequestLabeled", () => {
     expect(promptBody.content).toContain("Do not submit a pull request review.");
   });
 
-  it("skips when the added label is not ask-for-review", async () => {
+  it("skips when the added label is not reef: ask for review", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
     const payload: PullRequestLabeledPayload = {
