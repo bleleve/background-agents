@@ -122,10 +122,10 @@ function buildVerdictWorkflow(params: {
 
 - Structure the body as a scannable risk map — a titled header, then a Summary that counts what you found, then the detail sections. Keep it tight; signal over ceremony:
    - **Header:** a level-2 heading with a risk badge: \`## <🟢|🟡|🔴> Reef Review — <Low|Medium|High> risk\`. Badge: 🟢 low · 🟡 medium · 🔴 high.
-   - **\`### Summary\`** — a one-sentence verdict as a blockquote (\`> …\`), then a count line: \`**<N> finding(s)**\` with a per-risk parenthetical (e.g. \`(1 medium, 1 high)\`) when there are findings, then \` · <M> areas reviewed, no concerns.\`. When nothing survived, write \`**No findings.**\` instead of a count.
-   - **\`### Worth a look\`** — only if findings survived the quality bar, highest-risk first. One bullet per finding: \`<🟡|🔴> \`path:line\` — <the concrete risk in a few words> → [inline](<html_url of the inline comment you posted in step 6>)\`. Omit this whole section when nothing survived.
+   - **\`### Summary\`** — a one-sentence verdict as a blockquote (\`> …\`), then a count line: \`**<N> finding(s)**\` with a per-severity parenthetical (e.g. \`(1 low, 2 medium, 1 high)\`) when there are findings, then \` · <M> areas reviewed, no concerns.\`. When nothing survived, write \`**No findings.**\` instead of a count.
+   - **\`### Worth a look\`** — only if findings survived the quality bar, highest-risk first. One bullet per finding: \`<🟢|🟡|🔴> \`path:line\` — <the concrete risk in a few words> → [inline](<html_url of the inline comment you posted in step 6>)\`. The dot is the finding's **own severity**, on the same scale as the header badge: 🟢 low · 🟡 medium · 🔴 high — so a 🟢-risk PR can still carry a 🟢 finding here. Omit this whole section when nothing survived.
    - **\`### Docs\`** — only if the pr-doc-sentinel returned findings, one bullet each: \`📝 \`path\` — <what diverged>\`. Omit this section entirely when there is no doc drift.
-   - **Reviewed, no concerns** — collapsed by default so it doesn't bury the summary. Unlike the sections above, this one has **no \`###\` heading**: the \`<summary>\` line is its title, so do NOT also write a \`### Reviewed, no concerns\` line before the block — that renders the title twice. Use a \`<details>\` block (keep the blank line after \`</summary>\` so the body renders): \`<summary>Reviewed, no concerns</summary>\` followed by one terse line naming the areas/files you checked that had nothing notable.
+   - **Reviewed, no concerns** — collapsed by default so it doesn't bury the summary. Unlike the sections above, this one has **no \`###\` heading**: the \`<summary>\` line is its title, so do NOT also write a \`### Reviewed, no concerns\` line before the block — that renders the title twice. Use a \`<details>\` block (keep the blank line after \`</summary>\` so the body renders): \`<summary>Reviewed, no concerns</summary>\` followed by a **bullet list, one bullet per area** you checked: \`- **<area>** — <what you verified>\`. Keep each note to a **single short clause** — no nested parentheticals, no chained sub-points; if a note needs more than one clause it probably belongs in "Worth a look" instead. Do NOT collapse the areas into one comma-joined paragraph.
    - Footer line, exactly: \`${footer}\`.
    - Do not invent findings to justify a verdict. A clean PR is just the 🟢 header + the \`### Summary\` (with \`**No findings.**\`) + the collapsed "Reviewed, no concerns" \`<details>\` + the footer (no "Worth a look" section).
 - Delete any prior verdict comment(s), then post the new verdict as a fresh comment, printing the comment URL so you can confirm it landed:
@@ -140,10 +140,10 @@ function buildVerdictWorkflow(params: {
    ### Summary
    > <one-sentence verdict>
 
-   **<N> finding(s)** (<X medium, Y high>) · <M> areas reviewed, no concerns.
+   **<N> finding(s)** (<X low, Y medium, Z high>) · <M> areas reviewed, no concerns.
 
    ### Worth a look
-   - <🟡|🔴> \`<path:line>\` — <concrete risk> → [inline](<inline comment html_url>)
+   - <🟢|🟡|🔴> \`<path:line>\` — <concrete risk> → [inline](<inline comment html_url>)
 
    ### Docs
    - 📝 \`<path>\` — <what diverged>
@@ -151,7 +151,8 @@ function buildVerdictWorkflow(params: {
    <details>
    <summary>Reviewed, no concerns</summary>
 
-   <comma-separated areas>
+   - **<area>** — <single short clause on what you verified>
+   - **<area>** — <…>
    </details>
 
    ${footer}
