@@ -26,7 +26,7 @@ export const VALID_MODELS = [
   "opencode/kimi-k2.5",
   "opencode/minimax-m2.5",
   "opencode/glm-5",
-  "@cf/moonshotai/kimi-k2.6",
+  "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.6",
 ] as const;
 
 export type ValidModel = (typeof VALID_MODELS)[number];
@@ -245,7 +245,11 @@ export const MODEL_OPTIONS: ModelCategory[] = [
   {
     category: "Cloudflare",
     models: [
-      { id: "@cf/moonshotai/kimi-k2.6", name: "Kimi K2.6", description: "Cloudflare Workers AI" },
+      {
+        id: "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.6",
+        name: "Kimi K2.6",
+        description: "Cloudflare Workers AI",
+      },
     ],
   },
 ];
