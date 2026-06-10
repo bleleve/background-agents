@@ -390,7 +390,6 @@ export class AutomationStore {
       const touchAt = fields.started_at ?? fields.completed_at!;
       await this.touchLastRunAtForRun(id, touchAt);
     }
-    }
   }
 
   private async touchLastRunAtForRun(runId: string, at: number): Promise<void> {
