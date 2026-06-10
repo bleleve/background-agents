@@ -51,8 +51,8 @@ Key design decisions:
   sandbox.
 - **Fresh session by default, reuse on re-trigger**: A non-duplicate webhook normally creates a new
   session (delivery dedupe via KV `X-GitHub-Delivery`). The exception is re-triggering a review —
-  the `ask-for-review` label and the web "Re-run review" button re-run in the PR's existing review
-  session (mapped in KV `review-session:<repo>:<pr>`).
+  the `reef: ask for review` label and the web "Re-run review" button re-run in the PR's existing
+  review session (mapped in KV `review-session:<repo>:<pr>`).
 - **No PR context fetching**: The bot only uses metadata already in the webhook payload. The agent
   gathers additional context (diffs, prior comments, file contents) itself using `gh` CLI.
 
@@ -117,7 +117,7 @@ access model and can authenticate auxiliary private repos on the configured SCM 
 | ----------------------------- | ------------------ | ---------------------------- | ---------------------------- |
 | `pull_request`                | `opened`           | Non-draft PR opened          | `handlePullRequestOpened`    |
 | `pull_request`                | `review_requested` | Compatibility event path     | `handleReviewRequested`      |
-| `pull_request`                | `labeled`          | `ask-for-review` label added | `handlePullRequestLabeled`   |
+| `pull_request`                | `labeled`          | `reef: ask for review` added | `handlePullRequestLabeled`   |
 | `issue_comment`               | `created`          | @mention in a PR comment     | `handleIssueComment`         |
 | `pull_request_review_comment` | `created`          | @mention in a review thread  | `handleReviewComment`        |
 | `pull_request_review_thread`  | `resolved`         | Review thread resolved       | `handleReviewThreadResolved` |
@@ -127,11 +127,11 @@ All events are processed asynchronously via `executionCtx.waitUntil()`. The webh
 
 ### Re-triggering a review
 
-**Gating:** every review trigger — the auto-review on open, a requested review, the `ask-for-review`
-label, and the web "Re-run review" button — is gated by the repo's auto-review setting
-(`autoReviewOnOpen`). When it's off, none of them run. The bot also does nothing on a **closed or
-merged PR**: all handlers skip when `state !== "open"`, so no review or comment action posts after a
-PR is merged.
+**Gating:** every review trigger — the auto-review on open, a requested review, the
+`reef: ask for review` label, and the web "Re-run review" button — is gated by the repo's
+auto-review setting (`autoReviewOnOpen`). When it's off, none of them run. The bot also does nothing
+on a **closed or merged PR**: all handlers skip when `state !== "open"`, so no review or comment
+action posts after a PR is merged.
 
 A completed review can be re-run two ways, both reusing the same review machinery. A re-trigger
 **re-runs in the PR's existing review session** (a fresh turn) rather than spawning a new one, so
@@ -140,10 +140,10 @@ PR head first. On a re-review the agent finds the prior verdict by its `<!-- ree
 marker, **deletes it, and posts a fresh verdict comment** — a new comment notifies subscribers,
 whereas an in-place edit would be silent.
 
-- **`ask-for-review` label** — add the label to a PR to re-run the full review. The bot reuses the
-  PR's existing review session (looked up in KV, `review-session:<repo>:<pr>`) when there is one. It
-  removes the label again once the review completes, so re-adding it re-triggers. (No extra GitHub
-  App config — the `labeled` action ships with the already-subscribed `Pull request` event.)
+- **`reef: ask for review` label** — add the label to a PR to re-run the full review. The bot reuses
+  the PR's existing review session (looked up in KV, `review-session:<repo>:<pr>`) when there is
+  one. It removes the label again once the review completes, so re-adding it re-triggers. (No extra
+  GitHub App config — the `labeled` action ships with the already-subscribed `Pull request` event.)
 - **Web UI** — the "Re-run review" button on a PR-review session calls the bot's internal
   `POST /internal/reviews` endpoint (HMAC-authenticated with `INTERNAL_CALLBACK_SECRET`) with the
   current session id, so the review re-runs in that session. Requires `GITHUB_BOT_URL` set on the
@@ -173,12 +173,12 @@ people to request the GitHub App bot through the PR reviewer picker.
 
 **Pull Request Labeled (re-review):**
 
-1. Check the added `label.name` is `ask-for-review` — skip otherwise
+1. Check the added `label.name` is `reef: ask for review` — skip otherwise
 2. Skip drafts and closed/merged PRs; apply repo-enablement, visibility, the `autoReviewOnOpen`
    setting, and caller gating
 3. Post eyes reaction; reuse the PR's existing review session from KV (`review-session:<repo>:<pr>`)
    when present, else create one; send the code review prompt
-4. On completion, the bot removes the `ask-for-review` label (see `handleCompleteCallback`)
+4. On completion, the bot removes the `reef: ask for review` label (see `handleCompleteCallback`)
 
 **Issue Comment:**
 
@@ -229,9 +229,9 @@ Three prompt templates in `src/prompts.ts`:
 - Use `gh pr view ... --json headRefOid` for `commit_id`, temp markdown files for body, and
   `side=RIGHT`
 - Post a single editable risk-map **verdict** comment (anchored by a hidden marker), set the
-  matching `low-risk`/`medium-risk`/`high-risk` label on the PR, and link the originating session in
-  the footer (built from `sessionUrl`, the only extra param the handler passes beyond webhook
-  metadata)
+  matching `reef: low risk`/`reef: medium risk`/`reef: high risk` label on the PR, and link the
+  originating session in the footer (built from `sessionUrl`, the only extra param the handler
+  passes beyond webhook metadata)
 
 **`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and
 instructions to:
