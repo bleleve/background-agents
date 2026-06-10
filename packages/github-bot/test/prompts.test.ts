@@ -182,8 +182,8 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain(REEF_VERDICT_MARKER);
     // Visual-QA-style structure: titled header + rule + Summary with a finding count, then
     // the detail sections (Worth a look / Docs / Reviewed) and the footer.
-    expect(prompt).toContain("## <🟢|🟡|🔴> Reef Review — <Low|Medium|High> risk");
-    expect(prompt).toContain("🟢 low");
+    expect(prompt).toContain("## <🔵|🟡|🔴> Reef Review — <Low|Medium|High> risk");
+    expect(prompt).toContain("🔵 low · 🟡 medium · 🔴 high");
     expect(prompt).toContain("### Summary");
     expect(prompt).toContain("finding(s)");
     expect(prompt).toContain("### Worth a look");
@@ -192,6 +192,8 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("<summary>Reviewed, no concerns</summary>");
     expect(prompt).toContain("no `###` heading");
     expect(prompt).toContain("Reef automated review");
+    // The footer carries an explicit humility caveat — Reef is automated and never certifies.
+    expect(prompt).toContain("not exhaustive, may miss issues");
     // The final UI reply is standardized to one line with a link to the verdict.
     expect(prompt).toContain("Final reply (mandatory, exact format)");
     expect(prompt).toContain("[View verdict]");
@@ -206,17 +208,19 @@ describe("buildCodeReviewPrompt", () => {
 
   it("sets a risk label derived from the verdict header, replacing any prior one", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
-    expect(prompt).toContain("gh label create low-risk");
-    expect(prompt).toContain("gh label create medium-risk");
-    expect(prompt).toContain("gh label create high-risk");
+    // Labels are namespaced under `reef:` and created with --force so an existing one is recolored.
+    expect(prompt).toContain('gh label create "reef: low risk"');
+    expect(prompt).toContain('gh label create "reef: medium risk"');
+    expect(prompt).toContain('gh label create "reef: high risk"');
+    expect(prompt).toContain("--force");
     // Removes all three then adds the matching one, so only the current risk remains
     expect(prompt).toContain(
-      "--remove-label low-risk --remove-label medium-risk --remove-label high-risk"
+      '--remove-label "reef: low risk" --remove-label "reef: medium risk" --remove-label "reef: high risk"'
     );
     // The label must be parsed mechanically from the verdict header (single source
     // of truth) rather than re-judged — otherwise the badge and the label can drift.
     expect(prompt).toContain("grep -m1 'Reef Review' /tmp/pr-verdict.md");
-    expect(prompt).toContain('--add-label "$RISK-risk"');
+    expect(prompt).toContain('--add-label "$LABEL"');
     expect(prompt).toContain("do not re-judge the risk here");
     // The old free-choice placeholder must be gone — it let the label diverge from the badge.
     expect(prompt).not.toContain('--add-label "<low|medium|high>-risk"');
@@ -228,11 +232,13 @@ describe("buildCodeReviewPrompt", () => {
       sessionUrl: "https://reef.example.com/session/sess-123",
     });
     expect(withUrl).toContain(
-      "🤖 Reef automated review · [session](https://reef.example.com/session/sess-123)"
+      "🤖 Reef automated review — not exhaustive, may miss issues · [session](https://reef.example.com/session/sess-123)"
     );
 
     const withoutUrl = buildCodeReviewPrompt(baseParams);
-    expect(withoutUrl).toContain("🤖 Reef automated review</sub>");
+    expect(withoutUrl).toContain(
+      "🤖 Reef automated review — not exhaustive, may miss issues</sub>"
+    );
     expect(withoutUrl).not.toContain("[session](");
   });
 

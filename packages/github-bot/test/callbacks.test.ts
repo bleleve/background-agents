@@ -138,7 +138,7 @@ describe("handleCompleteCallback — verdict guarantee", () => {
     expect(log.info).toHaveBeenCalledWith("verdict.repaired", expect.any(Object));
   });
 
-  it("clears the ask-for-review label so re-adding it re-triggers", async () => {
+  it("clears the reef: ask for review label so re-adding it re-triggers", async () => {
     vi.mocked(findIssueCommentByMarker).mockResolvedValue(null);
     vi.mocked(createIssueComment).mockResolvedValue(1);
 
