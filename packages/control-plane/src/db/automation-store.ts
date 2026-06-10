@@ -386,8 +386,10 @@ export class AutomationStore {
       .bind(...params)
       .run();
 
-    if (fields.started_at != null) {
-      await this.touchLastRunAtForRun(id, fields.started_at);
+    if (fields.started_at != null || fields.completed_at != null) {
+      const touchAt = fields.started_at ?? fields.completed_at!;
+      await this.touchLastRunAtForRun(id, touchAt);
+    }
     }
   }
 
