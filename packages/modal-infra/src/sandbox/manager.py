@@ -44,6 +44,29 @@ MAX_TUNNEL_PORTS = 10
 DOCKER_EXPERIMENTAL_OPTIONS = {"enable_docker": True}
 
 
+def _resource_kwargs(settings: dict[str, Any] | None) -> dict:
+    """Map sandbox settings to Modal resource kwargs.
+
+    `cpuCores` -> Modal `cpu` (cores, fractional allowed), `memoryMib` -> Modal
+    `memory` (MiB). The control plane owns normalization; this only maps
+    already-normalized settings into provider-specific argument names.
+    """
+    if not settings:
+        return {}
+
+    kwargs: dict = {}
+
+    cpu_cores = settings.get("cpuCores")
+    if cpu_cores is not None:
+        kwargs["cpu"] = float(cpu_cores)
+
+    memory_mib = settings.get("memoryMib")
+    if memory_mib is not None:
+        kwargs["memory"] = memory_mib
+
+    return kwargs
+
+
 @dataclass
 class SandboxConfig:
     """Configuration for creating a sandbox."""
@@ -522,6 +545,7 @@ class SandboxManager:
             "env": env_vars,
             # Enable Docker-in-Sandboxes support per Modal docs.
             "experimental_options": DOCKER_EXPERIMENTAL_OPTIONS,
+            **_resource_kwargs(config.settings),
         }
         if exposed_ports:
             create_kwargs["encrypted_ports"] = exposed_ports
@@ -882,6 +906,7 @@ class SandboxManager:
             "env": env_vars,
             # Enable Docker-in-Sandboxes support per Modal docs.
             "experimental_options": DOCKER_EXPERIMENTAL_OPTIONS,
+            **_resource_kwargs(settings),
         }
         if exposed_ports:
             create_kwargs["encrypted_ports"] = exposed_ports
