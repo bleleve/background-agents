@@ -26,6 +26,7 @@ export const VALID_MODELS = [
   "opencode/kimi-k2.5",
   "opencode/minimax-m2.5",
   "opencode/glm-5",
+  "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.6",
 ] as const;
 
 export type ValidModel = (typeof VALID_MODELS)[number];
@@ -239,6 +240,16 @@ export const MODEL_OPTIONS: ModelCategory[] = [
       { id: "opencode/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
       { id: "opencode/minimax-m2.5", name: "MiniMax M2.5", description: "MiniMax" },
       { id: "opencode/glm-5", name: "GLM 5", description: "Z.ai 744B MoE" },
+    ],
+  },
+  {
+    category: "Cloudflare",
+    models: [
+      {
+        id: "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.6",
+        name: "Kimi K2.6",
+        description: "Cloudflare Workers AI",
+      },
     ],
   },
 ];
