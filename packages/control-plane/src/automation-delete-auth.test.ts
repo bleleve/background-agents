@@ -10,9 +10,9 @@ import type { Env } from "./types";
 const mockGetIdentity = vi.fn();
 
 vi.mock("./db/user-store", () => ({
-  UserStore: vi.fn().mockImplementation(() => ({
-    getIdentity: mockGetIdentity,
-  })),
+  UserStore: vi.fn().mockImplementation(function () {
+    return { getIdentity: mockGetIdentity };
+  }),
 }));
 
 function makeAutomation(overrides: Partial<AutomationRow> = {}): AutomationRow {
