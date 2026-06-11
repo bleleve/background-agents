@@ -1,4 +1,4 @@
-import type { SessionStatus, SpawnSource } from "@open-inspect/shared";
+import type { SandboxStatus, SessionStatus, SpawnSource } from "@open-inspect/shared";
 
 export interface SessionEntry {
   id: string;
@@ -10,6 +10,8 @@ export interface SessionEntry {
   reasoningEffort: string | null;
   baseBranch: string | null;
   status: SessionStatus;
+  sandboxStatus?: SandboxStatus | null;
+  isProcessing?: boolean;
   parentSessionId?: string | null;
   spawnSource?: SpawnSource;
   spawnDepth?: number;
@@ -35,6 +37,8 @@ interface SessionRow {
   reasoning_effort: string | null;
   base_branch: string | null;
   status: SessionStatus;
+  sandbox_status: string | null;
+  is_processing: number;
   parent_session_id: string | null;
   spawn_source: SpawnSource;
   spawn_depth: number;
@@ -77,6 +81,8 @@ function toEntry(row: SessionRow): SessionEntry {
     reasoningEffort: row.reasoning_effort,
     baseBranch: row.base_branch,
     status: row.status,
+    sandboxStatus: (row.sandbox_status as SandboxStatus | null) ?? null,
+    isProcessing: row.is_processing === 1,
     parentSessionId: row.parent_session_id,
     spawnSource: row.spawn_source,
     spawnDepth: row.spawn_depth,
@@ -245,6 +251,31 @@ export class SessionIndexStore {
       .run();
 
     return (result.meta?.changes ?? 0) > 0;
+  }
+
+  /**
+   * Mirror the sandbox's current lifecycle status onto the session row. Unlike
+   * status/title this leaves updated_at untouched — a sandbox warming or
+   * stopping must not reorder the session list. Best-effort, last-write-wins
+   * (the owning Durable Object is single-threaded per session).
+   */
+  async updateSandboxStatus(id: string, sandboxStatus: SandboxStatus): Promise<void> {
+    await this.db
+      .prepare("UPDATE sessions SET sandbox_status = ? WHERE id = ?")
+      .bind(sandboxStatus, id)
+      .run();
+  }
+
+  /**
+   * Mirror whether the agent is actively processing a turn onto the session row.
+   * Like updateSandboxStatus, leaves updated_at untouched (a processing toggle
+   * must not reorder the list). Best-effort, last-write-wins.
+   */
+  async updateIsProcessing(id: string, isProcessing: boolean): Promise<void> {
+    await this.db
+      .prepare("UPDATE sessions SET is_processing = ? WHERE id = ?")
+      .bind(isProcessing ? 1 : 0, id)
+      .run();
   }
 
   async updateMetrics(

@@ -225,6 +225,29 @@ class TestWriteTunnelEnvFile:
         assert mock_log.warn.call_count == 2
         assert mock_log.warn.call_args[0][0] == "tunnel.urls_write_failed"
 
+    @pytest.mark.asyncio
+    async def test_close_error_is_suppressed_and_does_not_mask_write_error(self):
+        """close() raising RuntimeError (e.g. at interpreter shutdown) is swallowed."""
+        sandbox, f = _mock_sandbox_with_open()
+        f.write.aio = AsyncMock(side_effect=Exception("write failed"))
+        f.close.aio = AsyncMock(
+            side_effect=RuntimeError("can't create new thread at interpreter shutdown")
+        )
+
+        with (
+            patch("src.sandbox.manager.log") as mock_log,
+            patch("src.sandbox.manager.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            # Should not raise despite both write and close failing.
+            await SandboxManager._write_tunnel_env_file(
+                sandbox, "sb-1", {3000: "https://tunnel-3000.example.com"}
+            )
+            await _drain_writes()
+
+        # The write failure is logged; the close RuntimeError is swallowed.
+        assert mock_log.warn.call_count == 2
+        assert mock_log.warn.call_args[0][0] == "tunnel.urls_write_failed"
+
 
 class TestResolveAndSetupTunnelsWritesFile:
     """Integration of _resolve_and_setup_tunnels with the env-file write."""
@@ -296,10 +319,12 @@ class TestResolveAndSetupTunnelsWritesFile:
                 return_value={3000: "https://tunnel-3000.example.com"},
             ),
             patch("src.sandbox.manager.log"),
+            patch("src.sandbox.manager.asyncio.sleep", new_callable=AsyncMock),
         ):
             _cs, _ttyd, extra = await SandboxManager._resolve_and_setup_tunnels(
                 sandbox, "sb-1", False, False, [3000]
             )
+            await _drain_writes()
 
         assert extra == {3000: "https://tunnel-3000.example.com"}
 

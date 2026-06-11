@@ -59,6 +59,7 @@ import {
   ErrorIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  RefreshIcon,
 } from "@/components/ui/icons";
 import { Combobox, type ComboboxGroup } from "@/components/ui/combobox";
 
@@ -585,7 +586,27 @@ function SessionContent({
   const baseResolvedTitle = sessionState?.title ?? fallbackSessionInfo.title ?? fallbackRepoLabel;
 
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [isRelaunching, setIsRelaunching] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
+
+  // A dead sandbox (stopped/failed/stale) can be brought back without sending a
+  // prompt. Hidden while a turn is processing or once the sandbox is live again;
+  // the resulting sandbox_status broadcasts drive the indicator from there.
+  const sandboxStatus = sessionState?.sandboxStatus;
+  const canRelaunchSandbox =
+    !isProcessing &&
+    (sandboxStatus === "stopped" || sandboxStatus === "failed" || sandboxStatus === "stale");
+
+  const handleRelaunchSandbox = useCallback(async () => {
+    setIsRelaunching(true);
+    try {
+      await fetch(`/api/sessions/${sessionId}/sandbox/relaunch`, { method: "POST" });
+    } catch (error) {
+      console.error("Failed to relaunch sandbox:", error);
+    } finally {
+      setIsRelaunching(false);
+    }
+  }, [sessionId]);
   const [title, setTitle] = useState(baseResolvedTitle);
   const [optimisticTitle, setOptimisticTitle] = useState<string | null>(null);
   const [sheetDragY, setSheetDragY] = useState(0);
@@ -1239,6 +1260,18 @@ function SessionContent({
                 {isProcessing && prompt.trim() && (
                   <span className="text-xs text-warning">Waiting...</span>
                 )}
+                {canRelaunchSandbox && (
+                  <button
+                    type="button"
+                    onClick={handleRelaunchSandbox}
+                    disabled={isRelaunching}
+                    className="p-2 text-warning hover:bg-warning-muted disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    title="Relaunch sandbox"
+                    aria-label="Relaunch sandbox"
+                  >
+                    <RefreshIcon className={`w-5 h-5${isRelaunching ? " animate-spin" : ""}`} />
+                  </button>
+                )}
                 {isProcessing && (
                   <button
                     type="button"
@@ -1788,6 +1821,15 @@ const EventItem = memo(function EventItem({
       );
 
     case "execution_complete":
+      if (event.success === false && event.cancelled) {
+        return (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="w-2 h-2 rounded-full bg-muted-foreground" />
+            Execution stopped
+            <span className="text-xs text-secondary-foreground">{time}</span>
+          </div>
+        );
+      }
       if (event.success === false) {
         return (
           <div className="flex items-center gap-2 text-sm text-destructive">

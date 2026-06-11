@@ -223,7 +223,7 @@ async function lookupPrSession(
 }
 
 // ─── PR → review-session mapping (KV) ────────────────────────────────────────
-// Records the latest review session for a PR so a re-trigger (the `ask-for-review`
+// Records the latest review session for a PR so a re-trigger (the `reef: ask for review`
 // label) re-runs in the existing session instead of spawning a new one. Separate
 // key from the plan-mode mapping above. The web "Re-run review" button passes the
 // session id directly and does not need this.
@@ -553,7 +553,7 @@ interface RunCodeReviewParams {
  * Shared core for every full code review: resolve the target session (reuse the
  * existing one on a re-trigger, else create), detect a large diff, build the
  * review prompt, and send it with the `pr_review` completion callback context.
- * Used by the auto-review-on-open, review-requested, `ask-for-review` label, and
+ * Used by the auto-review-on-open, review-requested, `reef: ask for review` label, and
  * web-triggered re-review paths so they stay in sync.
  */
 async function runCodeReview(
@@ -591,7 +591,7 @@ async function runCodeReview(
       prHeadRef: params.prHeadRef,
       prBaseRef: params.prBaseRef,
     });
-    // Remember it so a later re-trigger (the `ask-for-review` label) re-runs in
+    // Remember it so a later re-trigger (the `reef: ask for review` label) re-runs in
     // this session instead of spawning a new one.
     await rememberReviewSession(env, repoFullName, params.prNumber, sessionId);
     log.info("session.created", {
@@ -848,7 +848,7 @@ export async function handlePullRequestOpened(
 }
 
 /**
- * A label was added to a PR. When it's the `ask-for-review` trigger label,
+ * A label was added to a PR. When it's the `reef: ask for review` trigger label,
  * re-run the full code review. The label is removed again when the review
  * completes (see handleCompleteCallback), so re-adding it re-triggers.
  */

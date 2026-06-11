@@ -15,7 +15,9 @@ vi.mock("../db/model-preferences", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    ModelPreferencesStore: vi.fn().mockImplementation(() => mockStore),
+    ModelPreferencesStore: function () {
+      return mockStore;
+    },
   };
 });
 

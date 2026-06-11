@@ -128,4 +128,15 @@ describe("MetadataSection", () => {
     expect(screen.getByText("Plan")).toBeInTheDocument();
     expect(screen.getByText(/Claude Opus 4\.6/)).toBeInTheDocument();
   });
+
+  it("shows the session origin for bot-spawned sessions", () => {
+    render(<MetadataSection createdAt={Date.now()} baseBranch="main" spawnSource="github-bot" />);
+    expect(screen.getByText("GitHub")).toBeInTheDocument();
+  });
+
+  it("shows a Web origin for user-created sessions", () => {
+    render(<MetadataSection createdAt={Date.now()} baseBranch="main" spawnSource="user" />);
+    expect(screen.getByText("Web")).toBeInTheDocument();
+    expect(screen.queryByText("GitHub")).not.toBeInTheDocument();
+  });
 });

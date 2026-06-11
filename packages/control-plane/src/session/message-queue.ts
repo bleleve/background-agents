@@ -333,6 +333,7 @@ export class SessionMessageQueue {
         type: "execution_complete",
         messageId: processingMessage.id,
         success: false,
+        cancelled: true,
         error: stopError,
         sandboxId: "",
         timestamp: now / 1000,

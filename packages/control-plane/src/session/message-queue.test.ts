@@ -306,7 +306,7 @@ describe("SessionMessageQueue", () => {
     );
     expect(h.repository.upsertExecutionCompleteEvent).toHaveBeenCalledWith(
       "msg-9",
-      expect.objectContaining({ type: "execution_complete", success: false }),
+      expect.objectContaining({ type: "execution_complete", success: false, cancelled: true }),
       expect.any(Number)
     );
     expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });
@@ -335,6 +335,13 @@ describe("SessionMessageQueue", () => {
       "msg-timeout",
       false,
       "Execution interrupted: sandbox stopped due to inactivity"
+    );
+    // A timeout is a genuine failure, not a deliberate stop — it must NOT be
+    // flagged cancelled (the flow renders it red, not neutral).
+    expect(h.repository.upsertExecutionCompleteEvent).toHaveBeenCalledWith(
+      "msg-timeout",
+      expect.not.objectContaining({ cancelled: true }),
+      expect.any(Number)
     );
   });
 

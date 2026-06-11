@@ -15,7 +15,7 @@ import { useSession, signOut } from "next-auth/react";
 import useSWR, { mutate } from "swr";
 import { ArchiveSessionDialog } from "@/components/archive-session-dialog";
 import { archiveSession } from "@/lib/archive-session";
-import { formatRelativeTime, isInactiveSession } from "@/lib/time";
+import { formatRelativeTime, INACTIVE_SESSION_DAYS, isInactiveSession } from "@/lib/time";
 import {
   applyTitleUpdate,
   buildSessionsPageKey,
@@ -50,7 +50,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Session } from "@open-inspect/shared";
+import type { SandboxStatus, Session, SessionStatus } from "@open-inspect/shared";
 
 export type SessionItem = Session;
 
@@ -450,12 +450,12 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
               />
             ))}
 
-            {/* Inactive Divider */}
+            {/* "Older" divider — sessions idle for INACTIVE_SESSION_DAYS+ days */}
             {inactiveSessions.length > 0 && (
               <>
                 <div className="px-4 py-2 mt-2">
                   <span className="text-xs font-medium text-secondary-foreground uppercase tracking-wider">
-                    Inactive
+                    Older ({INACTIVE_SESSION_DAYS}+ days)
                   </span>
                 </div>
                 {inactiveSessions.map((session) => (
@@ -619,6 +619,113 @@ function ChildSessionTree({
       </Fragment>
     );
   });
+}
+
+const STATUS_DOT: Record<SessionStatus, { fill: string; ring: string; label: string }> = {
+  active: { fill: "bg-info", ring: "border-info", label: "Active" },
+  completed: { fill: "bg-success", ring: "border-success", label: "Completed" },
+  failed: { fill: "bg-destructive", ring: "border-destructive", label: "Failed" },
+  cancelled: { fill: "bg-muted-foreground", ring: "border-muted-foreground", label: "Cancelled" },
+  created: { fill: "bg-warning", ring: "border-warning", label: "Starting" },
+  archived: { fill: "bg-muted-foreground", ring: "border-muted-foreground", label: "Archived" },
+};
+
+// Sandbox lifecycle → dot color/label/pulse for non-terminal sessions. Pulse
+// marks "in motion" (healthy or coming up); failed/stopped are steady so they
+// never read as live. Healthy is blue — green is reserved for completed sessions.
+const SANDBOX_DOT: Record<
+  SandboxStatus,
+  { fill: string; ring: string; label: string; pulse: boolean }
+> = {
+  pending: { fill: "bg-warning", ring: "border-warning", label: "Pending", pulse: true },
+  spawning: { fill: "bg-warning", ring: "border-warning", label: "Starting", pulse: true },
+  connecting: { fill: "bg-warning", ring: "border-warning", label: "Connecting", pulse: true },
+  warming: { fill: "bg-warning", ring: "border-warning", label: "Warming", pulse: true },
+  syncing: { fill: "bg-warning", ring: "border-warning", label: "Syncing", pulse: true },
+  snapshotting: { fill: "bg-warning", ring: "border-warning", label: "Snapshotting", pulse: true },
+  ready: { fill: "bg-info", ring: "border-info", label: "Ready", pulse: true },
+  running: { fill: "bg-info", ring: "border-info", label: "Running", pulse: true },
+  stale: {
+    fill: "bg-muted-foreground",
+    ring: "border-muted-foreground",
+    label: "Stale",
+    pulse: false,
+  },
+  stopped: {
+    fill: "bg-muted-foreground",
+    ring: "border-muted-foreground",
+    label: "Stopped",
+    pulse: false,
+  },
+  failed: {
+    fill: "bg-destructive",
+    ring: "border-destructive",
+    label: "Sandbox failed",
+    pulse: false,
+  },
+};
+
+// Terminal sessions show their lifecycle status; the sandbox is gone or moot.
+const TERMINAL_STATUSES: ReadonlySet<SessionStatus> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "archived",
+]);
+
+function lifecycleMeta(status: SessionStatus): { fill: string; ring: string; label: string } {
+  return (
+    STATUS_DOT[status] ?? {
+      fill: "bg-muted-foreground",
+      ring: "border-muted-foreground",
+      label: status,
+    }
+  );
+}
+
+/**
+ * Color/label/pulse for a session's dot. "Pulse = live": terminal sessions and a
+ * failed/stopped sandbox are steady; an active session that is healthy, coming
+ * up, or of unknown sandbox state pulses. Color and motion never contradict.
+ */
+function dotAppearance(session: SessionItem): {
+  fill: string;
+  ring: string;
+  label: string;
+  pulse: boolean;
+} {
+  // Terminal: steady lifecycle color (the sandbox is gone or moot).
+  if (TERMINAL_STATUSES.has(session.status)) {
+    return { ...lifecycleMeta(session.status), pulse: false };
+  }
+  // Actively working ("Thinking…") wins over sandbox state: a session mid-turn is
+  // live whether its sandbox reads ready, stopped, or anything else.
+  if (session.isProcessing) {
+    return { fill: "bg-accent", ring: "border-accent", label: "Working", pulse: true };
+  }
+  // Active/created with a known sandbox: color + pulse come from the sandbox.
+  const sandbox = session.sandboxStatus;
+  if (sandbox && SANDBOX_DOT[sandbox]) return SANDBOX_DOT[sandbox];
+  // Unknown sandbox: a live session — lifecycle color, pulsing.
+  return { ...lifecycleMeta(session.status), pulse: true };
+}
+
+/**
+ * Status dot. Filled for top-level sessions; `hollow` (colored ring, empty
+ * center) marks sub-tasks.
+ */
+function SessionDot({ session, hollow = false }: { session: SessionItem; hollow?: boolean }) {
+  const meta = dotAppearance(session);
+  const shape = hollow ? `border-2 bg-transparent ${meta.ring}` : meta.fill;
+  const pulse = meta.pulse ? " animate-pulse" : "";
+  return (
+    <span
+      className={`h-2 w-2 shrink-0 rounded-full ${shape}${pulse}`}
+      role="img"
+      aria-label={meta.label}
+      title={meta.label}
+    />
+  );
 }
 
 function SessionListItem({
@@ -837,7 +944,12 @@ function SessionListItem({
             onTouchCancel={handleTouchEnd}
             className="block pr-8"
           >
-            <div className="truncate text-sm font-medium text-foreground">{displayTitle}</div>
+            <div className="flex items-center gap-1.5">
+              <SessionDot session={session} />
+              <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                {displayTitle}
+              </span>
+            </div>
             <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
               <span>{relativeTime}</span>
               <span>·</span>
@@ -935,8 +1047,9 @@ function ChildSessionListItem({
       style={{ paddingLeft: `${paddingLeftRem}rem` }}
     >
       <div className="flex items-center gap-1.5 text-xs">
+        <SessionDot session={session} hollow />
         <span className="shrink-0 text-muted-foreground">{relativeTime}</span>
-        <span className="truncate font-medium text-foreground">{displayTitle}</span>
+        <span className="min-w-0 truncate font-medium text-foreground">{displayTitle}</span>
       </div>
     </Link>
   );

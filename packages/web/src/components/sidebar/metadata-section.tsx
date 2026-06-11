@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { formatModelName, truncateBranch, copyToClipboard } from "@/lib/format";
 import { formatSessionCost } from "@/lib/session-cost";
@@ -8,7 +8,7 @@ import { formatRelativeTime, formatSessionDate } from "@/lib/time";
 import { getSafeExternalUrl } from "@/lib/urls";
 import { getScmBranchUrl, getScmRepoUrl } from "@/lib/scm";
 import type { Artifact } from "@/types/session";
-import type { PlanApprovalStatus } from "@open-inspect/shared";
+import type { PlanApprovalStatus, SpawnSource } from "@open-inspect/shared";
 import {
   ClockIcon,
   SparkleIcon,
@@ -19,6 +19,11 @@ import {
   CopyIcon,
   CheckIcon,
   LinkIcon,
+  GitHubIcon,
+  LinearIcon,
+  SlackIcon,
+  AutomationsIcon,
+  GlobeIcon,
 } from "@/components/ui/icons";
 import { Badge, prBadgeVariant } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -38,6 +43,47 @@ interface MetadataSectionProps {
   artifacts?: Artifact[];
   parentSessionId?: string | null;
   totalCost?: number;
+  spawnSource?: SpawnSource;
+}
+
+/** Where the session came from; null only for unrecognized sources. */
+function originRow(source: SpawnSource): ReactNode {
+  let icon: ReactNode;
+  let label: string;
+  switch (source) {
+    case "github-bot":
+      icon = <GitHubIcon className="w-4 h-4" />;
+      label = "GitHub";
+      break;
+    case "linear-bot":
+      icon = <LinearIcon className="w-4 h-4" />;
+      label = "Linear";
+      break;
+    case "slack-bot":
+      icon = <SlackIcon className="w-4 h-4" />;
+      label = "Slack";
+      break;
+    case "automation":
+      icon = <AutomationsIcon className="w-4 h-4" />;
+      label = "Automation";
+      break;
+    case "agent":
+      icon = <SparkleIcon className="w-4 h-4" />;
+      label = "Sub-task";
+      break;
+    case "user":
+      icon = <GlobeIcon className="w-4 h-4" />;
+      label = "Web";
+      break;
+    default:
+      return null;
+  }
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      {icon}
+      <span>{label}</span>
+    </div>
+  );
 }
 
 export function MetadataSection({
@@ -55,6 +101,7 @@ export function MetadataSection({
   artifacts = [],
   parentSessionId,
   totalCost,
+  spawnSource,
 }: MetadataSectionProps) {
   const [copied, setCopied] = useState(false);
 
@@ -89,6 +136,9 @@ export function MetadataSection({
           {formatSessionDate(createdAt)} · {formatRelativeTime(createdAt)}
         </span>
       </div>
+
+      {/* Origin (github-bot, linear-bot, automation, …) */}
+      {spawnSource && originRow(spawnSource)}
 
       {/* Parent session */}
       {parentSessionId && (

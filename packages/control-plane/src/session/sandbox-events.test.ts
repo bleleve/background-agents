@@ -5,6 +5,7 @@ import type { SandboxEvent, ServerMessage } from "../types";
 function createProcessor() {
   const repository = {
     updateSandboxHeartbeat: vi.fn(),
+    updateSandboxTunnelUrls: vi.fn(),
     getProcessingMessage: vi.fn(() => null as { id: string } | null),
     upsertTokenEvent: vi.fn(),
     createArtifact: vi.fn(),
@@ -90,6 +91,42 @@ describe("SessionSandboxEventProcessor", () => {
     await h.processor.processSandboxEvent(event);
 
     expect(h.repository.updateSandboxHeartbeat).toHaveBeenCalledWith(expect.any(Number));
+    expect(h.broadcast).not.toHaveBeenCalled();
+  });
+
+  it("restores and broadcasts tunnel URLs from a ready event", async () => {
+    const h = createProcessor();
+    const event: SandboxEvent = {
+      type: "ready",
+      sandboxId: "sb-1",
+      opencodeSessionId: "oc-1",
+      tunnelUrls: { "8990": "https://tunnel.example/8990" },
+      timestamp: 1000,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.repository.updateSandboxTunnelUrls).toHaveBeenCalledWith({
+      "8990": "https://tunnel.example/8990",
+    });
+    expect(h.broadcast).toHaveBeenCalledWith({
+      type: "tunnel_urls",
+      urls: { "8990": "https://tunnel.example/8990" },
+    });
+  });
+
+  it("ignores a ready event with no tunnel URLs", async () => {
+    const h = createProcessor();
+    const event: SandboxEvent = {
+      type: "ready",
+      sandboxId: "sb-1",
+      opencodeSessionId: "oc-1",
+      timestamp: 1000,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.repository.updateSandboxTunnelUrls).not.toHaveBeenCalled();
     expect(h.broadcast).not.toHaveBeenCalled();
   });
 

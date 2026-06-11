@@ -27,7 +27,9 @@ const mockStore = {
 };
 
 vi.mock("../db/automation-store", () => ({
-  AutomationStore: vi.fn().mockImplementation(() => mockStore),
+  AutomationStore: vi.fn().mockImplementation(function () {
+    return mockStore;
+  }),
   toAutomation: vi.fn((row: unknown) => row),
   toAutomationRun: vi.fn((row: unknown) => row),
 }));
@@ -37,7 +39,9 @@ const mockUserStore = {
   getIdentity: vi.fn(),
 };
 vi.mock("../db/user-store", () => ({
-  UserStore: vi.fn().mockImplementation(() => mockUserStore),
+  UserStore: vi.fn().mockImplementation(function () {
+    return mockUserStore;
+  }),
 }));
 
 vi.mock("../auth/crypto", () => ({

@@ -114,7 +114,7 @@ export async function handleCompleteCallback(
     userAgent,
   });
 
-  // Clear the `ask-for-review` trigger label (best-effort) so re-adding it
+  // Clear the `reef: ask for review` trigger label (best-effort) so re-adding it
   // re-triggers. Unconditional: a no-op (404) when the review wasn't
   // label-triggered, and it also clears a label left behind by a crashed run.
   removeIssueLabel(token, owner, repo, prNumber, ASK_FOR_REVIEW_LABEL, userAgent).then(

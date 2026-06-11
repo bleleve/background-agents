@@ -51,11 +51,14 @@ export function formatRelativeTime(timestamp: number): string {
   return "just now";
 }
 
+/** Sessions with no activity for this many days are grouped under "Older". */
+export const INACTIVE_SESSION_DAYS = 7;
+
 /**
- * Group sessions by activity status.
- * Sessions older than 7 days are considered "inactive".
+ * Group sessions by activity: those whose last activity is older than
+ * INACTIVE_SESSION_DAYS are inactive (shown under the "Older" divider).
  */
 export function isInactiveSession(updatedAt: number): boolean {
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  return updatedAt < sevenDaysAgo;
+  const cutoff = Date.now() - INACTIVE_SESSION_DAYS * 24 * 60 * 60 * 1000;
+  return updatedAt < cutoff;
 }
