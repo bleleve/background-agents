@@ -49,9 +49,11 @@ export interface UntrustedContentParams {
 /**
  * Wrap untrusted content in a `<user_content>` block with safety guardrails.
  *
- * The returned string ends with a paragraph telling the model to treat the
- * block as data only — do NOT chain a live user instruction immediately after
- * the warning without a clear separator.
+ * When `includeWarning` is `true` (the default), the returned string ends with
+ * a paragraph telling the model to treat the block as data only — do NOT chain
+ * a live user instruction immediately after the warning without a clear
+ * separator. With `includeWarning: false` only the wrapped `<user_content>`
+ * block is returned (for callers that supply a single consolidated warning).
  */
 export function buildUntrustedUserContentBlock(params: UntrustedContentParams): string {
   const { source, author, content, origin, extraGuidance, includeWarning = true } = params;
