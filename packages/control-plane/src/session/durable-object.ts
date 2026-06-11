@@ -208,6 +208,7 @@ export class SessionDO extends DurableObject<Env> {
     state: () => this.sessionLifecycleHandler.getState(),
     prompt: (request) => this.messagesHandler.enqueuePrompt(request),
     stop: () => this.messagesHandler.stop(),
+    relaunchSandbox: () => this.relaunchSandbox(),
     sandboxEvent: (request) => this.sandboxHandler.sandboxEvent(request),
     createMediaArtifact: (request) => this.sandboxHandler.createMediaArtifact(request),
     listParticipants: () => this.participantsHandler.listParticipants(),
@@ -1636,6 +1637,32 @@ export class SessionDO extends DurableObject<Env> {
   }
 
   /**
+   * User-triggered "Relaunch" of a dead sandbox. Only acts when the sandbox is
+   * in a recoverable terminal state (stopped/failed/stale); spawnSandbox() then
+   * resolves the right action (provider resume, snapshot restore, or fresh
+   * spawn) from the current state and broadcasts sandbox_status updates that the
+   * client watches. A no-op when the sandbox is already live.
+   */
+  private async relaunchSandbox(): Promise<Response> {
+    const session = this.getSession();
+    if (!session) {
+      return Response.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    const sandboxStatus = this.getSandbox()?.status;
+    const relaunchable: SandboxStatus[] = ["stopped", "failed", "stale"];
+    if (!sandboxStatus || !relaunchable.includes(sandboxStatus)) {
+      return Response.json({ status: "skipped", sandboxStatus: sandboxStatus ?? null });
+    }
+
+    await this.spawnSandbox();
+    return Response.json({
+      status: "relaunching",
+      sandboxStatus: this.getSandbox()?.status ?? null,
+    });
+  }
+
+  /**
    * Stop current execution.
    * Marks the processing message as failed, upserts synthetic execution_complete,
    * broadcasts synthetic execution_complete
@@ -1685,9 +1712,8 @@ export class SessionDO extends DurableObject<Env> {
     updatedAt: number
   ): void {
     if (!this.env.DB) return;
-    const sessionStore = new SessionIndexStore(this.env.DB);
     this.ctx.waitUntil(
-      sessionStore.updateStatus(sessionId, status, updatedAt).catch((error) => {
+      this.writeSessionIndexStatus(sessionId, status, updatedAt).catch((error) => {
         this.log.error("session_index.update_status.background_error", {
           session_id: sessionId,
           status,
@@ -1696,6 +1722,22 @@ export class SessionDO extends DurableObject<Env> {
         });
       })
     );
+  }
+
+  /**
+   * Awaited D1 index status write. Used for terminal transitions, where a
+   * dropped fire-and-forget write would leave the sidebar stale (e.g. a
+   * "completed" session shown as "failed"). The monotonic `updated_at` guard in
+   * SessionIndexStore.updateStatus keeps out-of-order writes from regressing.
+   */
+  private async writeSessionIndexStatus(
+    sessionId: string,
+    status: SessionStatus,
+    updatedAt: number
+  ): Promise<void> {
+    if (!this.env.DB) return;
+    const sessionStore = new SessionIndexStore(this.env.DB);
+    await sessionStore.updateStatus(sessionId, status, updatedAt);
   }
 
   private syncSandboxStatusIndex(sandboxStatus: SandboxStatus): void {
@@ -1791,7 +1833,23 @@ export class SessionDO extends DurableObject<Env> {
 
     const updatedAt = Math.max(Date.now(), session.updated_at + 1);
     this.repository.updateSessionStatus(session.id, status, updatedAt);
-    this.syncSessionIndexStatus(publicSessionId, status, updatedAt);
+
+    if (TERMINAL_STATUSES.includes(status)) {
+      // The sidebar reads status from D1; persist terminal transitions durably
+      // (awaited) so the write can't be dropped and leave the index stale.
+      try {
+        await this.writeSessionIndexStatus(publicSessionId, status, updatedAt);
+      } catch (error) {
+        this.log.error("session_index.update_status.terminal_error", {
+          session_id: publicSessionId,
+          status,
+          updated_at: updatedAt,
+          error,
+        });
+      }
+    } else {
+      this.syncSessionIndexStatus(publicSessionId, status, updatedAt);
+    }
 
     this.broadcast({ type: "session_status", status });
 
@@ -1910,6 +1968,20 @@ export class SessionDO extends DurableObject<Env> {
     sandbox ??= this.getSandbox();
     const messageCount = this.repository.getMessageCount();
     const isProcessing = this.getIsProcessing();
+
+    // Self-heal the D1 index from the authoritative DO status. A terminal-status
+    // index write can be dropped (fire-and-forget waitUntil), leaving the sidebar
+    // stale (e.g. a completed session shown as failed). Serving session state —
+    // e.g. when the detail page connects — re-mirrors it. Limited to terminal
+    // statuses, the only ones that can diverge and stick (live sessions keep
+    // getting fresh writes). The monotonic guard makes this a no-op when in sync.
+    if (session && TERMINAL_STATUSES.includes(session.status)) {
+      this.syncSessionIndexStatus(
+        this.getPublicSessionId(session),
+        session.status,
+        session.updated_at
+      );
+    }
 
     // Decrypt code-server password if stored encrypted
     let codeServerPassword: string | null = sandbox?.code_server_password ?? null;
