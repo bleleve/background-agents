@@ -196,6 +196,12 @@ export const sessionRuntimeProxyRoutes: Route[] = [
     runtimeMethod: "POST",
   }),
   simpleProxyRoute({
+    method: "POST",
+    routePath: "/sessions/:id/sandbox/relaunch",
+    internalPath: SessionInternalPaths.relaunchSandbox,
+    runtimeMethod: "POST",
+  }),
+  simpleProxyRoute({
     method: "GET",
     routePath: "/sessions/:id/events",
     internalPath: SessionInternalPaths.events,

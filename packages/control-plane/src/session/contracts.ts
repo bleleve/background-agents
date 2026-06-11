@@ -8,6 +8,7 @@ export const SessionInternalPaths = {
   state: "/internal/state",
   prompt: "/internal/prompt",
   stop: "/internal/stop",
+  relaunchSandbox: "/internal/relaunch-sandbox",
   sandboxEvent: "/internal/sandbox-event",
   createMediaArtifact: "/internal/create-media-artifact",
   participants: "/internal/participants",
