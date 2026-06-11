@@ -40,6 +40,11 @@ const LAST_SELECTED_MODEL_STORAGE_KEY = "open-inspect-last-selected-model";
 const LAST_SELECTED_MODEL_USER_PICKED_STORAGE_KEY = "open-inspect-last-selected-model-user-picked";
 const LAST_SELECTED_REASONING_EFFORT_STORAGE_KEY = "open-inspect-last-selected-reasoning-effort";
 
+// Warm a sandbox once the prompt shows real intent — strictly more than this
+// many non-whitespace characters — so it's ready by submit, without spinning
+// one up for a stray space or a couple of keystrokes.
+const WARMUP_MIN_TRIMMED_CHARS = 5;
+
 export default function Home() {
   const { data: session } = useSession();
   const router = useRouter();
@@ -55,6 +60,7 @@ export default function Home() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
   const sessionCreationPromise = useRef<Promise<string | null> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingConfigRef = useRef<{ repo: string; model: string; branch: string } | null>(null);
@@ -146,6 +152,7 @@ export default function Home() {
       abortControllerRef.current = null;
     }
     setPendingSessionId(null);
+    setIsCreatingSession(false);
     sessionCreationPromise.current = null;
     pendingConfigRef.current = null;
   }, [selectedRepo, selectedModel, selectedBranch]);
@@ -155,6 +162,7 @@ export default function Home() {
     if (sessionCreationPromise.current) return sessionCreationPromise.current;
     if (!selectedRepo) return null;
 
+    setIsCreatingSession(true);
     const [owner, name] = selectedRepo.split("/");
     const currentConfig = { repo: selectedRepo, model: selectedModel, branch: selectedBranch };
     pendingConfigRef.current = currentConfig;
@@ -199,6 +207,7 @@ export default function Home() {
         return null;
       } finally {
         if (abortControllerRef.current === abortController) {
+          setIsCreatingSession(false);
           sessionCreationPromise.current = null;
           abortControllerRef.current = null;
         }
@@ -217,6 +226,7 @@ export default function Home() {
       abortControllerRef.current = null;
     }
     setPendingSessionId(null);
+    setIsCreatingSession(false);
     sessionCreationPromise.current = null;
     pendingConfigRef.current = null;
   }, [planMode]);
@@ -285,10 +295,20 @@ export default function Home() {
     setReasoningEffort(getDefaultReasoningEffort(model));
   }, []);
 
-  // The session is created only when the user submits (Build/Plan), never while
-  // typing — see handleSubmit, which lazily creates the session on first send.
   const handlePromptChange = (value: string) => {
     setPrompt(value);
+    // Warm a sandbox once the input shows real intent (>WARMUP_MIN_TRIMMED_CHARS
+    // non-whitespace chars) so it's ready by submit — but not for a stray space
+    // or a couple of keystrokes. createSessionForWarming() is idempotent (guards
+    // on pendingSessionId / the in-flight promise), so later keystrokes are no-ops.
+    if (
+      value.trim().length > WARMUP_MIN_TRIMMED_CHARS &&
+      !pendingSessionId &&
+      !isCreatingSession &&
+      selectedRepo
+    ) {
+      createSessionForWarming();
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -358,6 +378,7 @@ export default function Home() {
       prompt={prompt}
       handlePromptChange={handlePromptChange}
       creating={creating}
+      isCreatingSession={isCreatingSession}
       error={error}
       handleSubmit={handleSubmit}
       modelOptions={enabledModelOptions}
@@ -384,6 +405,7 @@ function HomeContent({
   prompt,
   handlePromptChange,
   creating,
+  isCreatingSession,
   error,
   handleSubmit,
   modelOptions,
@@ -406,6 +428,7 @@ function HomeContent({
   prompt: string;
   handlePromptChange: (value: string) => void;
   creating: boolean;
+  isCreatingSession: boolean;
   error: string;
   handleSubmit: (e: React.FormEvent) => void;
   modelOptions: ModelCategory[];
@@ -478,6 +501,9 @@ function HomeContent({
                   />
                   {/* Submit button */}
                   <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                    {isCreatingSession && (
+                      <span className="text-xs text-accent">Warming sandbox...</span>
+                    )}
                     <button
                       type="submit"
                       disabled={!prompt.trim() || creating || !selectedRepo}
