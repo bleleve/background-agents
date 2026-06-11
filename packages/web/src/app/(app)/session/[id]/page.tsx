@@ -3,19 +3,21 @@
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import useSWR, { mutate } from "swr";
 import useSWRMutation from "swr/mutation";
-import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Suspense, useState, useRef, useEffect, useCallback, useMemo, useLayoutEffect, memo } from "react";
 import { useSessionSocket } from "@/hooks/use-session-socket";
-import { SessionTimeline } from "@/components/session-timeline";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { SessionHeader } from "@/components/session-header";
 import { SessionDetailsOverlay } from "@/components/session-details-overlay";
-import { SessionPromptComposer } from "@/components/session-prompt-composer";
+import { ToolCallGroup } from "@/components/tool-call-group";
+import { SafeMarkdown } from "@/components/safe-markdown";
+import { ScreenshotArtifactCard } from "@/components/screenshot-artifact-card";
 import { SessionRightSidebar } from "@/components/session-right-sidebar";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { ActionBar } from "@/components/action-bar";
 import { PlanApprovalBanner } from "@/components/plan-approval-banner";
 import { copyToClipboard, formatModelNameLower } from "@/lib/format";
+import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { archiveSession } from "@/lib/archive-session";
 import {
   isArchivedSessionListKey,
@@ -705,6 +707,7 @@ function SessionContent({
   // Scroll refs for the inline timeline
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef(false);
   const isPrependingRef = useRef(false);
   const prevScrollHeightRef = useRef(0);
