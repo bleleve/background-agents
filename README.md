@@ -144,7 +144,7 @@ Sessions start near-instantly through multiple layers of warming:
   instead of re-cloning
 - **Pre-built repo images** — Toggle per-repo in Settings; rebuilt every 30 minutes with latest
   commits and dependencies
-- **Proactive warming** — Sandbox begins spinning up as soon as you start typing, before you hit
+- **Proactive warming** — Sandbox begins spinning up while you type your prompt, before you hit
   Enter
 
 ### Multiplayer Sessions

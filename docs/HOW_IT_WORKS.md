@@ -244,7 +244,7 @@ If `start.sh` exists and fails, startup fails fast instead of continuing with a 
 
 To minimize perceived latency, sandboxes warm proactively:
 
-- When you start typing a prompt, the control plane begins warming a sandbox
+- Once you've typed a few characters of a prompt, the control plane begins warming a sandbox
 - By the time you hit enter, the sandbox may already be ready
 - If restore is fast enough, you won't notice any delay
 
