@@ -413,6 +413,10 @@ allowed_email_domains = ""                      # Comma-separated domains (e.g.,
 # Explicitly opt into open access only if you want any authenticated GitHub user
 # to be able to sign in when both allowlists are empty.
 unsafe_allow_all_users = false
+
+# Automation delete admins (optional): comma-separated GitHub usernames that can
+# soft-delete any automation. Creators can always delete their own automations.
+# automation_delete_admins = "alice,bob"
 ```
 
 > **Note**: Review `allowed_users` and `allowed_email_domains` carefully - these control who can
@@ -678,46 +682,47 @@ environment (or use repository-level secrets shared by both). Pull requests to `
 
 Go to your fork's Settings → Secrets and variables → Actions (or per-environment secrets), and add:
 
-| Secret Name                    | Value                                                                                       |
-| ------------------------------ | ------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`         | Your Cloudflare API token                                                                   |
-| `CLOUDFLARE_ACCOUNT_ID`        | Your Cloudflare account ID                                                                  |
-| `CLOUDFLARE_WORKER_SUBDOMAIN`  | Your workers.dev subdomain                                                                  |
-| `DEPLOYMENT_NAME`              | Your deployment name                                                                        |
-| `R2_ACCESS_KEY_ID`             | R2 access key ID                                                                            |
-| `R2_SECRET_ACCESS_KEY`         | R2 secret access key                                                                        |
-| `WEB_PLATFORM`                 | `vercel` or `cloudflare`                                                                    |
-| `VERCEL_API_TOKEN`             | Vercel API token _(only if `web_platform = "vercel"`)_                                      |
-| `VERCEL_TEAM_ID`               | Vercel team/account ID _(only if `web_platform = "vercel"`)_                                |
-| `VERCEL_PROJECT_ID`            | Vercel project ID _(only if `web_platform = "vercel"`)_                                     |
-| `NEXTAUTH_URL`                 | Your web app URL                                                                            |
-| `MODAL_TOKEN_ID`               | Modal token ID                                                                              |
-| `MODAL_TOKEN_SECRET`           | Modal token secret                                                                          |
-| `MODAL_WORKSPACE`              | Modal workspace name                                                                        |
-| `MODAL_ENVIRONMENT`            | Modal environment name (defaults to `main`)                                                 |
-| `MODAL_ENVIRONMENT_WEB_SUFFIX` | Modal environment web suffix for endpoint URLs; lowercase letters, digits, dashes, or empty |
-| `GH_OAUTH_CLIENT_ID`           | GitHub App OAuth client ID                                                                  |
-| `GH_OAUTH_CLIENT_SECRET`       | GitHub App OAuth client secret                                                              |
-| `GH_APP_ID`                    | GitHub App ID                                                                               |
-| `GH_APP_PRIVATE_KEY`           | GitHub App private key (PKCS#8 format)                                                      |
-| `GH_APP_INSTALLATION_ID`       | GitHub App installation ID                                                                  |
-| `ENABLE_SLACK_BOT`             | `true` to deploy Slack bot, `false` to skip (default: `true`)                               |
-| `SLACK_BOT_TOKEN`              | Slack bot token (required if enabled)                                                       |
-| `SLACK_SIGNING_SECRET`         | Slack signing secret (required if enabled)                                                  |
-| `ANTHROPIC_API_KEY`            | Anthropic API key                                                                           |
-| `TOKEN_ENCRYPTION_KEY`         | Generated encryption key (OAuth tokens)                                                     |
-| `REPO_SECRETS_ENCRYPTION_KEY`  | Generated encryption key (repo secrets)                                                     |
-| `INTERNAL_CALLBACK_SECRET`     | Generated callback secret                                                                   |
-| `MODAL_API_SECRET`             | Generated Modal API secret                                                                  |
-| `NEXTAUTH_SECRET`              | Generated NextAuth secret                                                                   |
-| `ALLOWED_USERS`                | Comma-separated GitHub usernames (or empty for all users)                                   |
-| `ALLOWED_EMAIL_DOMAINS`        | Comma-separated email domains (or empty for all domains)                                    |
-| `ENABLE_GITHUB_BOT`            | `true` to deploy GitHub bot worker (or empty to skip)                                       |
-| `GH_WEBHOOK_SECRET`            | GitHub webhook secret (required if GitHub bot enabled)                                      |
-| `GH_BOT_USERNAME`              | GitHub App bot username, e.g., `my-app[bot]` (required if GitHub bot enabled)               |
-| `APP_NAME`                     | Optional display name for whitelabeling (default: `Open-Inspect`)                           |
-| `APP_SHORT_NAME`               | Optional short label for sidebar header (default: `Inspect`)                                |
-| `APP_ICON_URL`                 | Optional URL to a custom logo/favicon (default: built-in icon)                              |
+| Secret Name                    | Value                                                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`         | Your Cloudflare API token                                                                                                       |
+| `CLOUDFLARE_ACCOUNT_ID`        | Your Cloudflare account ID                                                                                                      |
+| `CLOUDFLARE_WORKER_SUBDOMAIN`  | Your workers.dev subdomain                                                                                                      |
+| `DEPLOYMENT_NAME`              | Your deployment name                                                                                                            |
+| `R2_ACCESS_KEY_ID`             | R2 access key ID                                                                                                                |
+| `R2_SECRET_ACCESS_KEY`         | R2 secret access key                                                                                                            |
+| `WEB_PLATFORM`                 | `vercel` or `cloudflare`                                                                                                        |
+| `VERCEL_API_TOKEN`             | Vercel API token _(only if `web_platform = "vercel"`)_                                                                          |
+| `VERCEL_TEAM_ID`               | Vercel team/account ID _(only if `web_platform = "vercel"`)_                                                                    |
+| `VERCEL_PROJECT_ID`            | Vercel project ID _(only if `web_platform = "vercel"`)_                                                                         |
+| `NEXTAUTH_URL`                 | Your web app URL                                                                                                                |
+| `MODAL_TOKEN_ID`               | Modal token ID                                                                                                                  |
+| `MODAL_TOKEN_SECRET`           | Modal token secret                                                                                                              |
+| `MODAL_WORKSPACE`              | Modal workspace name                                                                                                            |
+| `MODAL_ENVIRONMENT`            | Modal environment name (defaults to `main`)                                                                                     |
+| `MODAL_ENVIRONMENT_WEB_SUFFIX` | Modal environment web suffix for endpoint URLs; lowercase letters, digits, dashes, or empty                                     |
+| `GH_OAUTH_CLIENT_ID`           | GitHub App OAuth client ID                                                                                                      |
+| `GH_OAUTH_CLIENT_SECRET`       | GitHub App OAuth client secret                                                                                                  |
+| `GH_APP_ID`                    | GitHub App ID                                                                                                                   |
+| `GH_APP_PRIVATE_KEY`           | GitHub App private key (PKCS#8 format)                                                                                          |
+| `GH_APP_INSTALLATION_ID`       | GitHub App installation ID                                                                                                      |
+| `ENABLE_SLACK_BOT`             | `true` to deploy Slack bot, `false` to skip (default: `true`)                                                                   |
+| `SLACK_BOT_TOKEN`              | Slack bot token (required if enabled)                                                                                           |
+| `SLACK_SIGNING_SECRET`         | Slack signing secret (required if enabled)                                                                                      |
+| `ANTHROPIC_API_KEY`            | Anthropic API key                                                                                                               |
+| `TOKEN_ENCRYPTION_KEY`         | Generated encryption key (OAuth tokens)                                                                                         |
+| `REPO_SECRETS_ENCRYPTION_KEY`  | Generated encryption key (repo secrets)                                                                                         |
+| `INTERNAL_CALLBACK_SECRET`     | Generated callback secret                                                                                                       |
+| `MODAL_API_SECRET`             | Generated Modal API secret                                                                                                      |
+| `NEXTAUTH_SECRET`              | Generated NextAuth secret                                                                                                       |
+| `ALLOWED_USERS`                | Comma-separated GitHub usernames (or empty for all users)                                                                       |
+| `ALLOWED_EMAIL_DOMAINS`        | Comma-separated email domains (or empty for all domains)                                                                        |
+| `AUTOMATION_DELETE_ADMINS`     | Comma-separated GitHub usernames allowed to delete any automation (optional, leave empty to restrict deletion to creators only) |
+| `ENABLE_GITHUB_BOT`            | `true` to deploy GitHub bot worker (or empty to skip)                                                                           |
+| `GH_WEBHOOK_SECRET`            | GitHub webhook secret (required if GitHub bot enabled)                                                                          |
+| `GH_BOT_USERNAME`              | GitHub App bot username, e.g., `my-app[bot]` (required if GitHub bot enabled)                                                   |
+| `APP_NAME`                     | Optional display name for whitelabeling (default: `Open-Inspect`)                                                               |
+| `APP_SHORT_NAME`               | Optional short label for sidebar header (default: `Inspect`)                                                                    |
+| `APP_ICON_URL`                 | Optional URL to a custom logo/favicon (default: built-in icon)                                                                  |
 
 **Bulk upload secrets with `gh` CLI:**
 

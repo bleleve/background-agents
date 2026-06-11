@@ -283,6 +283,10 @@ Optional variables:
   requests and push branches.
 - `GITLAB_NAMESPACE` - GitLab group namespace to scope repository listing (optional). When set,
   `GET /repos` lists projects within the group instead of all projects the token has access to.
+- `AUTOMATION_DELETE_ADMINS` - Comma-separated list of GitHub usernames (case-insensitive) that are
+  allowed to soft-delete any automation, regardless of ownership. Creators can always delete their
+  own automations; this variable grants that same capability to designated admin users. Leave empty
+  (default) to restrict deletion to creators only.
 
 See [terraform/terraform.tfvars.example](../../terraform/terraform.tfvars.example) for the complete
 list.
