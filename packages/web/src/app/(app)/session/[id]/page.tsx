@@ -191,26 +191,6 @@ function dedupeAndGroupEvents(
   return groupEvents(filteredEvents.filter((event): event is SandboxEvent => event !== null));
 }
 
-function resolveSessionDisplayInfo(
-  sessionState: SessionState,
-  fallbackSessionInfo: FallbackSessionInfo
-): {
-  repoLabel: string;
-  title: string;
-} {
-  const resolvedRepoOwner = sessionState?.repoOwner ?? fallbackSessionInfo.repoOwner;
-  const resolvedRepoName = sessionState?.repoName ?? fallbackSessionInfo.repoName;
-  const repoLabel =
-    resolvedRepoOwner && resolvedRepoName
-      ? `${resolvedRepoOwner}/${resolvedRepoName}`
-      : "Loading session...";
-
-  return {
-    repoLabel,
-    title: sessionState?.title || fallbackSessionInfo.title || repoLabel,
-  };
-}
-
 export default function SessionPage() {
   return (
     <Suspense>
@@ -351,7 +331,6 @@ function SessionPageContent() {
   // Set when the user explicitly picks a model on this page. Until then, the
   // Plan toggle auto-swaps between the session baseline and defaultPlanModel.
   const userPickedModelRef = useRef(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -1085,113 +1064,6 @@ function SessionContent({
   );
 }
 
-function ConnectionStatus({ connected, connecting }: { connected: boolean; connecting: boolean }) {
-  if (connecting) {
-    return (
-      <span className="flex items-center gap-1 text-xs text-warning">
-        <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
-        Connecting...
-      </span>
-    );
-  }
-
-  if (connected) {
-    return (
-      <span className="flex items-center gap-1 text-xs text-success">
-        <span className="w-2 h-2 rounded-full bg-success" />
-        Connected
-      </span>
-    );
-  }
-
-  return (
-    <span className="flex items-center gap-1 text-xs text-destructive">
-      <span className="w-2 h-2 rounded-full bg-destructive" />
-      Disconnected
-    </span>
-  );
-}
-
-function SandboxStatus({
-  status,
-  dashboardUrl,
-}: {
-  status?: string;
-  dashboardUrl?: string | null;
-}) {
-  if (!status) return null;
-
-  const colors: Record<string, string> = {
-    pending: "text-muted-foreground",
-    warming: "text-warning",
-    syncing: "text-accent",
-    ready: "text-success",
-    running: "text-accent",
-    stopped: "text-muted-foreground",
-    failed: "text-destructive",
-  };
-
-  const className = `text-xs ${colors[status] || colors.pending}`;
-  const label = `Sandbox: ${status}`;
-
-  if (dashboardUrl) {
-    return (
-      <a
-        href={dashboardUrl}
-        target="_blank"
-        rel="noreferrer noopener"
-        title="Open sandbox in provider dashboard"
-        className={`${className} hover:underline`}
-      >
-        {label}
-        <span aria-hidden="true" className="ml-0.5">
-          ↗
-        </span>
-      </a>
-    );
-  }
-
-  return <span className={className}>{label}</span>;
-}
-
-function CombinedStatusDot({
-  connected,
-  connecting,
-  sandboxStatus,
-}: {
-  connected: boolean;
-  connecting: boolean;
-  sandboxStatus?: string;
-}) {
-  let color: string;
-  let pulse = false;
-  let label: string;
-
-  if (!connected && !connecting) {
-    color = "bg-destructive";
-    label = "Disconnected";
-  } else if (connecting) {
-    color = "bg-warning";
-    pulse = true;
-    label = "Connecting...";
-  } else if (sandboxStatus === "failed") {
-    color = "bg-destructive";
-    label = `Connected \u00b7 Sandbox: ${sandboxStatus}`;
-  } else if (["pending", "warming", "syncing"].includes(sandboxStatus || "")) {
-    color = "bg-warning";
-    label = `Connected \u00b7 Sandbox: ${sandboxStatus}`;
-  } else {
-    color = "bg-success";
-    label = sandboxStatus ? `Connected \u00b7 Sandbox: ${sandboxStatus}` : "Connected";
-  }
-
-  return (
-    <span title={label} className="flex items-center">
-      <span className={`w-2.5 h-2.5 rounded-full ${color}${pulse ? " animate-pulse" : ""}`} />
-    </span>
-  );
-}
-
 function ThinkingIndicator() {
   return (
     <div className="bg-card p-4 flex items-center gap-2">
@@ -1313,36 +1185,6 @@ function TimelineSkeleton() {
         <div className="h-3 w-32 bg-muted rounded" />
         <div className="h-3 w-3/4 bg-muted rounded" />
       </div>
-    </div>
-  );
-}
-
-function ParticipantsList({
-  participants,
-}: {
-  participants: { userId: string; name: string; status: string }[];
-}) {
-  if (participants.length === 0) return null;
-
-  // Deduplicate participants by userId (same user may have multiple connections)
-  const uniqueParticipants = Array.from(new Map(participants.map((p) => [p.userId, p])).values());
-
-  return (
-    <div className="flex -space-x-2">
-      {uniqueParticipants.slice(0, 3).map((p) => (
-        <div
-          key={p.userId}
-          className="w-8 h-8 rounded-full bg-card flex items-center justify-center text-xs font-medium text-foreground border-2 border-white"
-          title={p.name}
-        >
-          {p.name.charAt(0).toUpperCase()}
-        </div>
-      ))}
-      {uniqueParticipants.length > 3 && (
-        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium text-foreground border-2 border-white">
-          +{uniqueParticipants.length - 3}
-        </div>
-      )}
     </div>
   );
 }
