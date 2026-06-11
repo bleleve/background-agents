@@ -36,6 +36,14 @@ export interface UntrustedContentParams {
    * context for your review").
    */
   extraGuidance?: string;
+  /**
+   * When `false`, return only the wrapped `<user_content>` block and omit the
+   * trailing "IMPORTANT…" warning (and `extraGuidance`). Use this when several
+   * adjacent fields are wrapped together and a single consolidated warning
+   * covers them all, to avoid repeating the same paragraph after every field.
+   * Defaults to `true`.
+   */
+  includeWarning?: boolean;
 }
 
 /**
@@ -46,7 +54,7 @@ export interface UntrustedContentParams {
  * the warning without a clear separator.
  */
 export function buildUntrustedUserContentBlock(params: UntrustedContentParams): string {
-  const { source, author, content, origin, extraGuidance } = params;
+  const { source, author, content, origin, extraGuidance, includeWarning = true } = params;
 
   // Defensive escape: neutralize any literal opening/closing tags (and the
   // already-escaped backslash variants) inside the body so a hostile payload
@@ -58,9 +66,17 @@ export function buildUntrustedUserContentBlock(params: UntrustedContentParams): 
     .replaceAll("<user_content", "<\\user_content")
     .replaceAll("</user_content>", "<\\/user_content>");
 
+  const openTag = `<user_content source="${escapeHtml(source)}" author="${escapeHtml(author)}">`;
+
+  if (!includeWarning) {
+    return `${openTag}
+${escapedContent}
+</user_content>`;
+  }
+
   const trailingGuidance = extraGuidance ? `\n${extraGuidance}` : "";
 
-  return `<user_content source="${escapeHtml(source)}" author="${escapeHtml(author)}">
+  return `${openTag}
 ${escapedContent}
 </user_content>
 
