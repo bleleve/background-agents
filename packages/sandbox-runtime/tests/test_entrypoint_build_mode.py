@@ -496,10 +496,12 @@ class TestUpdateExistingRepo:
 
     @pytest.mark.asyncio
     async def test_fetches_and_checks_out(self, base_env, tmp_path):
-        """Should rewrite origin to a plain URL, fetch with refspec, and checkout.
+        """Should rewrite origin to a plain URL, fetch with refspec, stash, and checkout.
 
         The `set-url` step exists to scrub stale embedded tokens from
-        snapshots taken before the credential-helper migration.
+        snapshots taken before the credential-helper migration.  The stash
+        step clears uncommitted local changes so the checkout cannot be
+        blocked by working-tree modifications.
         """
         supervisor = _make_supervisor(base_env)
         supervisor.repo_path = tmp_path
@@ -520,15 +522,16 @@ class TestUpdateExistingRepo:
             result = await supervisor._update_existing_repo()
 
         assert result is True
-        # set-url (scrub stale embedded token), fetch, checkout
-        assert len(call_log) == 3
+        # set-url (scrub stale embedded token), fetch, stash, checkout
+        assert len(call_log) == 4
         assert "set-url" in call_log[0]
         # The rewrite must use a token-free URL.
         assert call_log[0][-1] == supervisor._build_repo_url()
         assert "@" not in call_log[0][-1]
         assert "fetch" in call_log[1]
-        assert "checkout" in call_log[2]
-        assert "-B" in call_log[2]
+        assert "stash" in call_log[2]
+        assert "checkout" in call_log[3]
+        assert "-B" in call_log[3]
 
     @pytest.mark.asyncio
     async def test_returns_false_when_no_repo_path(self, base_env, tmp_path):
@@ -640,6 +643,165 @@ class TestUpdateExistingRepo:
             result = await supervisor._update_existing_repo()
 
         assert result is False
+
+
+class TestStashLocalChanges:
+    """Test _stash_local_changes() — stash before checkout."""
+
+    @pytest.mark.asyncio
+    async def test_stash_succeeds_with_no_changes(self, base_env, tmp_path):
+        """Returns True when there is nothing to stash."""
+        supervisor = _make_supervisor(base_env)
+        supervisor.repo_path = tmp_path
+
+        async def fake_subprocess(*args, **kwargs):
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"No local changes to stash", b""))
+            mock_proc.returncode = 0
+            return mock_proc
+
+        with patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            side_effect=fake_subprocess,
+        ):
+            result = await supervisor._stash_local_changes()
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_stash_succeeds_with_changes(self, base_env, tmp_path):
+        """Returns True and logs when changes were stashed."""
+        supervisor = _make_supervisor(base_env)
+        supervisor.repo_path = tmp_path
+        supervisor.log = MagicMock()
+
+        async def fake_subprocess(*args, **kwargs):
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock(
+                return_value=(b"Saved working directory and index state WIP on main", b"")
+            )
+            mock_proc.returncode = 0
+            return mock_proc
+
+        with patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            side_effect=fake_subprocess,
+        ):
+            result = await supervisor._stash_local_changes()
+
+        assert result is True
+        supervisor.log.info.assert_called_once_with(
+            "git.stash_created",
+            message="Saved working directory and index state WIP on main",
+        )
+
+    @pytest.mark.asyncio
+    async def test_stash_failure_returns_false(self, base_env, tmp_path):
+        """Returns False and logs a warning when git stash fails."""
+        supervisor = _make_supervisor(base_env)
+        supervisor.repo_path = tmp_path
+        supervisor.log = MagicMock()
+
+        async def fake_subprocess(*args, **kwargs):
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"", b"error: some stash error"))
+            mock_proc.returncode = 1
+            return mock_proc
+
+        with patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            side_effect=fake_subprocess,
+        ):
+            result = await supervisor._stash_local_changes()
+
+        assert result is False
+        supervisor.log.warn.assert_called_once()
+        call_args = supervisor.log.warn.call_args
+        assert call_args[0][0] == "git.stash_failed"
+
+    @pytest.mark.asyncio
+    async def test_stash_uses_include_untracked(self, base_env, tmp_path):
+        """Stash must include untracked files to handle generated lock files."""
+        supervisor = _make_supervisor(base_env)
+        supervisor.repo_path = tmp_path
+
+        call_args_list = []
+
+        async def fake_subprocess(*args, **kwargs):
+            call_args_list.append(args)
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
+            return mock_proc
+
+        with patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            side_effect=fake_subprocess,
+        ):
+            await supervisor._stash_local_changes()
+
+        assert len(call_args_list) == 1
+        stash_call = call_args_list[0]
+        assert "stash" in stash_call
+        assert "--include-untracked" in stash_call
+
+    @pytest.mark.asyncio
+    async def test_checkout_stashes_before_switching(self, base_env, tmp_path):
+        """_checkout_branch must call git stash before git checkout."""
+        supervisor = _make_supervisor(base_env)
+        supervisor.repo_path = tmp_path
+
+        call_log = []
+
+        async def fake_subprocess(*args, **kwargs):
+            call_log.append(args)
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
+            return mock_proc
+
+        with patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            side_effect=fake_subprocess,
+        ):
+            result = await supervisor._checkout_branch("main")
+
+        assert result is True
+        assert len(call_log) == 2
+        assert "stash" in call_log[0]
+        assert "--include-untracked" in call_log[0]
+        assert "checkout" in call_log[1]
+        assert "-B" in call_log[1]
+
+    @pytest.mark.asyncio
+    async def test_checkout_proceeds_even_if_stash_fails(self, base_env, tmp_path):
+        """If stash fails, checkout is still attempted (stash failure is non-fatal)."""
+        supervisor = _make_supervisor(base_env)
+        supervisor.repo_path = tmp_path
+        supervisor.log = MagicMock()
+
+        call_log = []
+
+        async def fake_subprocess(*args, **kwargs):
+            call_log.append(args)
+            mock_proc = MagicMock()
+            if "stash" in args:
+                mock_proc.returncode = 1
+                mock_proc.communicate = AsyncMock(return_value=(b"", b"stash error"))
+            else:
+                mock_proc.returncode = 0
+                mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            return mock_proc
+
+        with patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            side_effect=fake_subprocess,
+        ):
+            result = await supervisor._checkout_branch("main")
+
+        # Checkout was still attempted and succeeded
+        assert result is True
+        assert any("checkout" in c for c in call_log)
 
 
 class TestPerformGitSync:
