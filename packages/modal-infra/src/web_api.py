@@ -204,6 +204,7 @@ async def api_create(
             provider=request.get("provider", "anthropic"),
             model=request.get("model", "claude-sonnet-4-6"),
             mcp_servers=request.get("mcp_servers"),
+            allow_formal_review=request.get("allow_formal_review"),
         )
 
         sandbox_settings = request.get("sandbox_settings") or None

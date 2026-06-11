@@ -90,7 +90,7 @@ The existing GitHub App needs these additions:
 **Permissions**: `Pull requests: Read & write`, `Issues: Read & write`
 
 **Event subscriptions**: `Pull request`, `Issue comment`, `Pull request review comment`,
-`Pull request review thread`
+`Pull request review thread`, `Pull request review`
 
 **Webhook URL**: `https://open-inspect-github-bot-{suffix}.{account}.workers.dev/webhooks/github`
 
@@ -113,14 +113,15 @@ access model and can authenticate auxiliary private repos on the configured SCM 
 
 ## Webhook Events
 
-| Event                         | Action             | Trigger                      | Handler                      |
-| ----------------------------- | ------------------ | ---------------------------- | ---------------------------- |
-| `pull_request`                | `opened`           | Non-draft PR opened          | `handlePullRequestOpened`    |
-| `pull_request`                | `review_requested` | Compatibility event path     | `handleReviewRequested`      |
-| `pull_request`                | `labeled`          | `reef: ask for review` added | `handlePullRequestLabeled`   |
-| `issue_comment`               | `created`          | @mention in a PR comment     | `handleIssueComment`         |
-| `pull_request_review_comment` | `created`          | @mention in a review thread  | `handleReviewComment`        |
-| `pull_request_review_thread`  | `resolved`         | Review thread resolved       | `handleReviewThreadResolved` |
+| Event                         | Action               | Trigger                                                                                             | Handler                      |
+| ----------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `pull_request`                | `opened`             | Non-draft PR opened                                                                                 | `handlePullRequestOpened`    |
+| `pull_request`                | `review_requested`   | Compatibility event path                                                                            | `handleReviewRequested`      |
+| `pull_request`                | `labeled`            | `reef: ask for review` added                                                                        | `handlePullRequestLabeled`   |
+| `issue_comment`               | `created`            | @mention in a PR comment                                                                            | `handleIssueComment`         |
+| `pull_request_review_comment` | `created`            | @mention in a review thread                                                                         | `handleReviewComment`        |
+| `pull_request_review_thread`  | `resolved`           | Review thread resolved                                                                              | `handleReviewThreadResolved` |
+| `pull_request_review`         | `submitted`,`edited` | Bot submitted a formal APPROVED/CHANGES_REQUESTED review on a no-auto-approve repo (auto-dismissed) | `handlePullRequestReview`    |
 
 All events are processed asynchronously via `executionCtx.waitUntil()`. The webhook endpoint returns
 200 immediately after signature verification and delivery dedupe.
@@ -224,7 +225,11 @@ Three prompt templates in `src/prompts.ts`:
 **`buildCodeReviewPrompt`** — Includes PR title, body, author, branches, and instructions to:
 
 - Run `gh pr diff` for the full diff
-- Avoid submitting a review via `gh api .../reviews` for now
+- Never submit a formal review (`gh pr review` or `gh api .../pulls/{n}/reviews` with event
+  `APPROVE`/`REQUEST_CHANGES`) unless `autoApproveOnOpen` is enabled for the repo. The same guard is
+  added to the comment-action and failed-checks prompts, and is enforced for real in the sandbox by
+  the `gh` wrapper (see `sandbox-runtime` `git_credential_helper` `gh-guard`); off-policy reviews
+  are also auto-dismissed by the `pull_request_review` webhook handler as a backstop.
 - Post inline `suggestion` comments via `gh api .../pulls/{n}/comments`
 - Use `gh pr view ... --json headRefOid` for `commit_id`, temp markdown files for body, and
   `side=RIGHT`

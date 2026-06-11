@@ -265,6 +265,10 @@ export class ModalClient {
           agent_slack_notify_enabled: request.agentSlackNotifyEnabled ?? false,
           mcp_servers: request.mcpServers || null,
           sandbox_settings: request.sandboxSettings ?? null,
+          // Tri-state PR-review policy, sourced from sandboxSettings: undefined ⇒
+          // null (session not governed by the sandbox guard); false ⇒ block
+          // formal APPROVE/REQUEST_CHANGES reviews; true ⇒ allow.
+          allow_formal_review: request.sandboxSettings?.allowFormalReview ?? null,
           opencode_user_config: request.opencodeUserConfig ?? null,
         }),
       });
@@ -337,7 +341,13 @@ export class ModalClient {
         headers,
         body: JSON.stringify({
           snapshot_image_id: request.snapshotImageId,
-          session_config: buildSessionConfig(request),
+          // Carry the PR-review policy through the canonical session config so a
+          // restored sandbox enforces the same guard as a fresh one. Sourced
+          // from sandboxSettings; undefined ⇒ omitted (session not governed).
+          session_config: buildSessionConfig({
+            ...request,
+            allowFormalReview: request.sandboxSettings?.allowFormalReview,
+          }),
           sandbox_id: request.sandboxId,
           control_plane_url: request.controlPlaneUrl,
           sandbox_auth_token: request.sandboxAuthToken,

@@ -128,10 +128,19 @@ async function handleCreateSession(
       : null;
 
   // Resolve code-server integration setting and sandbox settings for this repo
-  const [codeServerEnabled, sandboxSettings] = await Promise.all([
+  const [codeServerEnabled, resolvedSandboxSettings] = await Promise.all([
     resolveCodeServerEnabled(env.DB, repoOwner, repoName),
     resolveSandboxSettings(env.DB, repoOwner, repoName),
   ]);
+
+  // The PR-review policy is not a repo-level sandbox setting — it's supplied
+  // per-session by the caller (github-bot derives it from `autoApproveOnOpen`).
+  // Merge it onto the resolved settings as a targeted override so it persists in
+  // `sandbox_settings` and reaches the sandbox guard. Omitted ⇒ ungoverned.
+  const sandboxSettings =
+    body.allowFormalReview !== undefined
+      ? { ...resolvedSandboxSettings, allowFormalReview: body.allowFormalReview }
+      : resolvedSandboxSettings;
 
   const sessionId = generateId();
 

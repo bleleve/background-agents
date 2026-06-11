@@ -55,15 +55,31 @@ AGENT_TOOLS_GATED_ON_ENV: dict[str, str] = {
 }
 
 # Wrapper installed at /usr/local/bin/gh (ahead of the real /usr/bin/gh in
-# PATH). The git credential helper can't authenticate the GitHub CLI — gh
-# reads GH_TOKEN/GITHUB_TOKEN from the environment, not git's protocol. This
-# thin delegator asks the credential helper's `gh-token` action whether a
-# fresh token is needed (the precedence logic lives there, in Python). If it
-# prints one we export it as GH_TOKEN; otherwise gh runs with its own env.
+# PATH). It does two things, in order:
+#
+#  1. Policy guard — the `gh-guard` action inspects argv and exits 3 when this
+#     session is forbidden from submitting a formal PR review (APPROVE /
+#     REQUEST_CHANGES). The decision logic lives in Python (auditable, tested);
+#     argv parsing in POSIX sh would be too fragile. The guard never reads
+#     stdin, so the eventual `exec gh "$@"` keeps the original stdin intact
+#     (the `-f body=...` / `--input -` paths still work).
+#  2. Token mint — the git credential helper can't authenticate the GitHub CLI
+#     (gh reads GH_TOKEN/GITHUB_TOKEN from the environment, not git's protocol).
+#     The `gh-token` action prints a fresh token when one is needed; we export
+#     it as GH_TOKEN, otherwise gh runs with its own env.
 GH_WRAPPER_REAL_PATH = "/usr/bin/gh"
+# Exit code the `gh-guard` action returns to signal "blocked by policy". Kept
+# distinct from gh's own 1/2/4 so the block is unambiguous in logs.
+GH_GUARD_BLOCK_RC = 3
 GH_WRAPPER_BODY = (
     "#!/bin/sh\n"
     f'REAL_GH="{GH_WRAPPER_REAL_PATH}"\n'
+    # Guard first. The block message is written to stderr by the action; exit 3
+    # propagates so gh never runs. Any other guard exit (e.g. an internal error)
+    # falls through to allow, so the guard can never break legitimate gh use —
+    # the control-plane backstop is the safety net for that residual case.
+    'python3 -m sandbox_runtime.credentials.git_credential_helper gh-guard "$@"\n'
+    f'[ "$?" -eq {GH_GUARD_BLOCK_RC} ] && exit {GH_GUARD_BLOCK_RC}\n'
     # stderr is left attached so the helper's diagnostic surfaces when a
     # refresh fails — otherwise the user just sees an opaque gh 401.
     "token=$(python3 -m sandbox_runtime.credentials.git_credential_helper gh-token || true)\n"
@@ -1020,6 +1036,30 @@ class SandboxSupervisor:
                 )
         self._configure_langfuse(opencode_config)
 
+        # PR-review policy, defense-in-depth layer at the agent. Merged AFTER the
+        # user config so it can't be overridden. This is a best-effort early stop
+        # for the common, documented command shapes — the authoritative block is
+        # the gh wrapper (git_credential_helper `gh-guard`), which parses argv
+        # precisely. Patterns are kept specific to avoid false positives on body
+        # text; the bare `-a`/`-r` shorthands are left to the wrapper. The
+        # bash-level `"*": "allow"` keeps every other command permitted.
+        if self.session_config.get("allow_formal_review") is False:
+            opencode_config = _deep_merge(
+                opencode_config,
+                {
+                    "permission": {
+                        "bash": {
+                            "*pulls/*/reviews*event=APPROVE*": "deny",
+                            "*pulls/*/reviews*event=REQUEST_CHANGES*": "deny",
+                            "*pr review*--approve*": "deny",
+                            "*pr review*--request-changes*": "deny",
+                            "*": "allow",
+                        }
+                    }
+                },
+            )
+            self.log.info("opencode.formal_review_denied")
+
         # Inject MCP servers
         mcp_servers = self._resolve_mcp_servers()
         if mcp_servers:
@@ -1042,8 +1082,18 @@ class SandboxSupervisor:
         opencode_dir = workdir / ".opencode"
         self._deploy_opencode_plugins(opencode_dir)
 
+        # Surface the PR-review policy to the gh wrapper. The wrapper runs as a
+        # child of opencode's bash tool and reads OI_ALLOW_FORMAL_REVIEW from the
+        # inherited env. Tri-state: only set when the session is governed
+        # (non-None) so non-github-bot sessions are entirely unaffected.
+        review_env: dict[str, str] = {}
+        allow_formal_review = self.session_config.get("allow_formal_review")
+        if allow_formal_review is not None:
+            review_env["OI_ALLOW_FORMAL_REVIEW"] = "true" if allow_formal_review else "false"
+
         env = {
             **os.environ,
+            **review_env,
             "OPENCODE_CONFIG_CONTENT": json.dumps(opencode_config),
             # Disable OpenCode's question tool in headless mode. The tool blocks
             # on a Promise waiting for user input via the HTTP API, but the bridge

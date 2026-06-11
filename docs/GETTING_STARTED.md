@@ -591,6 +591,9 @@ Now that the GitHub bot worker is deployed, configure the GitHub App for webhook
    - **Pull request review comments**
    - **Pull request review threads** (required for the review-suggestion acceptance-rate metric —
      the bot marks a suggestion resolved when its review thread is resolved)
+   - **Pull request reviews** (required for the comment-only review backstop — the bot
+     auto-dismisses any approving/blocking review it submits on repos where `autoApproveOnOpen` is
+     off)
 5. Click **Save changes**
 
 ### Find Your Bot Username

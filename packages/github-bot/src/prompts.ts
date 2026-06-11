@@ -59,6 +59,17 @@ A confidently-wrong inline comment costs reviewer time and erodes trust over man
 - **Out of scope — do not post (unless a comment explicitly asks about it):** theoretical risks that need unlikely preconditions (but do flag silent data corruption or loss even when the trigger is rare); defense-in-depth suggestions when the primary defense is already adequate; issues in code this PR does not touch; "consider using library X" style preferences.
 - **When uncertain whether the issue is real, do not post.** A missed real issue is recoverable on the next review pass; a confidently-wrong one creates noise on every review.`;
 
+// Shared guard forbidding a formal PR-review submission. The sandbox enforces
+// this for real (the gh wrapper blocks APPROVE/REQUEST_CHANGES when the session
+// is not permitted) — this is the prompt-level first line so the agent doesn't
+// even try. Used by every review/comment/failed-checks prompt that should only
+// leave comments. Keep aligned with the sandbox guard's allowed-actions message.
+const NO_FORMAL_REVIEW_GUARD =
+  "Do NOT submit a formal pull request review. Specifically, do not run `gh pr review` " +
+  "and do not call `gh api ... repos/<owner>/<repo>/pulls/<n>/reviews` with event APPROVE or " +
+  "REQUEST_CHANGES (neither is permitted here, and the sandbox will block them). Leave feedback " +
+  "only as inline suggestion comments (`.../pulls/<n>/comments`) and the single verdict issue comment.";
+
 function buildInlineSuggestionWorkflow(params: {
   owner: string;
   repo: string;
@@ -275,7 +286,7 @@ export function buildCodeReviewPrompt(params: {
    trivial config, or minor refactors with no behavioral change) and you found no issues. Use
    REQUEST_CHANGES if you found real issues. Use COMMENT for general feedback that does not block merging.
    If you found no issues and the changes are not clearly low-risk, do not submit a review at all.`
-    : `4. Do not submit a pull request review.`;
+    : `4. ${NO_FORMAL_REVIEW_GUARD}`;
 
   const largeDiffSection = largeDiff ? `\n${buildLookoutDiverGuidance()}\n` : "";
 
@@ -416,7 +427,7 @@ ${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
-5. Do not post summary issue comments on the PR.
+5. Do not post summary issue comments on the PR. ${NO_FORMAL_REVIEW_GUARD}
 ${replyInstruction}
 ${buildCustomInstructionsSection(commentActionInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
@@ -507,6 +518,8 @@ ${UNTRUSTED_REPO_CONTENT_GUIDANCE}
 ${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
+
+7. ${NO_FORMAL_REVIEW_GUARD}
 
 ${buildCommentGuidelines(isPublic)}`;
 }

@@ -697,6 +697,14 @@ export interface CreateSessionRequest {
    * DEFAULT_PLAN_MODEL.
    */
   planModel?: string;
+  /**
+   * PR-review policy for github-bot sessions: whether the agent may submit a
+   * formal GitHub review (event APPROVE or REQUEST_CHANGES). Merged onto the
+   * repo's resolved sandbox settings at session init and threaded to the sandbox
+   * guard. Omitted ⇒ session is not governed (no enforcement); `false` ⇒ block;
+   * `true` ⇒ allow. Inline comments and the verdict comment are always allowed.
+   */
+  allowFormalReview?: boolean;
 }
 
 export interface CreateSessionResponse {
