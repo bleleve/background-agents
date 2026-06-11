@@ -378,8 +378,49 @@ class SandboxSupervisor:
             return False
         return True
 
+    async def _stash_local_changes(self) -> bool:
+        """Stash any uncommitted local changes so a checkout can proceed cleanly.
+
+        Uses ``git stash --include-untracked`` so that both tracked modifications
+        and untracked files (e.g. generated lock-file updates written by a
+        previous session) are moved out of the way before the branch reset.
+
+        Returns True if the stash succeeded (or there was nothing to stash),
+        False on unexpected failure.
+        """
+        result = await asyncio.create_subprocess_exec(
+            "git",
+            "stash",
+            "--include-untracked",
+            cwd=self.repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await result.communicate()
+        if result.returncode != 0:
+            self.log.warn(
+                "git.stash_failed",
+                stderr=self._redact_git_stderr(stderr.decode()),
+                exit_code=result.returncode,
+            )
+            return False
+        stash_output = stdout.decode().strip()
+        if stash_output and stash_output != "No local changes to stash":
+            self.log.info("git.stash_created", message=stash_output)
+        return True
+
     async def _checkout_branch(self, branch: str) -> bool:
-        """Create/reset a local branch to match the remote tip."""
+        """Create/reset a local branch to match the remote tip.
+
+        Stashes any uncommitted local changes before the checkout so that
+        working-tree modifications (e.g. lock-file regenerations from a
+        previous session) do not block the branch reset.
+        """
+        if not await self._stash_local_changes():
+            # Stash failure is non-fatal; attempt the checkout anyway —
+            # it will fail loudly below if the working tree is still dirty.
+            self.log.warn("git.stash_skipped", reason="stash_failed")
+
         result = await asyncio.create_subprocess_exec(
             "git",
             "checkout",
