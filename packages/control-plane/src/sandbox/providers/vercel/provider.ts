@@ -26,6 +26,7 @@ import type {
   VercelCreateSandboxResponse,
   VercelSandboxClient,
   VercelSandboxRoute,
+  VercelVcpus,
 } from "./client";
 import { VercelSandboxApiError } from "./client";
 import { DEFAULT_VERCEL_RUNTIME, VERCEL_PYTHON_BIN } from "./bootstrap";
@@ -38,6 +39,10 @@ const TUNNEL_ENV_FILE_PATH = "/workspace/.tunnels.env";
 const EXPECTED_TUNNEL_PORTS_ENV_VAR = "EXPECTED_TUNNEL_PORTS";
 const DEFAULT_SNAPSHOT_EXPIRATION_MS = 0;
 const BUILD_TIMEOUT_SECONDS = 1800;
+const VERCEL_MAX_SANDBOX_TIMEOUT_MS = 45 * 60 * 1000;
+const VERCEL_MEMORY_MIB_PER_VCPU = 2048;
+const VERCEL_SUPPORTED_VCPUS: readonly VercelVcpus[] = [1, 2, 4, 8];
+const VERCEL_MAX_VCPUS = VERCEL_SUPPORTED_VCPUS[VERCEL_SUPPORTED_VCPUS.length - 1];
 const VERCEL_TUNNEL_ENV_WRITE_TIMEOUT_MS = 30_000;
 const REPO_IMAGE_CALLBACK_ENV_KEYS = [
   "OI_REPO_IMAGE_PROVIDER_SESSION_ID",
@@ -49,6 +54,11 @@ const RESERVED_REPO_IMAGE_CALLBACK_ENV_KEYS = [
   ...REPO_IMAGE_CALLBACK_ENV_KEYS,
   "OI_REPO_IMAGE_CALLBACK_SECRET",
 ] as const;
+
+function resolveVercelTimeoutMs(timeoutSeconds?: number): number {
+  const requestedMs = (timeoutSeconds ?? DEFAULT_SANDBOX_TIMEOUT_SECONDS) * 1000;
+  return Math.min(requestedMs, VERCEL_MAX_SANDBOX_TIMEOUT_MS);
+}
 
 export interface VercelProviderConfig {
   scmProvider: SourceControlProviderName;
@@ -119,7 +129,8 @@ export class VercelSandboxProvider implements SandboxProvider {
         {
           name: config.sandboxId,
           runtime: this.providerConfig.runtime || DEFAULT_VERCEL_RUNTIME,
-          timeoutMs: (config.timeoutSeconds ?? DEFAULT_SANDBOX_TIMEOUT_SECONDS) * 1000,
+          timeoutMs: resolveVercelTimeoutMs(config.timeoutSeconds),
+          resources: resolveVercelResources(config.sandboxSettings),
           ports,
           env,
           tags: this.buildTags(config),
@@ -165,7 +176,8 @@ export class VercelSandboxProvider implements SandboxProvider {
         {
           name: config.sandboxId,
           runtime: this.providerConfig.runtime || DEFAULT_VERCEL_RUNTIME,
-          timeoutMs: (config.timeoutSeconds ?? DEFAULT_SANDBOX_TIMEOUT_SECONDS) * 1000,
+          timeoutMs: resolveVercelTimeoutMs(config.timeoutSeconds),
+          resources: resolveVercelResources(config.sandboxSettings),
           ports,
           env,
           tags: this.buildTags(config),
@@ -394,16 +406,6 @@ export class VercelSandboxProvider implements SandboxProvider {
 
     if (cloneToken) {
       envVars.VCS_CLONE_TOKEN = cloneToken;
-      if (this.providerConfig.scmProvider === "github") {
-        const hasUserGithubCliToken = Boolean(
-          envVars.GH_TOKEN || envVars.GITHUB_TOKEN || envVars.GITHUB_APP_TOKEN
-        );
-        if (!hasUserGithubCliToken) {
-          envVars.GITHUB_TOKEN = cloneToken;
-          envVars.GITHUB_APP_TOKEN = cloneToken;
-          envVars.OI_GITHUB_TOKEN_IS_FALLBACK = "1";
-        }
-      }
     }
   }
 
@@ -620,6 +622,28 @@ function resolveTunnelPorts(rawPorts: number[] | undefined): number[] {
     if (ports.length >= MAX_TUNNEL_PORTS) break;
   }
   return ports;
+}
+
+function resolveVercelResources(
+  sandboxSettings: SandboxSettings | undefined
+): { vcpus: VercelVcpus } | undefined {
+  const requestedCpuCores = sandboxSettings?.cpuCores ?? undefined;
+  const requestedMemoryMib = sandboxSettings?.memoryMib ?? undefined;
+  const vcpusForMemory =
+    requestedMemoryMib === undefined
+      ? undefined
+      : Math.ceil(requestedMemoryMib / VERCEL_MEMORY_MIB_PER_VCPU);
+  const requestedVcpus = Math.max(requestedCpuCores ?? 0, vcpusForMemory ?? 0);
+
+  if (requestedVcpus <= 0) return undefined;
+  const supportedVcpus = VERCEL_SUPPORTED_VCPUS.find((vcpus) => vcpus >= requestedVcpus);
+  if (supportedVcpus === undefined) {
+    throw new SandboxProviderError(
+      `Vercel sandbox resources support up to ${VERCEL_MAX_VCPUS} vCPUs; requested ${requestedVcpus}`,
+      "permanent"
+    );
+  }
+  return { vcpus: supportedVcpus };
 }
 
 function routeToUrl(route: VercelSandboxRoute | undefined): string | undefined {
