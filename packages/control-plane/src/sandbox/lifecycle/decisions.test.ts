@@ -756,7 +756,7 @@ describe("evaluateConnectingTimeout", () => {
 
   it("returns not timed out for non-connecting status", () => {
     const now = Date.now();
-    const result = evaluateConnectingTimeout("ready", now - 200_000, config, now);
+    const result = evaluateConnectingTimeout("ready", now - 200_000, null, config, now);
 
     expect(result.isTimedOut).toBe(false);
     expect(result.elapsedMs).toBe(0);
@@ -766,7 +766,7 @@ describe("evaluateConnectingTimeout", () => {
     const now = Date.now();
     const createdAt = now - 60_000; // 60s ago, well within 120s timeout
 
-    const result = evaluateConnectingTimeout("connecting", createdAt, config, now);
+    const result = evaluateConnectingTimeout("connecting", createdAt, null, config, now);
 
     expect(result.isTimedOut).toBe(false);
     expect(result.elapsedMs).toBe(60_000);
@@ -776,7 +776,7 @@ describe("evaluateConnectingTimeout", () => {
     const now = Date.now();
     const createdAt = now - 130_000; // 130s ago, past 120s timeout
 
-    const result = evaluateConnectingTimeout("connecting", createdAt, config, now);
+    const result = evaluateConnectingTimeout("connecting", createdAt, null, config, now);
 
     expect(result.isTimedOut).toBe(true);
     expect(result.elapsedMs).toBe(130_000);
@@ -786,7 +786,7 @@ describe("evaluateConnectingTimeout", () => {
     const now = Date.now();
     const createdAt = now - config.timeoutMs; // Exactly at timeout
 
-    const result = evaluateConnectingTimeout("connecting", createdAt, config, now);
+    const result = evaluateConnectingTimeout("connecting", createdAt, null, config, now);
 
     expect(result.isTimedOut).toBe(true);
     expect(result.elapsedMs).toBe(config.timeoutMs);
@@ -796,7 +796,7 @@ describe("evaluateConnectingTimeout", () => {
     const now = Date.now();
     const createdAt = now - 130_000; // 130s ago, past 120s timeout
 
-    const result = evaluateConnectingTimeout("spawning", createdAt, config, now);
+    const result = evaluateConnectingTimeout("spawning", createdAt, null, config, now);
 
     expect(result.isTimedOut).toBe(true);
     expect(result.elapsedMs).toBe(130_000);
@@ -804,7 +804,7 @@ describe("evaluateConnectingTimeout", () => {
 
   it("returns not timed out for spawning within timeout window", () => {
     const now = Date.now();
-    const result = evaluateConnectingTimeout("spawning", now - 60_000, config, now);
+    const result = evaluateConnectingTimeout("spawning", now - 60_000, null, config, now);
 
     expect(result.isTimedOut).toBe(false);
   });
@@ -814,9 +814,44 @@ describe("evaluateConnectingTimeout", () => {
     const old = now - 999_999;
 
     for (const status of ["pending", "ready", "running", "stopped", "failed", "stale"] as const) {
-      const result = evaluateConnectingTimeout(status, old, config, now);
+      const result = evaluateConnectingTimeout(status, old, null, config, now);
       expect(result.isTimedOut).toBe(false);
     }
+  });
+
+  it("measures from last sign of life, not creation, during a long boot", () => {
+    const now = Date.now();
+    const createdAt = now - 300_000; // created 5 minutes ago (slow setup.sh)
+    const lastProgress = now - 10_000; // but pinged 10s ago
+
+    const result = evaluateConnectingTimeout("connecting", createdAt, lastProgress, config, now);
+
+    expect(result.isTimedOut).toBe(false);
+    expect(result.elapsedMs).toBe(10_000);
+  });
+
+  it("times out when boot-progress pings stop for the full window", () => {
+    const now = Date.now();
+    const createdAt = now - 300_000;
+    const lastProgress = now - config.timeoutMs; // last ping exactly a window ago
+
+    const result = evaluateConnectingTimeout("connecting", createdAt, lastProgress, config, now);
+
+    expect(result.isTimedOut).toBe(true);
+    expect(result.elapsedMs).toBe(config.timeoutMs);
+  });
+
+  it("falls back to creation time when no progress reported yet", () => {
+    const now = Date.now();
+    const createdAt = now - 130_000;
+
+    // lastProgressAt older than createdAt (or absent) must not extend the window.
+    expect(
+      evaluateConnectingTimeout("connecting", createdAt, createdAt - 50_000, config, now).isTimedOut
+    ).toBe(true);
+    expect(evaluateConnectingTimeout("connecting", createdAt, null, config, now).elapsedMs).toBe(
+      130_000
+    );
   });
 
   it("uses correct default config value", () => {

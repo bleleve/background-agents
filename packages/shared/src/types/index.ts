@@ -337,6 +337,16 @@ export type SandboxEvent =
       timestamp: number;
     }
   | {
+      type: "ready";
+      sandboxId: string;
+      opencodeSessionId?: string;
+      // Tunnel URLs the sandbox re-reports on (re)connect, parsed from its
+      // /workspace/.tunnels.env. Lets the control plane restore the preview
+      // links if a transient timeout cleared them while the sandbox was alive.
+      tunnelUrls?: Record<string, string>;
+      timestamp: number;
+    }
+  | {
       type: "user_message";
       content: string;
       messageId: string;

@@ -88,6 +88,8 @@ export interface SandboxStorage {
   updateSandboxSnapshotImageId(sandboxId: string, imageId: string): void;
   /** Update last activity timestamp */
   updateSandboxLastActivity(timestamp: number): void;
+  /** Update last heartbeat timestamp (last sign of life from the sandbox) */
+  updateSandboxHeartbeat(timestamp: number): void;
   /** Whether there is an active execution (processing message) in progress */
   getIsProcessing(): boolean;
   /** Increment circuit breaker failure count */
@@ -957,6 +959,7 @@ export class SandboxLifecycleManager {
     const connectingResult = evaluateConnectingTimeout(
       sandbox.status as SandboxStatus,
       sandbox.created_at,
+      sandbox.last_heartbeat,
       this.config.connectingTimeout,
       now
     );
@@ -1152,6 +1155,28 @@ export class SandboxLifecycleManager {
    */
   updateLastActivity(timestamp: number): void {
     this.storage.updateSandboxLastActivity(timestamp);
+  }
+
+  /**
+   * Record a boot-progress ping from the in-sandbox supervisor.
+   *
+   * The supervisor posts these throughout a long setup.sh — before the bridge
+   * WebSocket exists — so the connecting-timeout watchdog can tell a
+   * slow-but-healthy boot apart from a stuck one. Each ping refreshes the
+   * heartbeat, which is the "last sign of life" the connecting timeout measures
+   * from (see evaluateConnectingTimeout). The existing alarm re-evaluates on its
+   * normal cadence and sees the fresh timestamp, so no reschedule is needed.
+   *
+   * No-op once the sandbox has left the spawning/connecting phase: after the
+   * bridge connects it sends real heartbeats, and refreshing the heartbeat here
+   * would mask a dead agent.
+   */
+  onBootProgress(): void {
+    const sandbox = this.storage.getSandbox();
+    if (!sandbox) return;
+    if (sandbox.status !== "spawning" && sandbox.status !== "connecting") return;
+    this.storage.updateSandboxHeartbeat(Date.now());
+    this.log.debug("Boot progress ping", { event: "sandbox.boot_progress" });
   }
 
   /**
