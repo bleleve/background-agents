@@ -21,6 +21,7 @@ export const SessionInternalPaths = {
   verifySandboxToken: "/internal/verify-sandbox-token",
   openaiTokenRefresh: "/internal/openai-token-refresh",
   scmCredentials: "/internal/scm-credentials",
+  bootProgress: "/internal/boot-progress",
   spawnContext: "/internal/spawn-context",
   childSummary: "/internal/child-summary",
   updateTitle: "/internal/update-title",

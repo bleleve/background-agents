@@ -28,6 +28,7 @@ import websockets
 from websockets import ClientConnection, State
 from websockets.exceptions import InvalidStatus
 
+from .constants import TUNNEL_ENV_FILE_PATH
 from .log_config import configure_logging, get_logger
 from .types import GitUser
 
@@ -333,6 +334,28 @@ class AgentBridge:
         ]
         return any(pattern in error_str for pattern in fatal_patterns)
 
+    def _read_tunnel_urls(self) -> dict[str, str]:
+        """Parse TUNNEL_ENV_FILE_PATH (``TUNNEL_<port>=<url>`` per line) into a
+        ``{port: url}`` map. Returns an empty dict if the file is absent or
+        unreadable — reporting tunnel URLs is best-effort.
+        """
+        urls: dict[str, str] = {}
+        try:
+            path = Path(TUNNEL_ENV_FILE_PATH)
+            if not path.exists():
+                return urls
+            for raw_line in path.read_text().splitlines():
+                line = raw_line.strip()
+                if not line.startswith("TUNNEL_") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                port = key[len("TUNNEL_") :]
+                if port and value:
+                    urls[port] = value
+        except Exception as e:
+            self.log.debug("bridge.tunnel_urls_read_failed", exc=e)
+        return urls
+
     async def _connect_and_run(self) -> None:
         """Connect to control plane and handle messages.
 
@@ -355,13 +378,17 @@ class AgentBridge:
                 self.ws = ws
                 self.log.info("bridge.connect", outcome="success")
 
-                await self._send_event(
-                    {
-                        "type": "ready",
-                        "sandboxId": self.sandbox_id,
-                        "opencodeSessionId": self.opencode_session_id,
-                    }
-                )
+                ready_event: dict[str, Any] = {
+                    "type": "ready",
+                    "sandboxId": self.sandbox_id,
+                    "opencodeSessionId": self.opencode_session_id,
+                }
+                # Re-report tunnel URLs so the control plane can restore preview
+                # links if a transient timeout cleared them while we were alive.
+                tunnel_urls = self._read_tunnel_urls()
+                if tunnel_urls:
+                    ready_event["tunnelUrls"] = tunnel_urls
+                await self._send_event(ready_event)
 
                 just_flushed = await self._flush_event_buffer()
                 await self._flush_pending_acks(skip_ack_ids=just_flushed)

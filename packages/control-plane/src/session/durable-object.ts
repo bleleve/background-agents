@@ -223,6 +223,7 @@ export class SessionDO extends DurableObject<Env> {
     verifySandboxToken: (request) => this.sandboxHandler.verifySandboxToken(request),
     openaiTokenRefresh: () => this.sandboxHandler.openaiTokenRefresh(),
     scmCredentials: () => this.sandboxHandler.scmCredentials(),
+    bootProgress: () => this.sandboxHandler.bootProgress(),
     spawnContext: () => this.childSessionsHandler.getSpawnContext(),
     childSummary: (_request, url) => this.childSessionsHandler.getChildSummary(url),
     cancel: () => this.sessionLifecycleHandler.cancel(),
@@ -544,6 +545,7 @@ export class SessionDO extends DurableObject<Env> {
           Boolean(this.env.DB && this.env.REPO_SECRETS_ENCRYPTION_KEY),
         getScmCredentials: () =>
           new ScmCredentialsService(this.sourceControlProvider, this.log).getCredentials(),
+        recordBootProgress: () => this.lifecycleManager.onBootProgress(),
         broadcast: (message) => this.broadcast(message),
         generateId: () => generateId(),
         now: () => Date.now(),
@@ -811,6 +813,7 @@ export class SessionDO extends DurableObject<Env> {
         this.repository.updateSandboxSnapshotImageId(sandboxId, imageId),
       updateSandboxLastActivity: (timestamp) =>
         this.repository.updateSandboxLastActivity(timestamp),
+      updateSandboxHeartbeat: (timestamp) => this.repository.updateSandboxHeartbeat(timestamp),
       getIsProcessing: () => this.repository.getProcessingMessage() !== null,
       incrementCircuitBreakerFailure: (timestamp) =>
         this.repository.incrementCircuitBreakerFailure(timestamp),

@@ -12,6 +12,7 @@ Runs as PID 1 inside the sandbox. Responsibilities:
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -103,6 +104,10 @@ class SandboxSupervisor:
     RTK_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/rtk.ts"
     CODEX_AUTH_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/codex-auth-plugin.js"
     MCP_PACKAGE_INSTALL_TIMEOUT_SECONDS = 180
+    # How often to ping the control plane while booting so a long setup.sh
+    # doesn't trip the connecting-timeout watchdog. Must stay well under the
+    # control plane's connecting/heartbeat timeouts (120s / 90s).
+    BOOT_PROGRESS_INTERVAL_SECONDS = 20
 
     def __init__(self):
         self.opencode_process: asyncio.subprocess.Process | None = None
@@ -110,6 +115,7 @@ class SandboxSupervisor:
         self.code_server_process: asyncio.subprocess.Process | None = None
         self.ttyd_process: asyncio.subprocess.Process | None = None
         self.ttyd_proxy_process: asyncio.subprocess.Process | None = None
+        self._boot_progress_task: asyncio.Task[None] | None = None
         self.shutdown_event = asyncio.Event()
         self.git_sync_complete = asyncio.Event()
         self.opencode_ready = asyncio.Event()
@@ -137,12 +143,12 @@ class SandboxSupervisor:
         self.session_id_file = Path("/tmp/opencode-session-id")
 
         # Logger
-        session_id = self.session_config.get("session_id", "")
+        self.session_id = self.session_config.get("session_id", "")
         self.log = get_logger(
             "supervisor",
             service="sandbox",
             sandbox_id=self.sandbox_id,
-            session_id=session_id,
+            session_id=self.session_id,
         )
 
     @property
@@ -1373,6 +1379,57 @@ class SandboxSupervisor:
         except Exception as e:
             self.log.error("supervisor.report_error_failed", exc=e)
 
+    async def _send_boot_progress(self) -> None:
+        """Tell the control plane the sandbox is alive and still booting.
+
+        Posted repeatedly during a long setup.sh — before the bridge WebSocket
+        exists — so the connecting-timeout watchdog measures from the last ping
+        rather than from sandbox creation. Best-effort: failures are logged at
+        debug and never block boot.
+        """
+        if not self.control_plane_url or not self.session_id or not self.sandbox_token:
+            return
+
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"{self.control_plane_url}/sessions/{self.session_id}/boot-progress",
+                    headers={"Authorization": f"Bearer {self.sandbox_token}"},
+                    timeout=5.0,
+                )
+        except Exception as e:
+            self.log.debug("boot_progress.send_failed", exc=e)
+
+    async def _boot_progress_loop(self) -> None:
+        """Ping the control plane every BOOT_PROGRESS_INTERVAL_SECONDS while the
+        sandbox boots. Cancelled once the bridge starts, after which the bridge's
+        own heartbeats keep the sandbox alive.
+        """
+        while not self.shutdown_event.is_set():
+            await self._send_boot_progress()
+            try:
+                await asyncio.sleep(self.BOOT_PROGRESS_INTERVAL_SECONDS)
+            except asyncio.CancelledError:
+                break
+
+    def _start_boot_progress_pings(self) -> None:
+        """Start the background boot-progress ping loop (idempotent)."""
+        if self._boot_progress_task is not None:
+            return
+        if not self.control_plane_url or not self.session_id:
+            return
+        self._boot_progress_task = asyncio.create_task(self._boot_progress_loop())
+
+    async def _stop_boot_progress_pings(self) -> None:
+        """Stop the boot-progress ping loop once the bridge has taken over."""
+        task = self._boot_progress_task
+        if task is None:
+            return
+        self._boot_progress_task = None
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
     def _hook_env(self) -> dict[str, str]:
         """Build environment for startup hooks."""
         env = os.environ.copy()
@@ -1671,6 +1728,12 @@ class SandboxSupervisor:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self._handle_signal(s)))
 
+        # Keep the control plane's connecting-timeout watchdog at bay during a
+        # long setup.sh by pinging it from the start of boot. Stopped once the
+        # bridge connects (Phase 5) and its heartbeats take over.
+        if not image_build_mode:
+            self._start_boot_progress_pings()
+
         git_sync_success = False
         head_sha = ""
         opencode_ready = False
@@ -1758,6 +1821,8 @@ class SandboxSupervisor:
 
             # Phase 5: Start bridge (after OpenCode is ready)
             await self.start_bridge()
+            # The bridge now owns heartbeating; stop the boot-progress pings.
+            await self._stop_boot_progress_pings()
 
             # Emit sandbox.startup wide event
             duration_ms = int((time.time() - startup_start) * 1000)
@@ -1796,6 +1861,9 @@ class SandboxSupervisor:
     async def shutdown(self) -> None:
         """Graceful shutdown of all processes."""
         self.log.info("supervisor.shutdown_start")
+
+        # Stop boot-progress pings if boot failed before the bridge took over.
+        await self._stop_boot_progress_pings()
 
         # Terminate bridge first
         if self.bridge_process and self.bridge_process.returncode is None:

@@ -31,6 +31,7 @@ export interface SessionInternalRouteHandlers {
   verifySandboxToken: SessionInternalRouteHandler;
   openaiTokenRefresh: SessionInternalRouteHandler;
   scmCredentials: SessionInternalRouteHandler;
+  bootProgress: SessionInternalRouteHandler;
   spawnContext: SessionInternalRouteHandler;
   childSummary: SessionInternalRouteHandler;
   cancel: SessionInternalRouteHandler;
@@ -92,6 +93,11 @@ export function createSessionInternalRoutes(
       method: "POST",
       path: SessionInternalPaths.scmCredentials,
       handler: handlers.scmCredentials,
+    },
+    {
+      method: "POST",
+      path: SessionInternalPaths.bootProgress,
+      handler: handlers.bootProgress,
     },
     { method: "GET", path: SessionInternalPaths.spawnContext, handler: handlers.spawnContext },
     { method: "GET", path: SessionInternalPaths.childSummary, handler: handlers.childSummary },

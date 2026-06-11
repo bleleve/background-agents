@@ -155,6 +155,10 @@ function createMockStorage(
       calls.push("updateSandboxLastActivity");
       if (sandbox) sandbox.last_activity = timestamp;
     }),
+    updateSandboxHeartbeat: vi.fn((timestamp: number) => {
+      calls.push("updateSandboxHeartbeat");
+      if (sandbox) sandbox.last_heartbeat = timestamp;
+    }),
     getIsProcessing: vi.fn(() => false),
     incrementCircuitBreakerFailure: vi.fn((timestamp: number) => {
       calls.push("incrementCircuitBreakerFailure");
@@ -1420,6 +1424,32 @@ describe("SandboxLifecycleManager", () => {
       expect(alarmScheduler.alarms.length).toBe(1);
     });
 
+    it("does not time out a long boot that keeps reporting progress", async () => {
+      const now = Date.now();
+      // Created 5 minutes ago (slow setup.sh) but a boot-progress ping landed
+      // 10s ago, so the watchdog should measure from the ping, not creation.
+      const sandbox = createMockSandbox({
+        status: "connecting" as SandboxStatus,
+        created_at: now - 300_000,
+        last_heartbeat: now - 10_000,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.handleAlarm();
+
+      expect(storage.calls).not.toContain("updateSandboxStatus:failed");
+    });
+
     it("calls onSandboxTerminating callback on connecting timeout", async () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
@@ -2231,6 +2261,50 @@ describe("SandboxLifecycleManager", () => {
       expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
         expect.objectContaining({ agentSlackNotifyEnabled: false })
       );
+    });
+  });
+
+  describe("onBootProgress", () => {
+    function buildManager(sandbox: ReturnType<typeof createMockSandbox> | null) {
+      const storage = createMockStorage(createMockSession(), sandbox);
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+      return { manager, storage };
+    }
+
+    for (const status of ["spawning", "connecting"] as const) {
+      it(`refreshes the heartbeat while ${status}`, () => {
+        const { manager, storage } = buildManager(
+          createMockSandbox({ status, last_heartbeat: Date.now() - 60_000 })
+        );
+
+        manager.onBootProgress();
+
+        expect(storage.calls).toContain("updateSandboxHeartbeat");
+      });
+    }
+
+    it("is a no-op once the sandbox is ready (avoids masking a dead agent)", () => {
+      const { manager, storage } = buildManager(createMockSandbox({ status: "ready" }));
+
+      manager.onBootProgress();
+
+      expect(storage.calls).not.toContain("updateSandboxHeartbeat");
+    });
+
+    it("is a no-op when there is no sandbox", () => {
+      const { manager, storage } = buildManager(null);
+
+      manager.onBootProgress();
+
+      expect(storage.calls).not.toContain("updateSandboxHeartbeat");
     });
   });
 });

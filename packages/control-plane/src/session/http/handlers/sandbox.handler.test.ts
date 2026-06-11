@@ -17,6 +17,7 @@ function createHandler() {
   const refreshOpenAIToken = vi.fn();
   const isOpenAISecretsConfigured = vi.fn();
   const getScmCredentials = vi.fn();
+  const recordBootProgress = vi.fn();
   const broadcast = vi.fn();
   const generateId = vi.fn(() => "participant-1");
   const now = vi.fn(() => 1234);
@@ -38,6 +39,7 @@ function createHandler() {
     refreshOpenAIToken,
     isOpenAISecretsConfigured,
     getScmCredentials,
+    recordBootProgress,
     broadcast,
     generateId,
     now,
@@ -54,6 +56,7 @@ function createHandler() {
     refreshOpenAIToken,
     isOpenAISecretsConfigured,
     getScmCredentials,
+    recordBootProgress,
     broadcast,
     generateId,
     now,
