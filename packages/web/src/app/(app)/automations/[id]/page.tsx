@@ -56,6 +56,10 @@ export default function AutomationDetailPage({ params }: { params: Promise<{ id:
     try {
       const res = await fetch(`/api/automations/${id}`, { method: "DELETE" });
       if (!res.ok) {
+        if (res.status === 403) {
+          setActionError("This automation can only be deleted by its creator or an administrator.");
+          return;
+        }
         setActionError("Failed to delete automation");
         return;
       }
@@ -168,35 +172,36 @@ export default function AutomationDetailPage({ params }: { params: Promise<{ id:
                   Resume
                 </Button>
               )}
-              {confirmDelete ? (
-                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-1">
+              {automation.canDelete !== false &&
+                (confirmDelete ? (
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-1">
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="w-full sm:w-auto"
+                      onClick={handleDelete}
+                    >
+                      Confirm Delete
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full sm:w-auto"
+                      onClick={() => setConfirmDelete(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
                   <Button
                     variant="destructive"
                     size="sm"
                     className="w-full sm:w-auto"
-                    onClick={handleDelete}
+                    onClick={() => setConfirmDelete(true)}
                   >
-                    Confirm Delete
+                    Delete
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full sm:w-auto"
-                    onClick={() => setConfirmDelete(false)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="w-full sm:w-auto"
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  Delete
-                </Button>
-              )}
+                ))}
             </div>
           </div>
 

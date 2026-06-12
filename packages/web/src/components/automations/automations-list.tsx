@@ -68,10 +68,11 @@ export function AutomationsList({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   if (automations.length === 0) {
+    const showDefaultDescription = emptyMessage === "No automations yet." && emptyDescription;
     return (
       <div className="border border-border-muted rounded-md bg-card p-8 text-center">
         <p className="text-muted-foreground">{emptyMessage}</p>
-        {emptyDescription ? (
+        {showDefaultDescription ? (
           <p className="text-sm text-muted-foreground mt-1">{emptyDescription}</p>
         ) : null}
       </div>
@@ -109,31 +110,32 @@ export function AutomationsList({
                   Trigger
                 </span>
               </Button>
-              {confirmDeleteId === automation.id ? (
-                <div className="flex items-center gap-1">
+              {automation.canDelete !== false &&
+                (confirmDeleteId === automation.id ? (
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="destructive"
+                      size="xs"
+                      onClick={() => {
+                        onDelete(automation.id);
+                        setConfirmDeleteId(null);
+                      }}
+                    >
+                      Confirm
+                    </Button>
+                    <Button variant="ghost" size="xs" onClick={() => setConfirmDeleteId(null)}>
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
                   <Button
                     variant="destructive"
                     size="xs"
-                    onClick={() => {
-                      onDelete(automation.id);
-                      setConfirmDeleteId(null);
-                    }}
+                    onClick={() => setConfirmDeleteId(automation.id)}
                   >
-                    Confirm
+                    Delete
                   </Button>
-                  <Button variant="ghost" size="xs" onClick={() => setConfirmDeleteId(null)}>
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="destructive"
-                  size="xs"
-                  onClick={() => setConfirmDeleteId(automation.id)}
-                >
-                  Delete
-                </Button>
-              )}
+                ))}
             </div>
           </div>
 
@@ -150,6 +152,11 @@ export function AutomationsList({
             {automation.triggerType === "schedule" && automation.nextRunAt && (
               <span className="inline-flex items-center gap-1">
                 Next: {formatRelativeTime(automation.nextRunAt)}
+              </span>
+            )}
+            {automation.lastRunAt != null && (
+              <span className="inline-flex items-center gap-1">
+                Last run: {formatRelativeTime(automation.lastRunAt)}
               </span>
             )}
           </div>

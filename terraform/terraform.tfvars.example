@@ -299,6 +299,8 @@ enable_service_bindings = false
 # Set at least one access-control allowlist unless you intentionally opt into
 # open access with unsafe_allow_all_users = true.
 allowed_users = ""
+# GitHub usernames allowed to delete any automation (creators can delete their own)
+automation_delete_admins = ""
 
 # Comma-separated list of email domains allowed to sign in
 # Example: "example.com,corp.io"

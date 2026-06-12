@@ -3,17 +3,28 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { controlPlaneFetch } from "@/lib/control-plane";
+import {
+  AUTOMATION_CONTROL_PLANE_QUERY_PARAMS,
+  buildControlPlanePath,
+} from "@/lib/control-plane-query";
+import { buildAutomationActorQueryParams, buildAutomationDeleteBody } from "@/lib/automation-actor";
 
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
+  const forwardedParams = buildAutomationActorQueryParams(session);
+  const path = buildControlPlanePath(
+    `/automations/${id}`,
+    forwardedParams,
+    AUTOMATION_CONTROL_PLANE_QUERY_PARAMS
+  );
 
   try {
-    const response = await controlPlaneFetch(`/automations/${id}`);
+    const response = await controlPlaneFetch(path);
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
@@ -58,6 +69,7 @@ export async function DELETE(
   try {
     const response = await controlPlaneFetch(`/automations/${id}`, {
       method: "DELETE",
+      body: JSON.stringify(buildAutomationDeleteBody(session)),
     });
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });

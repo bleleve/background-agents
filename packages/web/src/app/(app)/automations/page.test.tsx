@@ -49,6 +49,7 @@ const sampleAutomation: Automation = {
   createdBy: "user-1",
   createdAt: Date.now(),
   updatedAt: Date.now(),
+  lastRunAt: null,
   deletedAt: null,
   eventType: null,
   triggerConfig: null,

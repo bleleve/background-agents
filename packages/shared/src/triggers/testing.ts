@@ -115,6 +115,7 @@ export function makeTriggerAutomation(overrides?: Partial<Automation>): Automati
     createdAt: Date.now(),
     updatedAt: Date.now(),
     deletedAt: null,
+    lastRunAt: null,
     eventType: "issue.created",
     triggerConfig: { conditions: [] },
     ...overrides,

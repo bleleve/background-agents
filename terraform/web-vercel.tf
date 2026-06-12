@@ -112,5 +112,11 @@ module "web_app" {
       targets   = ["production", "preview"]
       sensitive = false
     },
+    {
+      key       = "AUTOMATION_DELETE_ADMINS"
+      value     = var.automation_delete_admins
+      targets   = ["production", "preview"]
+      sensitive = false
+    },
   ]
 }

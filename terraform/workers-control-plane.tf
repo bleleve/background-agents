@@ -84,6 +84,7 @@ module "control_plane_worker" {
       # library constant. Keep aligned with the bot workers in this env.
       { name = "DEFAULT_MODEL", value = "claude-haiku-4-5" },
       { name = "DEFAULT_PLAN_MODEL", value = "claude-haiku-4-5" },
+      { name = "AUTOMATION_DELETE_ADMINS", value = var.automation_delete_admins },
     ],
     local.use_modal_backend ? [
       { name = "MODAL_WORKSPACE", value = var.modal_workspace },
