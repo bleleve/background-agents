@@ -451,7 +451,7 @@ export class SandboxLifecycleManager {
         repoImageId,
         repoImageSha,
         timeoutSeconds,
-        branch: session.base_branch,
+        branch: this.resolveCheckoutBranch(session),
         codeServerEnabled,
         agentSlackNotifyEnabled,
         mcpServers,
@@ -636,7 +636,7 @@ export class SandboxLifecycleManager {
         model: modelId,
         userEnvVars,
         timeoutSeconds,
-        branch: session.base_branch,
+        branch: this.resolveCheckoutBranch(session),
         codeServerEnabled,
         agentSlackNotifyEnabled,
         mcpServers,
@@ -1206,6 +1206,26 @@ export class SandboxLifecycleManager {
    */
   private resolveProviderAndModel(session: SessionRow): { provider: string; model: string } {
     return extractProviderAndModel(session.model || this.config.model);
+  }
+
+  /**
+   * The branch the sandbox should check out on boot.
+   *
+   * Prefer the session's working branch (`branch_name`, set to
+   * `open-inspect/<sessionId>` once a PR is created) over the base branch. The
+   * agent commits its work locally and the PR push maps `HEAD` onto that branch
+   * on the remote — so on a relaunch/restore we must check out the working
+   * branch to recover that work. Checking out `base_branch` instead would
+   * `git checkout -B <base> origin/<base>` (see entrypoint `_checkout_branch`),
+   * resetting the local branch to the base tip and discarding the committed
+   * change, which only survives on the remote `open-inspect/<sessionId>` branch.
+   *
+   * `branch_name` is only persisted after a successful push, so when set its
+   * remote branch is guaranteed to exist and fetch cleanly. Before any PR it is
+   * null and we fall back to the base branch.
+   */
+  private resolveCheckoutBranch(session: SessionRow): string {
+    return session.branch_name ?? session.base_branch;
   }
 
   /**
