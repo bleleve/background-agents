@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { formatModelNameLower } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
+import { shouldWarmForPrompt } from "@/lib/sandbox-warming";
 import { isUnarchivedSessionListKey } from "@/lib/session-list";
 import { APP_NAME } from "@/lib/site-config";
 import {
@@ -39,11 +40,6 @@ const LAST_SELECTED_MODEL_STORAGE_KEY = "open-inspect-last-selected-model";
 // stored model is restored on hydration.
 const LAST_SELECTED_MODEL_USER_PICKED_STORAGE_KEY = "open-inspect-last-selected-model-user-picked";
 const LAST_SELECTED_REASONING_EFFORT_STORAGE_KEY = "open-inspect-last-selected-reasoning-effort";
-
-// Warm a sandbox once the prompt shows real intent — strictly more than this
-// many non-whitespace characters — so it's ready by submit, without spinning
-// one up for a stray space or a couple of keystrokes.
-const WARMUP_MIN_TRIMMED_CHARS = 5;
 
 export default function Home() {
   const { data: session } = useSession();
@@ -297,16 +293,11 @@ export default function Home() {
 
   const handlePromptChange = (value: string) => {
     setPrompt(value);
-    // Warm a sandbox once the input shows real intent (>WARMUP_MIN_TRIMMED_CHARS
-    // non-whitespace chars) so it's ready by submit — but not for a stray space
-    // or a couple of keystrokes. createSessionForWarming() is idempotent (guards
-    // on pendingSessionId / the in-flight promise), so later keystrokes are no-ops.
-    if (
-      value.trim().length > WARMUP_MIN_TRIMMED_CHARS &&
-      !pendingSessionId &&
-      !isCreatingSession &&
-      selectedRepo
-    ) {
+    // Warm a sandbox once the input shows real intent (see shouldWarmForPrompt)
+    // so it's ready by submit — but not for a stray space or a couple of
+    // keystrokes. createSessionForWarming() is idempotent (guards on
+    // pendingSessionId / the in-flight promise), so later keystrokes are no-ops.
+    if (shouldWarmForPrompt(value) && !pendingSessionId && !isCreatingSession && selectedRepo) {
       createSessionForWarming();
     }
   };
