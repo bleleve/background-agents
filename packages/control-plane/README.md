@@ -52,25 +52,26 @@ The control plane provides:
 
 ### Sessions
 
-| Endpoint                         | Method    | Description                             |
-| -------------------------------- | --------- | --------------------------------------- |
-| `/sessions`                      | GET       | List user's sessions                    |
-| `/sessions`                      | POST      | Create new session                      |
-| `/sessions/:id`                  | GET       | Get session state                       |
-| `/sessions/:id`                  | DELETE    | Delete session                          |
-| `/sessions/:id/prompt`           | POST      | Enqueue prompt                          |
-| `/sessions/:id/stop`             | POST      | Stop execution                          |
-| `/sessions/:id/sandbox/relaunch` | POST      | Relaunch a stopped/failed/stale sandbox |
-| `/sessions/:id/ws`               | WebSocket | Real-time connection                    |
-| `/sessions/:id/events`           | GET       | Paginated events                        |
-| `/sessions/:id/artifacts`        | GET       | List artifacts                          |
-| `/sessions/:id/participants`     | GET/POST  | Manage participants                     |
-| `/sessions/:id/messages`         | GET       | List messages                           |
-| `/sessions/:id/pr`               | POST      | Create pull request                     |
-| `/sessions/:id/scm-credentials`  | POST      | Broker sandbox git credentials          |
-| `/sessions/:id/ws-token`         | POST      | Generate WebSocket token                |
-| `/sessions/:id/archive`          | POST      | Archive session                         |
-| `/sessions/:id/unarchive`        | POST      | Unarchive session                       |
+| Endpoint                         | Method    | Description                                                       |
+| -------------------------------- | --------- | ----------------------------------------------------------------- |
+| `/sessions`                      | GET       | List user's sessions                                              |
+| `/sessions`                      | POST      | Create new session                                                |
+| `/sessions/:id`                  | GET       | Get session state                                                 |
+| `/sessions/:id`                  | DELETE    | Delete session                                                    |
+| `/sessions/:id/prompt`           | POST      | Enqueue prompt                                                    |
+| `/sessions/:id/stop`             | POST      | Stop execution                                                    |
+| `/sessions/:id/sandbox/relaunch` | POST      | Relaunch a stopped/failed/stale sandbox                           |
+| `/sessions/:id/ws`               | WebSocket | Real-time connection                                              |
+| `/sessions/:id/events`           | GET       | Paginated events                                                  |
+| `/sessions/:id/artifacts`        | GET       | List artifacts                                                    |
+| `/sessions/:id/participants`     | GET/POST  | Manage participants                                               |
+| `/sessions/:id/messages`         | GET       | List messages                                                     |
+| `/sessions/:id/pr`               | POST      | Create pull request                                               |
+| `/sessions/:id/pr-review`        | POST      | Submit a formal PR review (policy-checked, sandbox-authenticated) |
+| `/sessions/:id/scm-credentials`  | POST      | Broker sandbox git credentials                                    |
+| `/sessions/:id/ws-token`         | POST      | Generate WebSocket token                                          |
+| `/sessions/:id/archive`          | POST      | Archive session                                                   |
+| `/sessions/:id/unarchive`        | POST      | Unarchive session                                                 |
 
 ### Plan Mode
 

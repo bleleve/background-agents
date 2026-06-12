@@ -225,11 +225,12 @@ Three prompt templates in `src/prompts.ts`:
 **`buildCodeReviewPrompt`** — Includes PR title, body, author, branches, and instructions to:
 
 - Run `gh pr diff` for the full diff
-- Never submit a formal review (`gh pr review` or `gh api .../pulls/{n}/reviews` with event
-  `APPROVE`/`REQUEST_CHANGES`) unless `autoApproveOnOpen` is enabled for the repo. The same guard is
-  added to the comment-action and failed-checks prompts, and is enforced for real in the sandbox by
-  the `gh` wrapper (see `sandbox-runtime` `git_credential_helper` `gh-guard`); off-policy reviews
-  are also auto-dismissed by the `pull_request_review` webhook handler as a backstop.
+- Submit a formal verdict only through the `submit-pr-review` tool, never raw `gh pr review` /
+  `gh api .../pulls/{n}/reviews` (those are blocked in the sandbox by the `gh` wrapper — see
+  `sandbox-runtime` `git_credential_helper` `gh-guard`). The tool routes to the control plane
+  (`POST /sessions/:id/pr-review`), which resolves the repo's `autoApproveOnOpen` live and posts the
+  review with the App token or rejects `APPROVE`/`REQUEST_CHANGES`. As a backstop, the
+  `pull_request_review` webhook handler auto-dismisses any off-policy formal review the bot lands.
 - Post inline `suggestion` comments via `gh api .../pulls/{n}/comments`
 - Use `gh pr view ... --json headRefOid` for `commit_id`, temp markdown files for body, and
   `side=RIGHT`
