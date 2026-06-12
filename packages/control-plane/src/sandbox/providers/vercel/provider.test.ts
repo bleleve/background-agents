@@ -116,6 +116,9 @@ const baseRestoreConfig: RestoreConfig = {
   model: "anthropic/claude-sonnet-4-5",
 };
 
+// Mirrors VERCEL_MAX_SANDBOX_TIMEOUT_MS in provider.ts — Vercel rejects timeouts above 45 minutes.
+const VERCEL_MAX_SANDBOX_TIMEOUT_MS = 45 * 60 * 1000;
+
 describe("VercelSandboxProvider", () => {
   it("reports Vercel capabilities", () => {
     const provider = new VercelSandboxProvider(createMockClient(), providerConfig);
@@ -205,6 +208,100 @@ describe("VercelSandboxProvider", () => {
         ttydUrl: "https://term.test",
       })
     );
+  });
+
+  it("caps the default sandbox timeout at Vercel's 45 minute limit", async () => {
+    const client = createMockClient();
+    const provider = new VercelSandboxProvider(client, providerConfig);
+
+    await provider.createSandbox(baseCreateConfig);
+
+    expect(vi.mocked(client.createSandbox).mock.calls[0][0].timeoutMs).toBe(
+      VERCEL_MAX_SANDBOX_TIMEOUT_MS
+    );
+  });
+
+  it("keeps explicit Vercel sandbox timeouts below the provider limit", async () => {
+    const client = createMockClient();
+    const provider = new VercelSandboxProvider(client, providerConfig);
+
+    await provider.createSandbox({ ...baseCreateConfig, timeoutSeconds: 30 * 60 });
+
+    expect(vi.mocked(client.createSandbox).mock.calls[0][0].timeoutMs).toBe(30 * 60 * 1000);
+  });
+
+  it("caps explicit Vercel sandbox timeouts above the provider limit", async () => {
+    const client = createMockClient();
+    const provider = new VercelSandboxProvider(client, providerConfig);
+
+    await provider.createSandbox({ ...baseCreateConfig, timeoutSeconds: 60 * 60 });
+
+    expect(vi.mocked(client.createSandbox).mock.calls[0][0].timeoutMs).toBe(
+      VERCEL_MAX_SANDBOX_TIMEOUT_MS
+    );
+  });
+
+  it("caps restore timeouts at Vercel's 45 minute limit", async () => {
+    const client = createMockClient();
+    const provider = new VercelSandboxProvider(client, providerConfig);
+
+    await provider.restoreFromSnapshot(baseRestoreConfig);
+
+    expect(vi.mocked(client.createSandbox).mock.calls[0][0].timeoutMs).toBe(
+      VERCEL_MAX_SANDBOX_TIMEOUT_MS
+    );
+  });
+
+  it("maps sandbox CPU and memory settings to Vercel vCPU resources", async () => {
+    const client = createMockClient();
+    const provider = new VercelSandboxProvider(client, providerConfig);
+
+    await provider.createSandbox({
+      ...baseCreateConfig,
+      sandboxSettings: { cpuCores: 2, memoryMib: 6144 },
+    });
+
+    expect(vi.mocked(client.createSandbox).mock.calls[0][0].resources).toEqual({ vcpus: 4 });
+  });
+
+  it("omits Vercel resources when sandbox CPU and memory settings use provider defaults", async () => {
+    const client = createMockClient();
+    const provider = new VercelSandboxProvider(client, providerConfig);
+
+    await provider.createSandbox({
+      ...baseCreateConfig,
+      sandboxSettings: { cpuCores: null, memoryMib: null },
+    });
+
+    expect(vi.mocked(client.createSandbox).mock.calls[0][0].resources).toBeUndefined();
+  });
+
+  it("maps restore sandbox memory settings to Vercel vCPU resources", async () => {
+    const client = createMockClient();
+    const provider = new VercelSandboxProvider(client, providerConfig);
+
+    await provider.restoreFromSnapshot({
+      ...baseRestoreConfig,
+      sandboxSettings: { memoryMib: 4096 },
+    });
+
+    expect(vi.mocked(client.createSandbox).mock.calls[0][0].resources).toEqual({ vcpus: 2 });
+  });
+
+  it("rejects Vercel resource requests above the maximum supported vCPU size", async () => {
+    const client = createMockClient();
+    const provider = new VercelSandboxProvider(client, providerConfig);
+
+    await expect(
+      provider.createSandbox({
+        ...baseCreateConfig,
+        sandboxSettings: { memoryMib: 18432 },
+      })
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("support up to 8 vCPUs; requested 9"),
+    });
+
+    expect(vi.mocked(client.createSandbox)).not.toHaveBeenCalled();
   });
 
   it("resolves a configured base snapshot name before creating a fresh sandbox", async () => {
@@ -422,11 +519,11 @@ describe("VercelSandboxProvider", () => {
         IMAGE_BUILD_MODE: "true",
         SESSION_CONFIG: JSON.stringify({ branch: "main" }),
         VCS_CLONE_TOKEN: "clone-token",
-        GITHUB_TOKEN: "clone-token",
-        GITHUB_APP_TOKEN: "clone-token",
-        OI_GITHUB_TOKEN_IS_FALLBACK: "1",
       })
     );
+    expect(createCall.env).not.toHaveProperty("GITHUB_TOKEN");
+    expect(createCall.env).not.toHaveProperty("GITHUB_APP_TOKEN");
+    expect(createCall.env).not.toHaveProperty("OI_GITHUB_TOKEN_IS_FALLBACK");
     expect(createCall.env).not.toHaveProperty("OI_INTERNAL_CALLBACK_SECRET");
     expect(createCall.env).not.toHaveProperty("OI_VERCEL_TOKEN");
     expect(createCall.env).not.toHaveProperty("OI_VERCEL_CALLBACK_URL");

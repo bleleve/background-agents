@@ -16,6 +16,7 @@ export interface SessionInternalRouteHandlers {
   state: SessionInternalRouteHandler;
   prompt: SessionInternalRouteHandler;
   stop: SessionInternalRouteHandler;
+  relaunchSandbox: SessionInternalRouteHandler;
   sandboxEvent: SessionInternalRouteHandler;
   createMediaArtifact: SessionInternalRouteHandler;
   listParticipants: SessionInternalRouteHandler;
@@ -31,6 +32,7 @@ export interface SessionInternalRouteHandlers {
   verifySandboxToken: SessionInternalRouteHandler;
   openaiTokenRefresh: SessionInternalRouteHandler;
   scmCredentials: SessionInternalRouteHandler;
+  bootProgress: SessionInternalRouteHandler;
   spawnContext: SessionInternalRouteHandler;
   childSummary: SessionInternalRouteHandler;
   cancel: SessionInternalRouteHandler;
@@ -54,6 +56,11 @@ export function createSessionInternalRoutes(
     { method: "GET", path: SessionInternalPaths.state, handler: handlers.state },
     { method: "POST", path: SessionInternalPaths.prompt, handler: handlers.prompt },
     { method: "POST", path: SessionInternalPaths.stop, handler: handlers.stop },
+    {
+      method: "POST",
+      path: SessionInternalPaths.relaunchSandbox,
+      handler: handlers.relaunchSandbox,
+    },
     { method: "POST", path: SessionInternalPaths.sandboxEvent, handler: handlers.sandboxEvent },
     {
       method: "POST",
@@ -92,6 +99,11 @@ export function createSessionInternalRoutes(
       method: "POST",
       path: SessionInternalPaths.scmCredentials,
       handler: handlers.scmCredentials,
+    },
+    {
+      method: "POST",
+      path: SessionInternalPaths.bootProgress,
+      handler: handlers.bootProgress,
     },
     { method: "GET", path: SessionInternalPaths.spawnContext, handler: handlers.spawnContext },
     { method: "GET", path: SessionInternalPaths.childSummary, handler: handlers.childSummary },

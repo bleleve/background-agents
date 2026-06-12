@@ -485,8 +485,12 @@ export interface ConnectingTimeoutConfig {
 
 /**
  * Default connecting timeout: 2 minutes.
- * Boot sequence (git clone → setup.sh → start.sh → opencode → bridge connect) typically
- * takes 30–90 seconds. Two minutes provides margin without leaving users waiting too long.
+ *
+ * Measured from the sandbox's last sign of life, not raw creation time: the
+ * in-sandbox supervisor posts boot-progress pings (recorded as heartbeats)
+ * throughout setup, so a legitimately slow setup.sh keeps pushing the deadline
+ * forward. The watchdog therefore fires only after two minutes of silence — a
+ * genuinely stuck boot — rather than penalizing repos with long setup scripts.
  */
 export const DEFAULT_CONNECTING_TIMEOUT_CONFIG: ConnectingTimeoutConfig = {
   timeoutMs: 120_000,
@@ -519,13 +523,16 @@ export interface ConnectingTimeoutResult {
  *
  * @param status - Current sandbox status
  * @param createdAt - Timestamp (ms) when the sandbox was spawned
+ * @param lastProgressAt - Timestamp (ms) of the last sign of life from the
+ *   sandbox (heartbeat / boot-progress ping), or null if none received yet
  * @param config - Connecting timeout configuration
  * @param now - Current timestamp (ms)
- * @returns Whether the sandbox has timed out and how long it's been spawning/connecting
+ * @returns Whether the sandbox has timed out and how long it's been silent
  */
 export function evaluateConnectingTimeout(
   status: SandboxStatus,
   createdAt: number,
+  lastProgressAt: number | null,
   config: ConnectingTimeoutConfig,
   now: number
 ): ConnectingTimeoutResult {
@@ -533,7 +540,13 @@ export function evaluateConnectingTimeout(
     return { isTimedOut: false, elapsedMs: 0 };
   }
 
-  const elapsedMs = now - createdAt;
+  // Measure from the last sign of life, not raw creation time. The supervisor
+  // posts boot-progress pings (recorded as heartbeats) throughout a long
+  // setup.sh — before the bridge WebSocket exists — and each one pushes the
+  // deadline forward. The watchdog fires only when the sandbox goes silent for
+  // the full window (stuck boot), not when a healthy setup simply runs long.
+  const since = Math.max(createdAt, lastProgressAt ?? 0);
+  const elapsedMs = now - since;
   return {
     isTimedOut: elapsedMs >= config.timeoutMs,
     elapsedMs,

@@ -62,6 +62,23 @@ export class SessionSandboxEventProcessor {
       return;
     }
 
+    if (event.type === "ready") {
+      // Re-store the tunnel URLs the sandbox reports on (re)connect. A transient
+      // connecting/heartbeat timeout can clear the stored URLs while the sandbox
+      // is still alive (its Modal tunnels stay valid); the bridge re-reports the
+      // live URLs from /workspace/.tunnels.env so the preview links reappear
+      // without waiting for a fresh spawn.
+      const urls = event.tunnelUrls;
+      if (urls && Object.keys(urls).length > 0) {
+        this.deps.repository.updateSandboxTunnelUrls(urls);
+        this.deps.broadcast({ type: "tunnel_urls", urls });
+        this.deps.log.info("Restored tunnel URLs from sandbox ready event", {
+          ports: Object.keys(urls),
+        });
+      }
+      return;
+    }
+
     if (event.type === "session_title") {
       this.deps.applySessionTitleUpdate(event.title, { onlyIfUnset: true });
       return;

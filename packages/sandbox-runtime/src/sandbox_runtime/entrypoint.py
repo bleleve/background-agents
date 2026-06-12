@@ -12,6 +12,7 @@ Runs as PID 1 inside the sandbox. Responsibilities:
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -55,46 +56,21 @@ AGENT_TOOLS_GATED_ON_ENV: dict[str, str] = {
 
 # Wrapper installed at /usr/local/bin/gh (ahead of the real /usr/bin/gh in
 # PATH). The git credential helper can't authenticate the GitHub CLI — gh
-# reads GH_TOKEN/GITHUB_TOKEN from the environment, not git's protocol — so
-# instead of baking a short-lived token into env at boot (which goes stale
-# after ~1h), this mints a fresh token per invocation.
-#
-# Skip rules (exec real gh untouched):
-#   * non-github.com deployments — never touch gh's auth;
-#   * a genuine user-provided token. The manager's legacy-snapshot fallback
-#     token is marked with OI_GITHUB_TOKEN_IS_FALLBACK=1 and is NOT treated
-#     as user-provided, so a helper-capable restored snapshot still refreshes
-#     rather than reusing the soon-expired restore token. gh reads GH_TOKEN
-#     before GITHUB_TOKEN. The manager's fallback aliases are matching
-#     GITHUB_TOKEN/GITHUB_APP_TOKEN values, so a later user override differs
-#     and wins.
+# reads GH_TOKEN/GITHUB_TOKEN from the environment, not git's protocol. This
+# thin delegator asks the credential helper's `gh-token` action whether a
+# fresh token is needed (the precedence logic lives there, in Python). If it
+# prints one we export it as GH_TOKEN; otherwise gh runs with its own env.
 GH_WRAPPER_REAL_PATH = "/usr/bin/gh"
 GH_WRAPPER_BODY = (
     "#!/bin/sh\n"
     f'REAL_GH="{GH_WRAPPER_REAL_PATH}"\n'
-    'if [ "${VCS_HOST:-github.com}" != "github.com" ]; then\n'
-    '  exec "$REAL_GH" "$@"\n'
-    "fi\n"
-    "# A real user token wins; a marked fallback token does not.\n"
-    'if [ -n "$GH_TOKEN" ]; then\n'
-    '  exec "$REAL_GH" "$@"\n'
-    "fi\n"
-    'if [ "$OI_GITHUB_TOKEN_IS_FALLBACK" != "1" ] && '
-    '{ [ -n "$GITHUB_TOKEN" ] || [ -n "$GITHUB_APP_TOKEN" ]; }; then\n'
-    '  exec "$REAL_GH" "$@"\n'
-    "fi\n"
-    'if [ "$OI_GITHUB_TOKEN_IS_FALLBACK" = "1" ] && '
-    '[ -n "$GITHUB_TOKEN" ] && [ -n "$GITHUB_APP_TOKEN" ] && '
-    '[ "$GITHUB_TOKEN" != "$GITHUB_APP_TOKEN" ]; then\n'
-    '  exec "$REAL_GH" "$@"\n'
-    "fi\n"
     # stderr is left attached so the helper's diagnostic surfaces when a
     # refresh fails — otherwise the user just sees an opaque gh 401.
-    "token=$(python3 -m sandbox_runtime.credentials.git_credential_helper token || true)\n"
+    "token=$(python3 -m sandbox_runtime.credentials.git_credential_helper gh-token || true)\n"
     'if [ -n "$token" ]; then\n'
-    '  exec env GH_TOKEN="$token" "$REAL_GH" "$@"\n'
+    # export (not `env GH_TOKEN=… exec`) so the token never lands in argv.
+    '  export GH_TOKEN="$token"\n'
     "fi\n"
-    "# Refresh unavailable — fall back to whatever was in env (may be stale).\n"
     'exec "$REAL_GH" "$@"\n'
 )
 
@@ -128,6 +104,10 @@ class SandboxSupervisor:
     RTK_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/rtk.ts"
     CODEX_AUTH_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/codex-auth-plugin.js"
     MCP_PACKAGE_INSTALL_TIMEOUT_SECONDS = 180
+    # How often to ping the control plane while booting so a long setup.sh
+    # doesn't trip the connecting-timeout watchdog. Must stay well under the
+    # control plane's connecting/heartbeat timeouts (120s / 90s).
+    BOOT_PROGRESS_INTERVAL_SECONDS = 20
 
     def __init__(self):
         self.opencode_process: asyncio.subprocess.Process | None = None
@@ -135,6 +115,7 @@ class SandboxSupervisor:
         self.code_server_process: asyncio.subprocess.Process | None = None
         self.ttyd_process: asyncio.subprocess.Process | None = None
         self.ttyd_proxy_process: asyncio.subprocess.Process | None = None
+        self._boot_progress_task: asyncio.Task[None] | None = None
         self.shutdown_event = asyncio.Event()
         self.git_sync_complete = asyncio.Event()
         self.opencode_ready = asyncio.Event()
@@ -162,12 +143,12 @@ class SandboxSupervisor:
         self.session_id_file = Path("/tmp/opencode-session-id")
 
         # Logger
-        session_id = self.session_config.get("session_id", "")
+        self.session_id = self.session_config.get("session_id", "")
         self.log = get_logger(
             "supervisor",
             service="sandbox",
             sandbox_id=self.sandbox_id,
-            session_id=session_id,
+            session_id=self.session_id,
         )
 
     @property
@@ -378,8 +359,49 @@ class SandboxSupervisor:
             return False
         return True
 
+    async def _stash_local_changes(self) -> bool:
+        """Stash any uncommitted local changes so a checkout can proceed cleanly.
+
+        Uses ``git stash --include-untracked`` so that both tracked modifications
+        and untracked files (e.g. generated lock-file updates written by a
+        previous session) are moved out of the way before the branch reset.
+
+        Returns True if the stash succeeded (or there was nothing to stash),
+        False on unexpected failure.
+        """
+        result = await asyncio.create_subprocess_exec(
+            "git",
+            "stash",
+            "--include-untracked",
+            cwd=self.repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await result.communicate()
+        if result.returncode != 0:
+            self.log.warn(
+                "git.stash_failed",
+                stderr=self._redact_git_stderr(stderr.decode()),
+                exit_code=result.returncode,
+            )
+            return False
+        stash_output = stdout.decode().strip()
+        if stash_output and stash_output != "No local changes to stash":
+            self.log.info("git.stash_created", message=stash_output)
+        return True
+
     async def _checkout_branch(self, branch: str) -> bool:
-        """Create/reset a local branch to match the remote tip."""
+        """Create/reset a local branch to match the remote tip.
+
+        Stashes any uncommitted local changes before the checkout so that
+        working-tree modifications (e.g. lock-file regenerations from a
+        previous session) do not block the branch reset.
+        """
+        if not await self._stash_local_changes():
+            # Stash failure is non-fatal; attempt the checkout anyway —
+            # it will fail loudly below if the working tree is still dirty.
+            self.log.warn("git.stash_skipped", reason="stash_failed")
+
         result = await asyncio.create_subprocess_exec(
             "git",
             "checkout",
@@ -1357,6 +1379,57 @@ class SandboxSupervisor:
         except Exception as e:
             self.log.error("supervisor.report_error_failed", exc=e)
 
+    async def _send_boot_progress(self) -> None:
+        """Tell the control plane the sandbox is alive and still booting.
+
+        Posted repeatedly during a long setup.sh — before the bridge WebSocket
+        exists — so the connecting-timeout watchdog measures from the last ping
+        rather than from sandbox creation. Best-effort: failures are logged at
+        debug and never block boot.
+        """
+        if not self.control_plane_url or not self.session_id or not self.sandbox_token:
+            return
+
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"{self.control_plane_url}/sessions/{self.session_id}/boot-progress",
+                    headers={"Authorization": f"Bearer {self.sandbox_token}"},
+                    timeout=5.0,
+                )
+        except Exception as e:
+            self.log.debug("boot_progress.send_failed", exc=e)
+
+    async def _boot_progress_loop(self) -> None:
+        """Ping the control plane every BOOT_PROGRESS_INTERVAL_SECONDS while the
+        sandbox boots. Cancelled once the bridge starts, after which the bridge's
+        own heartbeats keep the sandbox alive.
+        """
+        while not self.shutdown_event.is_set():
+            await self._send_boot_progress()
+            try:
+                await asyncio.sleep(self.BOOT_PROGRESS_INTERVAL_SECONDS)
+            except asyncio.CancelledError:
+                break
+
+    def _start_boot_progress_pings(self) -> None:
+        """Start the background boot-progress ping loop (idempotent)."""
+        if self._boot_progress_task is not None:
+            return
+        if not self.control_plane_url or not self.session_id:
+            return
+        self._boot_progress_task = asyncio.create_task(self._boot_progress_loop())
+
+    async def _stop_boot_progress_pings(self) -> None:
+        """Stop the boot-progress ping loop once the bridge has taken over."""
+        task = self._boot_progress_task
+        if task is None:
+            return
+        self._boot_progress_task = None
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
     def _hook_env(self) -> dict[str, str]:
         """Build environment for startup hooks."""
         env = os.environ.copy()
@@ -1655,6 +1728,12 @@ class SandboxSupervisor:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self._handle_signal(s)))
 
+        # Keep the control plane's connecting-timeout watchdog at bay during a
+        # long setup.sh by pinging it from the start of boot. Stopped once the
+        # bridge connects (Phase 5) and its heartbeats take over.
+        if not image_build_mode:
+            self._start_boot_progress_pings()
+
         git_sync_success = False
         head_sha = ""
         opencode_ready = False
@@ -1742,6 +1821,8 @@ class SandboxSupervisor:
 
             # Phase 5: Start bridge (after OpenCode is ready)
             await self.start_bridge()
+            # The bridge now owns heartbeating; stop the boot-progress pings.
+            await self._stop_boot_progress_pings()
 
             # Emit sandbox.startup wide event
             duration_ms = int((time.time() - startup_start) * 1000)
@@ -1780,6 +1861,9 @@ class SandboxSupervisor:
     async def shutdown(self) -> None:
         """Graceful shutdown of all processes."""
         self.log.info("supervisor.shutdown_start")
+
+        # Stop boot-progress pings if boot failed before the bridge took over.
+        await self._stop_boot_progress_pings()
 
         # Terminate bridge first
         if self.bridge_process and self.bridge_process.returncode is None:

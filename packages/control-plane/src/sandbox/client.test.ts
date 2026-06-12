@@ -34,6 +34,7 @@ describe("ModalClient OpenCode config payload", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("sends opencode_user_config in createSandbox requests", async () => {
@@ -109,6 +110,7 @@ describe("ModalClient endpoint URLs", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("posts createSandbox to the api-create endpoint (not api-create-sandbox)", async () => {

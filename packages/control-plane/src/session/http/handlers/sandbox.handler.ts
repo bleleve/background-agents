@@ -27,6 +27,7 @@ export interface SandboxHandlerDeps {
   refreshOpenAIToken: (session: SessionRow) => Promise<OpenAITokenRefreshResult>;
   isOpenAISecretsConfigured: () => boolean;
   getScmCredentials: () => Promise<ScmCredentialsResult>;
+  recordBootProgress: () => void;
   broadcast: (message: ServerMessage) => void;
   generateId: () => string;
   now: () => number;
@@ -47,6 +48,7 @@ export interface SandboxHandler {
   verifySandboxToken: (request: Request) => Promise<Response>;
   openaiTokenRefresh: () => Promise<Response>;
   scmCredentials: () => Promise<Response>;
+  bootProgress: () => Promise<Response>;
 }
 
 export function createSandboxHandler(deps: SandboxHandlerDeps): SandboxHandler {
@@ -213,6 +215,11 @@ export function createSandboxHandler(deps: SandboxHandlerDeps): SandboxHandler {
           headers: { "Cache-Control": "no-store" },
         }
       );
+    },
+
+    async bootProgress(): Promise<Response> {
+      deps.recordBootProgress();
+      return Response.json({ status: "ok" });
     },
   };
 }

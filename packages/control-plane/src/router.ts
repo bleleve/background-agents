@@ -25,6 +25,7 @@ import { mcpServerRoutes } from "./routes/mcp-servers";
 import { analyticsRoutes } from "./routes/analytics";
 import { providerIdentityRoutes } from "./routes/provider-identities";
 import { sessionRoutes } from "./routes/sessions";
+import { handleBootProgress } from "./routes/boot-progress";
 import { handleSlackNotify } from "./routes/slack-notify";
 import { reviewSuggestionRoutes } from "./routes/review-suggestions";
 import { webhookRoutes } from "./webhooks";
@@ -79,6 +80,7 @@ const SANDBOX_AUTH_ROUTES: RegExp[] = [
   /^\/sessions\/[^/]+\/children\/[^/]+$/, // GET child detail
   /^\/sessions\/[^/]+\/children\/[^/]+\/cancel$/, // POST cancel child
   /^\/sessions\/[^/]+\/slack-notify$/, // Agent-initiated Slack notification
+  /^\/sessions\/[^/]+\/boot-progress$/, // Supervisor boot-progress ping during setup
   /^\/sessions\/[^/]+\/plan$/, // Agent-saved plan artifact (POST/GET)
   /^\/sessions\/[^/]+\/plans$/, // Plan history list (GET)
 ];
@@ -337,6 +339,13 @@ const routes: Route[] = [
     method: "POST",
     pattern: parsePattern("/sessions/:id/slack-notify"),
     handler: handleSlackNotify,
+  },
+
+  // Supervisor boot-progress ping during setup (sandbox-authenticated)
+  {
+    method: "POST",
+    pattern: parsePattern("/sessions/:id/boot-progress"),
+    handler: handleBootProgress,
   },
 
   // Repository management
