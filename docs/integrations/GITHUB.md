@@ -135,6 +135,11 @@ there is no keyword matching in the bot. A review-request mention produces the s
 [automatic review](#what-it-posts), not a plain summary comment. The verdict footer links back to
 the session that produced it.
 
+Unlike auto-review, the session starts from the repository default branch rather than the PR head
+(see [Current Branch Behavior](#current-branch-behavior) below). This does not change the review
+output: the agent reads the diff with `gh pr diff` and anchors inline suggestions to the PR head
+SHA, so it does not need the PR branch checked out.
+
 ### Current Branch Behavior
 
 Comment-triggered sessions currently start from the repository default branch, not the PR head
