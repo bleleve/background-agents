@@ -326,9 +326,9 @@ src/
 └── utils/
     └── internal.ts   # Re-exports generateInternalToken from @open-inspect/shared
 test/
-├── verify.test.ts    # Signature verification (8 tests)
-├── webhook.test.ts   # Endpoint routing and integration (6 tests)
-├── prompts.test.ts   # Prompt construction (10 tests)
-├── github-auth.test.ts # JWT generation and reactions (7 tests)
-└── handlers.test.ts  # Event handler flows and edge cases (15 tests)
+├── verify.test.ts    # Signature verification
+├── webhook.test.ts   # Endpoint routing and integration
+├── prompts.test.ts   # Prompt construction
+├── github-auth.test.ts # JWT generation and reactions
+└── handlers.test.ts  # Event handler flows and edge cases
 ```
