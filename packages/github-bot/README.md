@@ -6,7 +6,9 @@ sessions. It provides two capabilities:
 1. **Code Review** — Review newly opened PRs when auto-review is enabled and submit structured
    feedback.
 2. **Comment-Triggered Actions** — @mention the bot in a PR comment; it reads the PR context and
-   responds with analysis, a summary comment, or a review-thread reply.
+   either handles a targeted request (analysis, a summary comment, a review-thread reply, or a code
+   change) or, when the comment asks for a review, runs a full PR review with the same verdict as
+   auto-review.
 
 For day-to-day usage, see the user-facing
 [GitHub integration guide](../../docs/integrations/GITHUB.md).
@@ -239,14 +241,22 @@ Three prompt templates in `src/prompts.ts`:
   originating session in the footer (built from `sessionUrl`, the only extra param the handler
   passes beyond webhook metadata)
 
-**`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and
-instructions to:
+**`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and asks the
+agent to first classify the request into one of two paths (the model decides from the comment's
+meaning in any phrasing or language — there is no keyword matching in the bot):
 
-- Check prior conversation via `gh pr view --comments`
-- Make code changes and push, or respond with analysis
-- Post inline `suggestion` comments via `gh api .../pulls/{n}/comments` (instead of summary PR
-  comments)
-- Reply to a specific review thread (when `commentId` is present)
+- **Targeted request** (the default) — answer a question or make a specific change. Instructions to:
+  - Check prior conversation via `gh pr view --comments`
+  - Make code changes and push, or respond with analysis
+  - Post inline `suggestion` comments via `gh api .../pulls/{n}/comments` (instead of summary PR
+    comments)
+  - Reply to a specific review thread (when `commentId` is present)
+  - Never post a verdict comment, and never submit a formal review (`NO_FORMAL_REVIEW_GUARD`)
+- **Full PR review** — when the comment reads as a request to review or re-review the PR. Reuses the
+  exact same verdict workflow as `buildCodeReviewPrompt`: inline `suggestion` comments plus a single
+  risk-map **verdict** comment, the matching `reef: …` risk label, and the originating session
+  linked in the footer (built from `sessionUrl`, passed by
+  `handleIssueComment`/`handleReviewComment`).
 
 **`buildFailedChecksPrompt`** — Includes check context and instructions to:
 

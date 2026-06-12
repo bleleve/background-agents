@@ -125,6 +125,21 @@ When you mention the bot in a PR review thread, Open-Inspect includes the file p
 from that thread. The agent can reply directly to the review thread and can also post a summary
 comment on the PR.
 
+### Requesting a Review
+
+If your mention reads as a request to review or re-review the PR — in any phrasing or language ("can
+you review this?", "PTAL", "take another look", "review again") — the agent runs a full PR review
+instead of a targeted reply. The agent classifies the intent itself from the comment's meaning;
+there is no keyword matching in the bot. A review-request mention produces the same inline
+`suggestion` comments and structured **verdict** comment (with the matching risk label) as an
+[automatic review](#what-it-posts), not a plain summary comment. The verdict footer links back to
+the session that produced it.
+
+Unlike auto-review, the session starts from the repository default branch rather than the PR head
+(see [Current Branch Behavior](#current-branch-behavior) below). This does not change the review
+output: the agent reads the diff with `gh pr diff` and anchors inline suggestions to the PR head
+SHA, so it does not need the PR branch checked out.
+
 ### Current Branch Behavior
 
 Comment-triggered sessions currently start from the repository default branch, not the PR head
@@ -152,8 +167,12 @@ GitHub rejects the reaction, the session can still start.
 For auto-review workflows, the agent posts inline `suggestion` comments plus the structured review
 verdict described in [What It Posts](#what-it-posts), and sets the matching risk label on the PR.
 
-For `@mention` workflows, the agent posts a PR comment summarizing its response or answering the
-question. If the request came from an inline review thread, the agent may also reply in that thread.
+For `@mention` workflows, the output depends on what the comment asks for. A targeted question or
+change gets a PR comment summarizing the response (or the pushed change); if the request came from
+an inline review thread, the agent may also reply in that thread. A request to review the PR runs a
+full review and posts the same inline suggestions and structured verdict described in
+[What It Posts](#what-it-posts), just like an automatic review — see
+[Requesting a Review](#requesting-a-review).
 
 GitHub does not receive the same managed completion message that Slack receives. After the initial
 eyes reaction, GitHub-facing output is written by the agent from inside the session. Use the
