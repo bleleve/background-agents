@@ -187,6 +187,42 @@ export async function removeIssueLabel(
   }
 }
 
+/**
+ * Dismiss a formal PR review (reactive backstop for off-policy bot reviews).
+ * Only APPROVED / CHANGES_REQUESTED reviews are dismissable — GitHub returns 422
+ * for COMMENTED/PENDING/DISMISSED, which we treat as a non-fatal no-op (callers
+ * pre-filter on state, so this is just belt-and-suspenders). Best-effort:
+ * returns true on success, false on any failure. Never throws.
+ */
+export async function dismissPullRequestReview(
+  token: string,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  reviewId: number,
+  message: string,
+  userAgent: string = DEFAULT_APP_NAME
+): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${pullNumber}/reviews/${reviewId}/dismissals`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": userAgent,
+        },
+        body: JSON.stringify({ message, event: "DISMISS" }),
+      }
+    );
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 // Page size and page cap for the verdict-comment lookup. 100 is GitHub's max
 // per_page; 10 pages (1000 comments) is far more than any real PR thread, and
 // the loop short-circuits the moment it finds the marker.

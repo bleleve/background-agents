@@ -7,6 +7,7 @@ import {
   AUTOMATION_CONTROL_PLANE_QUERY_PARAMS,
   buildControlPlanePath,
 } from "@/lib/control-plane-query";
+import { buildAutomationActorQueryParams } from "@/lib/automation-actor";
 import { resolveCurrentUserId } from "@/lib/current-user";
 import { CURRENT_USER_CREATED_BY } from "@/lib/automation-list";
 
@@ -33,6 +34,11 @@ export async function GET(request: NextRequest) {
           value === CURRENT_USER_CREATED_BY ? resolved.userId : value
         );
       }
+    }
+
+    const actorParams = buildAutomationActorQueryParams(session);
+    for (const [key, value] of actorParams.entries()) {
+      searchParams.set(key, value);
     }
 
     const path = buildControlPlanePath(

@@ -16,8 +16,20 @@ import {
   type UpdateAutomationRequest,
   type AutomationTriggerType,
 } from "@open-inspect/shared";
-import { AutomationStore, toAutomation, toAutomationRun } from "../db/automation-store";
+import {
+  AutomationStore,
+  toAutomation,
+  toAutomationRun,
+  type AutomationListSortBy,
+  type AutomationListSortOrder,
+  type AutomationRow,
+} from "../db/automation-store";
 import { UserStore } from "../db/user-store";
+import {
+  canDeleteAutomation,
+  parseAutomationDeleteActorFromSearchParams,
+  type AutomationDeleteActor,
+} from "../automation-delete-auth";
 import { generateId } from "../auth/crypto";
 import { generateWebhookApiKey, hashApiKey, encryptSentrySecret } from "../auth/webhook-key";
 import { createLogger } from "../logger";
@@ -69,6 +81,18 @@ function isValidTimezone(tz: string): boolean {
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
+const VALID_AUTOMATION_SORT_BY = new Set<AutomationListSortBy>(["created_at", "last_run_at"]);
+const VALID_AUTOMATION_SORT_ORDER = new Set<AutomationListSortOrder>(["asc", "desc"]);
+
+async function toAutomationResponse(env: Env, row: AutomationRow, actor?: AutomationDeleteActor) {
+  const automation = toAutomation(row);
+  if (!actor) return automation;
+  return {
+    ...automation,
+    canDelete: await canDeleteAutomation(env, env.DB, row, actor),
+  };
+}
+
 async function handleListAutomations(
   request: Request,
   env: Env,
@@ -84,11 +108,43 @@ async function handleListAutomations(
     return createdByUserIds;
   }
 
+  const sortByParam = url.searchParams.get("sortBy");
+  const sortOrderParam = url.searchParams.get("sortOrder");
+
+  const sortBy: AutomationListSortBy =
+    sortByParam === null || sortByParam === ""
+      ? "created_at"
+      : (sortByParam as AutomationListSortBy);
+  const sortOrder: AutomationListSortOrder =
+    sortOrderParam === null || sortOrderParam === ""
+      ? "desc"
+      : (sortOrderParam as AutomationListSortOrder);
+
+  if (!VALID_AUTOMATION_SORT_BY.has(sortBy)) {
+    return error("sortBy must be one of: created_at, last_run_at", 400);
+  }
+  if (!VALID_AUTOMATION_SORT_ORDER.has(sortOrder)) {
+    return error("sortOrder must be one of: asc, desc", 400);
+  }
+
+  const actor = parseAutomationDeleteActorFromSearchParams(url.searchParams);
+  const hasActorContext = Boolean(actor.scmUserId || actor.scmLogin || actor.userId);
+
   const store = new AutomationStore(env.DB);
-  const result = await store.list({ repoOwner, repoName, createdByUserIds });
+  const result = await store.list({
+    repoOwner,
+    repoName,
+    sortBy,
+    sortOrder,
+    createdByUserIds,
+  });
+
+  const automations = hasActorContext
+    ? await Promise.all(result.automations.map((row) => toAutomationResponse(env, row, actor)))
+    : result.automations.map(toAutomation);
 
   return json({
-    automations: result.automations.map(toAutomation),
+    automations,
     total: result.total,
   });
 }
@@ -278,6 +334,7 @@ async function handleCreateAutomation(
     event_type: body.eventType ?? null,
     trigger_config: body.triggerConfig ? JSON.stringify(body.triggerConfig) : null,
     trigger_auth_data: triggerAuthData,
+    last_run_at: null,
   });
 
   const automation = toAutomation((await store.getById(id))!);
@@ -317,7 +374,7 @@ async function handleCreateAutomation(
 }
 
 async function handleGetAutomation(
-  _request: Request,
+  request: Request,
   env: Env,
   match: RegExpMatchArray,
   _ctx: RequestContext
@@ -325,11 +382,19 @@ async function handleGetAutomation(
   const id = match.groups?.id;
   if (!id) return error("Automation ID required", 400);
 
+  const url = new URL(request.url);
+  const actor = parseAutomationDeleteActorFromSearchParams(url.searchParams);
+  const hasActorContext = Boolean(actor.scmUserId || actor.scmLogin || actor.userId);
+
   const store = new AutomationStore(env.DB);
   const row = await store.getById(id);
   if (!row) return error("Automation not found", 404);
 
-  return json({ automation: toAutomation(row) });
+  const automation = hasActorContext
+    ? await toAutomationResponse(env, row, actor)
+    : toAutomation(row);
+
+  return json({ automation });
 }
 
 async function handleUpdateAutomation(
@@ -477,7 +542,7 @@ async function handleUpdateAutomation(
 }
 
 async function handleDeleteAutomation(
-  _request: Request,
+  request: Request,
   env: Env,
   match: RegExpMatchArray,
   ctx: RequestContext
@@ -485,13 +550,37 @@ async function handleDeleteAutomation(
   const id = match.groups?.id;
   if (!id) return error("Automation ID required", 400);
 
+  let deleteBody: { scmUserId?: string; scmLogin?: string; userId?: string } = {};
+  const rawBody = await request.text();
+  if (rawBody.trim()) {
+    try {
+      deleteBody = JSON.parse(rawBody) as typeof deleteBody;
+    } catch {
+      return error("Invalid JSON body", 400);
+    }
+  }
+
+  const actor: AutomationDeleteActor = {
+    scmUserId: deleteBody.scmUserId,
+    scmLogin: deleteBody.scmLogin,
+    userId: deleteBody.userId,
+  };
+
   const store = new AutomationStore(env.DB);
+  const existing = await store.getById(id);
+  if (!existing) return error("Automation not found", 404);
+
+  if (!(await canDeleteAutomation(env, env.DB, existing, actor))) {
+    return error("This automation can only be deleted by its creator or an administrator", 403);
+  }
+
   const deleted = await store.softDelete(id);
   if (!deleted) return error("Automation not found", 404);
 
   logger.info("automation.deleted", {
     event: "automation.deleted",
     automation_id: id,
+    actor_login: actor.scmLogin ?? null,
     request_id: ctx.request_id,
     trace_id: ctx.trace_id,
   });

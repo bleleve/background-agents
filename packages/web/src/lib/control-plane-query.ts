@@ -11,6 +11,11 @@ export const AUTOMATION_CONTROL_PLANE_QUERY_PARAMS = [
   "createdBy",
   "repoOwner",
   "repoName",
+  "sortBy",
+  "sortOrder",
+  "scmUserId",
+  "scmLogin",
+  "actorUserId",
 ] as const;
 
 export function buildControlPlanePath(

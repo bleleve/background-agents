@@ -33,6 +33,31 @@ export interface AutomationRow {
   event_type: string | null;
   trigger_config: string | null; // JSON-serialized TriggerConfig
   trigger_auth_data: string | null;
+  last_run_at: number | null;
+}
+
+export type AutomationListSortBy = "created_at" | "last_run_at";
+export type AutomationListSortOrder = "asc" | "desc";
+
+export interface AutomationListOptions {
+  repoOwner?: string;
+  repoName?: string;
+  sortBy?: AutomationListSortBy;
+  sortOrder?: AutomationListSortOrder;
+  createdByUserIds?: readonly string[];
+}
+
+function buildListOrderBy(
+  sortBy: AutomationListSortBy = "created_at",
+  sortOrder: AutomationListSortOrder = "desc"
+): string {
+  if (sortBy === "last_run_at") {
+    if (sortOrder === "desc") {
+      return "ORDER BY last_run_at IS NULL, last_run_at DESC";
+    }
+    return "ORDER BY last_run_at IS NULL DESC, last_run_at ASC";
+  }
+  return sortOrder === "asc" ? "ORDER BY created_at ASC" : "ORDER BY created_at DESC";
 }
 
 export interface AutomationRunRow {
@@ -78,6 +103,7 @@ export function toAutomation(row: AutomationRow): Automation {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
+    lastRunAt: row.last_run_at ?? null,
     eventType: row.event_type ?? null,
     triggerConfig: row.trigger_config ? JSON.parse(row.trigger_config) : null,
   };
@@ -154,13 +180,10 @@ export class AutomationStore {
       .first<AutomationRow>();
   }
 
-  async list(
-    options: {
-      repoOwner?: string;
-      repoName?: string;
-      createdByUserIds?: readonly string[];
-    } = {}
-  ): Promise<{ automations: AutomationRow[]; total: number }> {
+  async list(options: AutomationListOptions = {}): Promise<{
+    automations: AutomationRow[];
+    total: number;
+  }> {
     const conditions: string[] = ["deleted_at IS NULL"];
     const params: unknown[] = [];
 
@@ -178,9 +201,10 @@ export class AutomationStore {
     }
 
     const where = `WHERE ${conditions.join(" AND ")}`;
+    const orderBy = buildListOrderBy(options.sortBy, options.sortOrder);
 
     const result = await this.db
-      .prepare(`SELECT * FROM automations ${where} ORDER BY created_at DESC`)
+      .prepare(`SELECT * FROM automations ${where} ${orderBy}`)
       .bind(...params)
       .all<AutomationRow>();
 
@@ -360,6 +384,22 @@ export class AutomationStore {
     await this.db
       .prepare(`UPDATE automation_runs SET ${setClauses.join(", ")} WHERE id = ?`)
       .bind(...params)
+      .run();
+
+    if (fields.started_at != null || fields.completed_at != null) {
+      const touchAt = fields.started_at ?? fields.completed_at!;
+      await this.touchLastRunAtForRun(id, touchAt);
+    }
+  }
+
+  private async touchLastRunAtForRun(runId: string, at: number): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE automations SET last_run_at = ?, updated_at = ?
+         WHERE id = (SELECT automation_id FROM automation_runs WHERE id = ?)
+           AND deleted_at IS NULL`
+      )
+      .bind(at, Date.now(), runId)
       .run();
   }
 

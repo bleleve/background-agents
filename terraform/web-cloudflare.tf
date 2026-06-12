@@ -92,6 +92,7 @@ resource "local_file" "web_app_wrangler_production" {
     ALLOWED_USERS = "${var.allowed_users}"
     ALLOWED_EMAIL_DOMAINS = "${var.allowed_email_domains}"
     UNSAFE_ALLOW_ALL_USERS = "${tostring(var.unsafe_allow_all_users)}"
+    AUTOMATION_DELETE_ADMINS = "${var.automation_delete_admins}"
 
     [assets]
     directory = ".open-next/assets"

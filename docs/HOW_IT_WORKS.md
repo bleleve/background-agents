@@ -242,9 +242,12 @@ If `start.sh` exists and fails, startup fails fast instead of continuing with a 
 
 ### Sandbox Warming
 
-To minimize perceived latency, sandboxes warm proactively:
+To minimize perceived latency, sandboxes warm proactively once a prompt shows real intent (more than
+a few non-whitespace characters):
 
-- Once you've typed a few characters of a prompt, the control plane begins warming a sandbox
+- On the new-session prompt, the control plane begins warming a fresh sandbox
+- In the in-session composer, typing a follow-up relaunches a stopped/idle sandbox (when it's
+  relaunchable) so it's coming back up before you submit
 - By the time you hit enter, the sandbox may already be ready
 - If restore is fast enough, you won't notice any delay
 

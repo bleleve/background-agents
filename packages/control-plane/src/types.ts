@@ -117,6 +117,9 @@ export interface Env {
 
   // Logging
   LOG_LEVEL?: string; // "debug" | "info" | "warn" | "error" (default: "info")
+
+  // Comma-separated GitHub logins allowed to delete any automation (soft-delete).
+  AUTOMATION_DELETE_ADMINS?: string;
 }
 
 // Client info (stored in DO memory)

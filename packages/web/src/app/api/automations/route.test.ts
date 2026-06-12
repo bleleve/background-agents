@@ -53,7 +53,7 @@ describe("automations API route", () => {
     );
 
     expect(controlPlaneFetch).toHaveBeenCalledWith(
-      "/automations?limit=10&offset=20&createdBy=0123456789abcdef0123456789abcdef&repoOwner=acme&repoName=web-app"
+      "/automations?limit=10&offset=20&createdBy=0123456789abcdef0123456789abcdef&repoOwner=acme&repoName=web-app&scmUserId=12345&actorUserId=12345"
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ automations: [], total: 0 });
@@ -86,7 +86,7 @@ describe("automations API route", () => {
     });
     expect(controlPlaneFetch).toHaveBeenNthCalledWith(
       2,
-      "/automations?createdBy=0123456789abcdef0123456789abcdef"
+      "/automations?createdBy=0123456789abcdef0123456789abcdef&scmUserId=12345&scmLogin=ada&actorUserId=12345"
     );
     expect(response.status).toBe(200);
   });

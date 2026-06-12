@@ -59,6 +59,17 @@ A confidently-wrong inline comment costs reviewer time and erodes trust over man
 - **Out of scope — do not post (unless a comment explicitly asks about it):** theoretical risks that need unlikely preconditions (but do flag silent data corruption or loss even when the trigger is rare); defense-in-depth suggestions when the primary defense is already adequate; issues in code this PR does not touch; "consider using library X" style preferences.
 - **When uncertain whether the issue is real, do not post.** A missed real issue is recoverable on the next review pass; a confidently-wrong one creates noise on every review.`;
 
+// Shared guard forbidding a formal PR-review submission. The sandbox enforces
+// this for real (the gh wrapper blocks APPROVE/REQUEST_CHANGES when the session
+// is not permitted) — this is the prompt-level first line so the agent doesn't
+// even try. Used by every review/comment/failed-checks prompt that should only
+// leave comments. Keep aligned with the sandbox guard's allowed-actions message.
+const NO_FORMAL_REVIEW_GUARD =
+  "Do NOT submit a formal pull request review. Specifically, do not run `gh pr review` " +
+  "and do not call `gh api ... repos/<owner>/<repo>/pulls/<n>/reviews` with event APPROVE or " +
+  "REQUEST_CHANGES (neither is permitted here, and the sandbox will block them). Leave feedback " +
+  "only as inline suggestion comments (`.../pulls/<n>/comments`) and the single verdict issue comment.";
+
 function buildInlineSuggestionWorkflow(params: {
   owner: string;
   repo: string;
@@ -264,18 +275,11 @@ export function buildCodeReviewPrompt(params: {
     includeWarning: false,
   });
 
-  const reviewInstruction = autoApproveOnOpen
-    ? `4. When your review is complete, submit it via:
+  const formalVerdictHint = autoApproveOnOpen
+    ? "This repo permits formal verdicts: APPROVE only for extremely low-risk changes (docs, comments, test-only, trivial config, or minor refactors with no behavioral change) when you found no issues; REQUEST_CHANGES for real blocking issues; COMMENT for non-blocking feedback. If you found no issues and the changes are not clearly low-risk, skip the formal verdict."
+    : "This repo does not permit approving or blocking verdicts — the tool will reject APPROVE and REQUEST_CHANGES, so at most submit a COMMENT, or skip the tool entirely.";
 
-   gh api -X POST "repos/${owner}/${repo}/pulls/${number}/reviews" \\
-     -f body="<your review summary>" \\
-     -f event="APPROVE|REQUEST_CHANGES|COMMENT"
-
-   Use APPROVE only if the changes are extremely low-risk (documentation, comments, test-only updates,
-   trivial config, or minor refactors with no behavioral change) and you found no issues. Use
-   REQUEST_CHANGES if you found real issues. Use COMMENT for general feedback that does not block merging.
-   If you found no issues and the changes are not clearly low-risk, do not submit a review at all.`
-    : `4. Do not submit a pull request review.`;
+  const reviewInstruction = `4. A formal review verdict is OPTIONAL. If you want one, use the \`submit-pr-review\` tool (event APPROVE, REQUEST_CHANGES, or COMMENT) — it posts the review server-side after checking this repo's policy live. ${formalVerdictHint} NEVER submit a review with \`gh pr review\` or \`gh api ... repos/${owner}/${repo}/pulls/${number}/reviews\` — those are blocked in the sandbox. Your inline comments and the single verdict comment (below) are the primary output regardless of whether you submit a formal verdict.`;
 
   const largeDiffSection = largeDiff ? `\n${buildLookoutDiverGuidance()}\n` : "";
 
@@ -341,6 +345,8 @@ export function buildCommentActionPrompt(params: {
   diffHunk?: string;
   commentId?: number;
   commentActionInstructions?: string | null;
+  /** Links the session in the verdict footer when the agent chooses a full review. */
+  sessionUrl?: string;
 }): string {
   const {
     owner,
@@ -356,6 +362,7 @@ export function buildCommentActionPrompt(params: {
     diffHunk,
     commentId,
     commentActionInstructions,
+    sessionUrl,
   } = params;
 
   const intro = head
@@ -390,7 +397,7 @@ export function buildCommentActionPrompt(params: {
 
   let replyInstruction = "";
   if (commentId) {
-    replyInstruction = `\n6. If you need to reply to the specific review thread:\n\n   gh api repos/${owner}/${repo}/pulls/${number}/comments/${commentId}/replies \\\n     --method POST \\\n     -f body="<your reply>"`;
+    replyInstruction = `\n   - To reply to the specific review thread:\n\n     gh api repos/${owner}/${repo}/pulls/${number}/comments/${commentId}/replies \\\n       --method POST \\\n       -f body="<your reply>"`;
   }
 
   return `${intro}${prDetails}${codeLocation}
@@ -404,20 +411,31 @@ ${buildUntrustedUserContentBlock({
 
 ${UNTRUSTED_REPO_CONTENT_GUIDANCE}
 
-## Instructions
-1. Run \`gh pr diff ${number}\` if you need to see the current changes
-2. Run \`gh pr view ${number} --comments\` to see prior conversation on this PR
-3. Address the request:
-   - If code changes are needed, make them and push to the current branch
-   - If it's a question, reply in-thread when possible
-4. For code feedback to the PR author, post inline suggestion comments (not top-level PR comments) using this flow:
+## Decide what is being asked
+Read the request above and choose ONE path:
+- **Full PR review** — the commenter is asking you to review or re-review the PR. Judge this from the meaning of their message, in any language or phrasing (e.g. "can you review it?", "review again", "take another look", "PTAL", "re-review please"). Follow **Full PR review** below.
+- **Targeted request** — anything else: a specific code change, a question, or feedback about a specific line. Follow **Targeted request** below, and do NOT post a verdict.
+
+When in doubt between the two, prefer the targeted request — only treat it as a full review when the comment is clearly asking you to review the PR.
+
+## Inline suggestions
+In either path, when you have concrete on-the-diff code feedback, post it as inline suggestion comments (never top-level), using this flow:
 
 ${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
-5. Do not post summary issue comments on the PR.
-${replyInstruction}
+## Targeted request
+1. Run \`gh pr diff ${number}\` for the current changes and \`gh pr view ${number} --comments\` for prior conversation, as needed.
+2. Address the request:
+   - If code changes are needed, make them and push to the current branch
+   - If it's a question, reply in-thread when possible${replyInstruction}
+3. Do not post summary or verdict issue comments on the PR. ${NO_FORMAL_REVIEW_GUARD}
+
+## Full PR review
+Only when the request is a (re-)review. Review the whole diff with the same rigor as an automated review — correctness and potential bugs, security, performance, maintainability, deletions that silently change behavior, cross-boundary drift (callers/siblings/other implementations not updated alongside the change), and silent behavior changes (same signature, different behavior). Post inline suggestions (above) for findings that clear the quality bar, then post the verdict. ${NO_FORMAL_REVIEW_GUARD}
+
+${buildVerdictWorkflow({ owner, repo, number, sessionUrl })}
 ${buildCustomInstructionsSection(commentActionInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
 }
@@ -507,6 +525,8 @@ ${UNTRUSTED_REPO_CONTENT_GUIDANCE}
 ${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
+
+7. ${NO_FORMAL_REVIEW_GUARD}
 
 ${buildCommentGuidelines(isPublic)}`;
 }

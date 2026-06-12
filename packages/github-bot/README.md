@@ -6,7 +6,9 @@ sessions. It provides two capabilities:
 1. **Code Review** — Review newly opened PRs when auto-review is enabled and submit structured
    feedback.
 2. **Comment-Triggered Actions** — @mention the bot in a PR comment; it reads the PR context and
-   responds with analysis, a summary comment, or a review-thread reply.
+   either handles a targeted request (analysis, a summary comment, a review-thread reply, or a code
+   change) or, when the comment asks for a review, runs a full PR review with the same verdict as
+   auto-review.
 
 For day-to-day usage, see the user-facing
 [GitHub integration guide](../../docs/integrations/GITHUB.md).
@@ -90,7 +92,7 @@ The existing GitHub App needs these additions:
 **Permissions**: `Pull requests: Read & write`, `Issues: Read & write`
 
 **Event subscriptions**: `Pull request`, `Issue comment`, `Pull request review comment`,
-`Pull request review thread`
+`Pull request review thread`, `Pull request review`
 
 **Webhook URL**: `https://open-inspect-github-bot-{suffix}.{account}.workers.dev/webhooks/github`
 
@@ -113,14 +115,15 @@ access model and can authenticate auxiliary private repos on the configured SCM 
 
 ## Webhook Events
 
-| Event                         | Action             | Trigger                      | Handler                      |
-| ----------------------------- | ------------------ | ---------------------------- | ---------------------------- |
-| `pull_request`                | `opened`           | Non-draft PR opened          | `handlePullRequestOpened`    |
-| `pull_request`                | `review_requested` | Compatibility event path     | `handleReviewRequested`      |
-| `pull_request`                | `labeled`          | `reef: ask for review` added | `handlePullRequestLabeled`   |
-| `issue_comment`               | `created`          | @mention in a PR comment     | `handleIssueComment`         |
-| `pull_request_review_comment` | `created`          | @mention in a review thread  | `handleReviewComment`        |
-| `pull_request_review_thread`  | `resolved`         | Review thread resolved       | `handleReviewThreadResolved` |
+| Event                         | Action               | Trigger                                                                                             | Handler                      |
+| ----------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `pull_request`                | `opened`             | Non-draft PR opened                                                                                 | `handlePullRequestOpened`    |
+| `pull_request`                | `review_requested`   | Compatibility event path                                                                            | `handleReviewRequested`      |
+| `pull_request`                | `labeled`            | `reef: ask for review` added                                                                        | `handlePullRequestLabeled`   |
+| `issue_comment`               | `created`            | @mention in a PR comment                                                                            | `handleIssueComment`         |
+| `pull_request_review_comment` | `created`            | @mention in a review thread                                                                         | `handleReviewComment`        |
+| `pull_request_review_thread`  | `resolved`           | Review thread resolved                                                                              | `handleReviewThreadResolved` |
+| `pull_request_review`         | `submitted`,`edited` | Bot submitted a formal APPROVED/CHANGES_REQUESTED review on a no-auto-approve repo (auto-dismissed) | `handlePullRequestReview`    |
 
 All events are processed asynchronously via `executionCtx.waitUntil()`. The webhook endpoint returns
 200 immediately after signature verification and delivery dedupe.
@@ -224,7 +227,12 @@ Three prompt templates in `src/prompts.ts`:
 **`buildCodeReviewPrompt`** — Includes PR title, body, author, branches, and instructions to:
 
 - Run `gh pr diff` for the full diff
-- Avoid submitting a review via `gh api .../reviews` for now
+- Submit a formal verdict only through the `submit-pr-review` tool, never raw `gh pr review` /
+  `gh api .../pulls/{n}/reviews` (those are blocked in the sandbox by the `gh` wrapper — see
+  `sandbox-runtime` `git_credential_helper` `gh-guard`). The tool routes to the control plane
+  (`POST /sessions/:id/pr-review`), which resolves the repo's `autoApproveOnOpen` live and posts the
+  review with the App token or rejects `APPROVE`/`REQUEST_CHANGES`. As a backstop, the
+  `pull_request_review` webhook handler auto-dismisses any off-policy formal review the bot lands.
 - Post inline `suggestion` comments via `gh api .../pulls/{n}/comments`
 - Use `gh pr view ... --json headRefOid` for `commit_id`, temp markdown files for body, and
   `side=RIGHT`
@@ -233,14 +241,22 @@ Three prompt templates in `src/prompts.ts`:
   originating session in the footer (built from `sessionUrl`, the only extra param the handler
   passes beyond webhook metadata)
 
-**`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and
-instructions to:
+**`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and asks the
+agent to first classify the request into one of two paths (the model decides from the comment's
+meaning in any phrasing or language — there is no keyword matching in the bot):
 
-- Check prior conversation via `gh pr view --comments`
-- Make code changes and push, or respond with analysis
-- Post inline `suggestion` comments via `gh api .../pulls/{n}/comments` (instead of summary PR
-  comments)
-- Reply to a specific review thread (when `commentId` is present)
+- **Targeted request** (the default) — answer a question or make a specific change. Instructions to:
+  - Check prior conversation via `gh pr view --comments`
+  - Make code changes and push, or respond with analysis
+  - Post inline `suggestion` comments via `gh api .../pulls/{n}/comments` (instead of summary PR
+    comments)
+  - Reply to a specific review thread (when `commentId` is present)
+  - Never post a verdict comment, and never submit a formal review (`NO_FORMAL_REVIEW_GUARD`)
+- **Full PR review** — when the comment reads as a request to review or re-review the PR. Reuses the
+  exact same verdict workflow as `buildCodeReviewPrompt`: inline `suggestion` comments plus a single
+  risk-map **verdict** comment, the matching `reef: …` risk label, and the originating session
+  linked in the footer (built from `sessionUrl`, passed by
+  `handleIssueComment`/`handleReviewComment`).
 
 **`buildFailedChecksPrompt`** — Includes check context and instructions to:
 
@@ -310,9 +326,9 @@ src/
 └── utils/
     └── internal.ts   # Re-exports generateInternalToken from @open-inspect/shared
 test/
-├── verify.test.ts    # Signature verification (8 tests)
-├── webhook.test.ts   # Endpoint routing and integration (6 tests)
-├── prompts.test.ts   # Prompt construction (10 tests)
-├── github-auth.test.ts # JWT generation and reactions (7 tests)
-└── handlers.test.ts  # Event handler flows and edge cases (15 tests)
+├── verify.test.ts    # Signature verification
+├── webhook.test.ts   # Endpoint routing and integration
+├── prompts.test.ts   # Prompt construction
+├── github-auth.test.ts # JWT generation and reactions
+└── handlers.test.ts  # Event handler flows and edge cases
 ```

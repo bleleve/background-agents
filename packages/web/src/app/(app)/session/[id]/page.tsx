@@ -27,6 +27,7 @@ import { ActionBar } from "@/components/action-bar";
 import { PlanApprovalBanner } from "@/components/plan-approval-banner";
 import { copyToClipboard, formatModelNameLower } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
+import { shouldWarmForPrompt } from "@/lib/sandbox-warming";
 import { archiveSession } from "@/lib/archive-session";
 import {
   isArchivedSessionListKey,
@@ -563,13 +564,56 @@ function SessionContent({
   const handleRelaunchSandbox = useCallback(async () => {
     setIsRelaunching(true);
     try {
-      await fetch(`/api/sessions/${sessionId}/sandbox/relaunch`, { method: "POST" });
+      const res = await fetch(`/api/sessions/${sessionId}/sandbox/relaunch`, { method: "POST" });
+      if (!res.ok) {
+        console.error(`Failed to relaunch sandbox: ${res.status}`);
+        return false;
+      }
+      return true;
     } catch (error) {
       console.error("Failed to relaunch sandbox:", error);
+      return false;
     } finally {
       setIsRelaunching(false);
     }
   }, [sessionId]);
+
+  // Warm a stopped/idle sandbox once a follow-up shows real intent, so it's
+  // ready by submit — mirrors the new-session prompt's warm-on-type. The guard
+  // ref keeps it to one relaunch per down-cycle: canRelaunchSandbox can briefly
+  // stay true between the relaunch POST resolving and the sandbox_status
+  // broadcast arriving, so we must dedupe rather than rely on status alone.
+  const warmRequestedRef = useRef(false);
+  useEffect(() => {
+    // Sandbox is live (or coming up) again — allow the next stop→type cycle to warm.
+    if (
+      sandboxStatus &&
+      sandboxStatus !== "stopped" &&
+      sandboxStatus !== "failed" &&
+      sandboxStatus !== "stale"
+    ) {
+      warmRequestedRef.current = false;
+    }
+  }, [sandboxStatus]);
+
+  const handleComposerChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    handleInputChange(e);
+    if (
+      shouldWarmForPrompt(e.target.value) &&
+      canRelaunchSandbox &&
+      !isRelaunching &&
+      !warmRequestedRef.current
+    ) {
+      // Hold the dedup ref through the request; release it if the relaunch
+      // fails so a later keystroke can retry. On success the sandbox_status
+      // broadcast drives the useEffect reset for the next down-cycle.
+      warmRequestedRef.current = true;
+      void handleRelaunchSandbox().then((ok) => {
+        if (!ok) warmRequestedRef.current = false;
+      });
+    }
+  };
+
   const detailsButtonRef = useRef<HTMLButtonElement>(null);
 
   // Terminal panel state
@@ -926,7 +970,7 @@ function SessionContent({
               <textarea
                 ref={inputRef}
                 value={prompt}
-                onChange={handleInputChange}
+                onChange={handleComposerChange}
                 onKeyDown={handleKeyDown}
                 placeholder={
                   isPlanAwaiting

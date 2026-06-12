@@ -8,6 +8,7 @@ import type {
   ReviewCommentPayload,
   ReviewThreadPayload,
   CheckSuiteCompletedPayload,
+  PullRequestReviewPayload,
 } from "../src/types";
 import type { Logger } from "../src/logger";
 import type { ResolvedGitHubConfig } from "../src/utils/integration-config";
@@ -16,6 +17,7 @@ vi.mock("../src/github-auth", () => ({
   generateInstallationToken: vi.fn().mockResolvedValue("test-installation-token"),
   postReaction: vi.fn().mockResolvedValue(true),
   checkSenderPermission: vi.fn().mockResolvedValue({ hasPermission: true }),
+  dismissPullRequestReview: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("../src/utils/internal", () => ({
@@ -59,9 +61,15 @@ import {
   handleReviewComment,
   handleReviewThreadResolved,
   handleCheckSuiteCompleted,
+  handlePullRequestReview,
   handleReviewRequestInternal,
 } from "../src/handlers";
-import { generateInstallationToken, postReaction, checkSenderPermission } from "../src/github-auth";
+import {
+  generateInstallationToken,
+  postReaction,
+  checkSenderPermission,
+  dismissPullRequestReview,
+} from "../src/github-auth";
 import { getGitHubConfig } from "../src/utils/integration-config";
 
 function createMockLogger(): Logger {
@@ -224,6 +232,7 @@ beforeEach(() => {
   vi.mocked(generateInstallationToken).mockResolvedValue("test-installation-token");
   vi.mocked(postReaction).mockResolvedValue(true);
   vi.mocked(checkSenderPermission).mockResolvedValue({ hasPermission: true });
+  vi.mocked(dismissPullRequestReview).mockResolvedValue(true);
   vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig });
   // Default PR-details fetch: small diff, so review handlers see largeDiff=false.
   // Tests that need a large diff (or check-suite details) override this per test.
@@ -972,6 +981,29 @@ describe("handleIssueComment", () => {
     expect(generateInstallationToken).not.toHaveBeenCalled();
   });
 
+  it("does not fire the @reef alias on a longer handle like @reef-fountain", async () => {
+    // Regression: the @reef alias used to substring-match @reef-fountain, so the
+    // production bot reacted to comments meant only for a sibling deployment.
+    const env = {
+      ...createMockEnv(),
+      GITHUB_BOT_USERNAME: "fountain-reef[bot]",
+      REEF_ALIAS_ENABLED: "true",
+    };
+    const log = createMockLogger();
+    const payload: IssueCommentPayload = {
+      ...issueCommentPayload,
+      comment: {
+        ...issueCommentPayload.comment,
+        body: "@reef-fountain can you review it?",
+      },
+    };
+
+    const result = await handleIssueComment(env, log, payload, "trace-2");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "no_mention" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+  });
+
   it("returns early if not a PR", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
@@ -1111,6 +1143,25 @@ describe("handleReviewComment", () => {
     const payload: ReviewCommentPayload = {
       ...reviewCommentPayload,
       comment: { ...reviewCommentPayload.comment, body: "@reef can you fix this?" },
+    };
+
+    const result = await handleReviewComment(env, log, payload, "trace-3");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "no_mention" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it("does not fire the @reef alias on a longer handle like @reef-fountain", async () => {
+    // Regression: see the matching issue-comment test above.
+    const env = {
+      ...createMockEnv(),
+      GITHUB_BOT_USERNAME: "fountain-reef[bot]",
+      REEF_ALIAS_ENABLED: "true",
+    };
+    const log = createMockLogger();
+    const payload: ReviewCommentPayload = {
+      ...reviewCommentPayload,
+      comment: { ...reviewCommentPayload.comment, body: "@reef-fountain can you fix this?" },
     };
 
     const result = await handleReviewComment(env, log, payload, "trace-3");
@@ -1669,11 +1720,12 @@ describe("integration config", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
-    expect(promptBody.content).toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
-    expect(promptBody.content).not.toContain("Do not submit a pull request review.");
+    expect(promptBody.content).toContain("submit-pr-review");
+    expect(promptBody.content).toContain("permits formal verdicts");
+    expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 
-  it("omits APPROVE instruction and forbids review submission when autoApproveOnOpen is false", async () => {
+  it("routes verdicts through the tool and forbids raw gh when autoApproveOnOpen is false", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
 
@@ -1681,13 +1733,14 @@ describe("integration config", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
-    expect(promptBody.content).toContain("Do not submit a pull request review.");
-    expect(promptBody.content).not.toContain("APPROVE|REQUEST_CHANGES");
+    expect(promptBody.content).toContain("submit-pr-review");
+    expect(promptBody.content).toContain("NEVER submit a review with `gh pr review`");
+    expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 });
 
 describe("handlePullRequestOpened autoApproveOnOpen", () => {
-  it("includes APPROVE/REQUEST_CHANGES instruction in prompt when autoApproveOnOpen is true", async () => {
+  it("permits formal verdicts via the tool when autoApproveOnOpen is true", async () => {
     vi.mocked(getGitHubConfig).mockResolvedValue({
       ...defaultConfig,
       autoApproveOnOpen: true,
@@ -1699,11 +1752,12 @@ describe("handlePullRequestOpened autoApproveOnOpen", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
-    expect(promptBody.content).toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
-    expect(promptBody.content).not.toContain("Do not submit a pull request review.");
+    expect(promptBody.content).toContain("submit-pr-review");
+    expect(promptBody.content).toContain("permits formal verdicts");
+    expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 
-  it("omits APPROVE instruction when autoApproveOnOpen is false", async () => {
+  it("routes verdicts through the tool when autoApproveOnOpen is false", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
 
@@ -1711,8 +1765,9 @@ describe("handlePullRequestOpened autoApproveOnOpen", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
-    expect(promptBody.content).toContain("Do not submit a pull request review.");
-    expect(promptBody.content).not.toContain("APPROVE|REQUEST_CHANGES");
+    expect(promptBody.content).toContain("submit-pr-review");
+    expect(promptBody.content).toContain("does not permit approving or blocking verdicts");
+    expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 });
 
@@ -1879,7 +1934,11 @@ describe("handlePullRequestLabeled", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
-    expect(promptBody.content).toContain("Do not submit a pull request review.");
+    // The labeled path forces the no-formal-verdict hint regardless of the repo
+    // setting; the tool would also reject it server-side.
+    expect(promptBody.content).toContain("submit-pr-review");
+    expect(promptBody.content).toContain("does not permit approving or blocking verdicts");
+    expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 
   it("skips when the added label is not reef: ask for review", async () => {
@@ -2107,5 +2166,183 @@ describe("handleReviewRequestInternal", () => {
 
     expect(result).toEqual({ ok: false, status: 409, error: "pull_request_not_open" });
     expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+});
+
+describe("handlePullRequestReview", () => {
+  const botChangesRequestedReviewPayload: PullRequestReviewPayload = {
+    action: "submitted",
+    review: {
+      id: 555,
+      state: "changes_requested",
+      body: "See inline and verdict comments for full analysis.",
+      user: { login: "test-bot[bot]" }, // matches createMockEnv GITHUB_BOT_USERNAME
+    },
+    pull_request: { number: 42, state: "open" },
+    repository: { owner: { login: "acme" }, name: "widgets", private: false },
+    sender: { login: "test-bot[bot]", id: 999 },
+  };
+
+  it("dismisses a bot CHANGES_REQUESTED review when autoApproveOnOpen is false", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handlePullRequestReview(
+      env,
+      log,
+      botChangesRequestedReviewPayload,
+      "trace-rev"
+    );
+
+    expect(generateInstallationToken).toHaveBeenCalled();
+    expect(dismissPullRequestReview).toHaveBeenCalledWith(
+      "test-installation-token",
+      "acme",
+      "widgets",
+      42,
+      555,
+      expect.stringContaining("does not submit approving or blocking PR reviews"),
+      "Open-Inspect"
+    );
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "",
+      message_id: "",
+      handler_action: "review_dismissed",
+    });
+  });
+
+  it("dismisses a bot APPROVED review when autoApproveOnOpen is false", async () => {
+    const env = createMockEnv();
+    const result = await handlePullRequestReview(
+      env,
+      createMockLogger(),
+      {
+        ...botChangesRequestedReviewPayload,
+        review: { ...botChangesRequestedReviewPayload.review, state: "approved" },
+      },
+      "trace-rev"
+    );
+
+    expect(dismissPullRequestReview).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ outcome: "processed", handler_action: "review_dismissed" });
+  });
+
+  it("leaves the review alone when autoApproveOnOpen is true", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoApproveOnOpen: true });
+    const env = createMockEnv();
+
+    const result = await handlePullRequestReview(
+      env,
+      createMockLogger(),
+      botChangesRequestedReviewPayload,
+      "trace-rev"
+    );
+
+    expect(dismissPullRequestReview).not.toHaveBeenCalled();
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "auto_approve_allowed" });
+  });
+
+  it("ignores reviews authored by humans (and never fetches config)", async () => {
+    const env = createMockEnv();
+    const result = await handlePullRequestReview(
+      env,
+      createMockLogger(),
+      {
+        ...botChangesRequestedReviewPayload,
+        review: { ...botChangesRequestedReviewPayload.review, user: { login: "carol" } },
+      },
+      "trace-rev"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "review_not_by_bot" });
+    expect(getGitHubConfig).not.toHaveBeenCalled();
+    expect(dismissPullRequestReview).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op for the dismissed action (loop-prevention)", async () => {
+    const env = createMockEnv();
+    const result = await handlePullRequestReview(
+      env,
+      createMockLogger(),
+      {
+        ...botChangesRequestedReviewPayload,
+        action: "dismissed",
+        review: { ...botChangesRequestedReviewPayload.review, state: "dismissed" },
+      },
+      "trace-rev"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "unsupported_action" });
+    expect(dismissPullRequestReview).not.toHaveBeenCalled();
+  });
+
+  it("ignores a bot COMMENTED review (non-blocking state)", async () => {
+    const env = createMockEnv();
+    const result = await handlePullRequestReview(
+      env,
+      createMockLogger(),
+      {
+        ...botChangesRequestedReviewPayload,
+        review: { ...botChangesRequestedReviewPayload.review, state: "commented" },
+      },
+      "trace-rev"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "non_blocking_review_state" });
+    expect(getGitHubConfig).not.toHaveBeenCalled();
+    expect(dismissPullRequestReview).not.toHaveBeenCalled();
+  });
+
+  it("skips when the PR is closed", async () => {
+    const env = createMockEnv();
+    const result = await handlePullRequestReview(
+      env,
+      createMockLogger(),
+      {
+        ...botChangesRequestedReviewPayload,
+        pull_request: { number: 42, state: "closed" },
+      },
+      "trace-rev"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "pr_closed_or_merged" });
+    expect(dismissPullRequestReview).not.toHaveBeenCalled();
+  });
+
+  it("fails closed: dismisses on the FAIL_CLOSED config shape (enabledRepos: [])", async () => {
+    // getGitHubConfig fails closed on errors to autoApproveOnOpen:false AND
+    // enabledRepos:[] (empty allowlist). The backstop must still dismiss — it must
+    // NOT early-return on an enabledRepos gate (the bug the Reef review caught).
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      autoApproveOnOpen: false,
+      enabledRepos: [],
+    });
+    const env = createMockEnv();
+
+    const result = await handlePullRequestReview(
+      env,
+      createMockLogger(),
+      botChangesRequestedReviewPayload,
+      "trace-rev"
+    );
+
+    expect(dismissPullRequestReview).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ outcome: "processed", handler_action: "review_dismissed" });
+  });
+
+  it("does not throw when the dismissal API fails", async () => {
+    vi.mocked(dismissPullRequestReview).mockResolvedValue(false);
+    const env = createMockEnv();
+
+    const result = await handlePullRequestReview(
+      env,
+      createMockLogger(),
+      botChangesRequestedReviewPayload,
+      "trace-rev"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "dismiss_failed" });
   });
 });

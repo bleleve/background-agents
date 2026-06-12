@@ -176,3 +176,18 @@ export interface CheckSuiteCompletedPayload {
   repository: { owner: { login: string }; name: string; private: boolean };
   sender: { login: string };
 }
+
+export interface PullRequestReviewPayload {
+  action: "submitted" | "edited" | "dismissed";
+  review: {
+    id: number;
+    // Lowercase in the webhook ("approved" | "changes_requested" | "commented" |
+    // "dismissed" | "pending") — note the REST list-reviews API returns uppercase.
+    state: string;
+    body: string | null;
+    user: { login: string };
+  };
+  pull_request: { number: number; state: string };
+  repository: { owner: { login: string }; name: string; private: boolean };
+  sender: { login: string; id: number };
+}
