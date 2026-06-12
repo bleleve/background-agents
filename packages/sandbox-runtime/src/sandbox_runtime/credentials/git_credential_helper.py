@@ -29,6 +29,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -312,6 +313,167 @@ def _print_gh_token() -> int:
     return 0
 
 
+# --- gh formal-review guard --------------------------------------------------
+#
+# The gh wrapper delegates to the `gh-guard` action (below) so the agent cannot
+# submit a formal PR review (APPROVE / REQUEST_CHANGES) via raw gh. Such reviews
+# must go through the `submit-pr-review` tool, which routes to the control plane
+# for a live policy check (the repo's `autoApproveOnOpen` setting) and posts the
+# review server-side. The guard is therefore unconditional: it always blocks raw
+# formal reviews so the sanctioned tool is the only path, and the policy decision
+# lives in one server-side place instead of being baked into the sandbox.
+#
+# This is the authoritative bypass-prevention layer; the OpenCode permission rule
+# is a softer early stop. Inline comments (`pulls/N/comments`), the verdict
+# (`issues/N/comments`), GETs, and COMMENT-event reviews are always allowed.
+
+# Exit code the wrapper interprets as "blocked by policy" (see GH_WRAPPER_BODY).
+GH_GUARD_BLOCK_RC = 3
+
+# A gh-api path argument that targets the PR *reviews collection* — POSTing to
+# it submits a review. Deliberately excludes `/reviews/{id}` (review-by-id GET)
+# and the `/comments` endpoints. Accepts a leading slash, an optional `repos/`
+# prefix, and a full api.github.com URL form.
+_REVIEWS_PATH_RE = re.compile(
+    r"^(?:https?://[^/]+/)?/?(?:repos/)?[^/\s]+/[^/\s]+/pulls/\d+/reviews/?$"
+)
+_GH_FIELD_FLAGS = frozenset({"-f", "--field", "-F", "--raw-field"})
+_GH_BLOCKED_EVENTS = frozenset({"APPROVE", "REQUEST_CHANGES"})
+
+_GH_GUARD_BLOCK_MESSAGE = (
+    "BLOCKED: do not submit a formal pull request review with raw gh (event "
+    "APPROVE or REQUEST_CHANGES).\n"
+    "\n"
+    "Use the `submit-pr-review` tool instead — it enforces the repo's review "
+    "policy and posts the review for you (or tells you it isn't permitted).\n"
+    "\n"
+    "For everything else, raw gh is fine:\n"
+    "  - Inline code comment:  gh api repos/OWNER/REPO/pulls/N/comments "
+    "-f body=... -f path=... -F line=...\n"
+    "  - Overall verdict:      gh api repos/OWNER/REPO/issues/N/comments "
+    "-f body='<your summary>'\n"
+)
+
+
+def _event_from_field_token(token: str) -> str | None:
+    """Extract the event value from a ``key=value`` gh field token, else None.
+
+    Ignores ``@``-prefixed values (read-from-file): inspecting files/stdin for a
+    nested event is out of scope (documented; covered by the control-plane
+    backstop).
+    """
+    key, sep, value = token.partition("=")
+    if not sep or key != "event" or value.startswith("@"):
+        return None
+    return value
+
+
+def _pr_review_is_formal(args: list[str]) -> bool:
+    """True if a ``gh pr review`` invocation selects APPROVE or REQUEST_CHANGES.
+
+    ``--comment``/``-c`` (COMMENT) and a bare interactive invocation are allowed.
+    """
+    return any(a in ("--approve", "-a", "--request-changes", "-r") for a in args)
+
+
+def _api_is_formal_review(args: list[str]) -> bool:
+    """True if a ``gh api ...`` invocation POSTs a formal review.
+
+    Blocks only when all hold: the path is the reviews *collection*, the
+    effective method is POST (explicit ``-X POST`` or implicit because a field
+    flag is present), and an ``event`` field is APPROVE or REQUEST_CHANGES.
+    """
+    path_is_reviews = False
+    method: str | None = None
+    has_field_or_input = False
+    events: list[str] = []
+
+    i = 0
+    n = len(args)
+    while i < n:
+        a = args[i]
+        if a in ("-X", "--method"):
+            if i + 1 < n:
+                method = args[i + 1].upper()
+            i += 2
+            continue
+        if a.startswith("--method="):
+            method = a.split("=", 1)[1].upper()
+            i += 1
+            continue
+        if a.startswith("-X") and len(a) > 2:  # glued, e.g. -XPOST
+            method = a[2:].upper()
+            i += 1
+            continue
+        if a in _GH_FIELD_FLAGS:  # spaced form: `-f event=APPROVE`
+            has_field_or_input = True
+            if i + 1 < n:
+                ev = _event_from_field_token(args[i + 1])
+                if ev is not None:
+                    events.append(ev)
+            i += 2
+            continue
+        if a.startswith("--field=") or a.startswith("--raw-field="):
+            has_field_or_input = True
+            ev = _event_from_field_token(a.split("=", 1)[1])
+            if ev is not None:
+                events.append(ev)
+            i += 1
+            continue
+        if (a.startswith("-f") or a.startswith("-F")) and len(a) > 2:  # glued -fevent=X
+            has_field_or_input = True
+            ev = _event_from_field_token(a[2:])
+            if ev is not None:
+                events.append(ev)
+            i += 1
+            continue
+        if a == "--input" or a.startswith("--input="):
+            has_field_or_input = True
+            i += 1 if "=" in a else 2
+            continue
+        if not a.startswith("-") and _REVIEWS_PATH_RE.match(a):
+            path_is_reviews = True
+        i += 1
+
+    if not path_is_reviews:
+        return False
+    if method in ("GET", "HEAD", "DELETE", "PATCH", "PUT"):
+        return False
+    is_post = method == "POST" or (method is None and has_field_or_input)
+    if not is_post:
+        return False
+    return any(ev.upper() in _GH_BLOCKED_EVENTS for ev in events)
+
+
+def _gh_command_is_blocked(gh_args: list[str]) -> bool:
+    """True if ``gh_args`` is a raw formal-review submission (always blocked).
+
+    Formal APPROVE/REQUEST_CHANGES reviews must go through the `submit-pr-review`
+    tool, never raw gh — so this is unconditional.
+    """
+    if not gh_args:
+        return False
+    sub = gh_args[0]
+    if sub == "pr" and len(gh_args) >= 2 and gh_args[1] == "review":
+        return _pr_review_is_formal(gh_args[2:])
+    if sub == "api":
+        return _api_is_formal_review(gh_args[1:])
+    return False
+
+
+def _run_gh_guard(gh_args: list[str]) -> int:
+    """Guard action for the gh wrapper: exit 3 to block, 0 to allow.
+
+    Receives the full argv passed to ``gh`` (the wrapper's ``"$@"``). Never reads
+    stdin, so the wrapper's subsequent ``exec gh "$@"`` keeps stdin intact.
+    """
+    if _gh_command_is_blocked(gh_args):
+        sys.stderr.write(_GH_GUARD_BLOCK_MESSAGE)
+        sys.stderr.flush()
+        return GH_GUARD_BLOCK_RC
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     action = args[0] if args else "get"
@@ -320,6 +482,11 @@ def main(argv: list[str] | None = None) -> int:
     # has none usable, otherwise nothing (see _print_gh_token).
     if action == "gh-token":
         return _print_gh_token()
+
+    # `gh-guard` is for the gh CLI wrapper: block formal PR-review submissions
+    # when policy forbids them (see _run_gh_guard). Exit 3 == blocked.
+    if action == "gh-guard":
+        return _run_gh_guard(args[1:])
 
     # We only mint credentials on `get`. `store` and `erase` are no-ops:
     # the control plane owns the truth and we don't persist anything git tells us.

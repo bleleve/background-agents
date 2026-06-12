@@ -27,6 +27,7 @@ import { providerIdentityRoutes } from "./routes/provider-identities";
 import { sessionRoutes } from "./routes/sessions";
 import { handleBootProgress } from "./routes/boot-progress";
 import { handleSlackNotify } from "./routes/slack-notify";
+import { prReviewRoutes } from "./routes/pr-review";
 import { reviewSuggestionRoutes } from "./routes/review-suggestions";
 import { webhookRoutes } from "./webhooks";
 
@@ -73,6 +74,7 @@ const PUBLIC_ROUTES: RegExp[] = [
  */
 const SANDBOX_AUTH_ROUTES: RegExp[] = [
   /^\/sessions\/[^/]+\/pr$/, // PR creation from sandbox
+  /^\/sessions\/[^/]+\/pr-review$/, // Formal PR review submission from sandbox (policy-checked)
   /^\/sessions\/[^/]+\/openai-token-refresh$/, // OpenAI token refresh from sandbox
   /^\/sessions\/[^/]+\/scm-credentials$/, // SCM credential broker for git credential helper
   /^\/sessions\/[^/]+\/media$/, // Media upload from sandbox
@@ -347,6 +349,10 @@ const routes: Route[] = [
     pattern: parsePattern("/sessions/:id/boot-progress"),
     handler: handleBootProgress,
   },
+
+  // Formal PR review submission from the sandbox (sandbox-authenticated,
+  // policy-checked server-side). The `submit-pr-review` tool's only backend.
+  ...prReviewRoutes,
 
   // Repository management
   ...reposRoutes,

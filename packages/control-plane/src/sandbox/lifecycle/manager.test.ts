@@ -1788,6 +1788,121 @@ describe("SandboxLifecycleManager", () => {
     });
   });
 
+  describe("checkout branch resolution", () => {
+    it("doSpawn() checks out the session working branch when branch_name is set", async () => {
+      const session = createMockSession({
+        base_branch: "main",
+        branch_name: "open-inspect/session-abc",
+      });
+      const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
+      const storage = createMockStorage(session, sandbox);
+      const provider = createMockProvider();
+
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.spawnSandbox();
+
+      // The work the agent committed lives on the working branch (pushed there
+      // during PR creation), so a relaunch must check it out — not base_branch.
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({ branch: "open-inspect/session-abc" })
+      );
+    });
+
+    it("doSpawn() falls back to base_branch when branch_name is null", async () => {
+      const session = createMockSession({ base_branch: "feature/xyz", branch_name: null });
+      const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
+      const storage = createMockStorage(session, sandbox);
+      const provider = createMockProvider();
+
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.spawnSandbox();
+
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({ branch: "feature/xyz" })
+      );
+    });
+
+    it("restoreFromSnapshot() checks out the session working branch when branch_name is set", async () => {
+      const session = createMockSession({
+        base_branch: "main",
+        branch_name: "open-inspect/session-abc",
+      });
+      const sandbox = createMockSandbox({
+        status: "stopped",
+        snapshot_image_id: "img-abc123",
+      });
+      const storage = createMockStorage(session, sandbox);
+      const provider = createMockProvider();
+
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.spawnSandbox();
+
+      expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ branch: "open-inspect/session-abc" })
+      );
+      expect(provider.createSandbox).not.toHaveBeenCalled();
+    });
+
+    it("still keys the repo image lookup on base_branch, not the working branch", async () => {
+      const session = createMockSession({
+        base_branch: "main",
+        branch_name: "open-inspect/session-abc",
+      });
+      const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
+      const storage = createMockStorage(session, sandbox);
+      const provider = createMockProvider();
+
+      const repoImageLookup: RepoImageLookup = {
+        getLatestReady: vi.fn(async () => null),
+      };
+
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig(),
+        {},
+        repoImageLookup
+      );
+
+      await manager.spawnSandbox();
+
+      // Prebuilt images are keyed on the base branch; the working-branch
+      // checkout happens after boot via the sandbox entrypoint.
+      expect(repoImageLookup.getLatestReady).toHaveBeenCalledWith("testowner", "testrepo", "main");
+    });
+  });
+
   describe("sandbox settings", () => {
     it("doSpawn() passes sandboxSettings from session to provider config", async () => {
       const session = createMockSession({

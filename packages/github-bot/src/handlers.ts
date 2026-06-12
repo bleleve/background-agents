@@ -16,10 +16,16 @@ import type {
   ReviewCommentPayload,
   ReviewThreadPayload,
   CheckSuiteCompletedPayload,
+  PullRequestReviewPayload,
 } from "./types";
 import type { Logger } from "./logger";
 import { extractSessionIdFromBranch } from "@open-inspect/shared";
-import { generateInstallationToken, postReaction, checkSenderPermission } from "./github-auth";
+import {
+  generateInstallationToken,
+  postReaction,
+  checkSenderPermission,
+  dismissPullRequestReview,
+} from "./github-auth";
 import {
   buildCodeReviewPrompt,
   buildCommentActionPrompt,
@@ -1572,4 +1578,118 @@ export async function handleReviewThreadResolved(
 
   await resolveReviewSuggestions(env, log, traceId, commentIds);
   return { outcome: "skipped", skip_reason: "review_thread_resolved" };
+}
+
+/** Review states that change PR approval and can be dismissed via the API. */
+const DISMISSABLE_REVIEW_STATES = new Set(["approved", "changes_requested"]);
+
+/**
+ * Reactive backstop for the comment-only review policy. If the Reef bot submits
+ * a formal review (APPROVED / CHANGES_REQUESTED) on a repo where formal reviews
+ * are not permitted (`autoApproveOnOpen=false`), dismiss it as soon as the
+ * `pull_request_review` webhook arrives. This guarantees the PR never stays in a
+ * blocking/approving state caused by the agent going off-script, independent of
+ * (and as a backstop to) the sandbox `gh` guard. Inline comments and the verdict
+ * issue comment are left untouched.
+ *
+ * Loop-prevention: dismissing emits a `pull_request_review` event with action
+ * `dismissed` — dropped by the router and again by the action filter (a) below.
+ */
+export async function handlePullRequestReview(
+  env: Env,
+  log: Logger,
+  payload: PullRequestReviewPayload,
+  traceId: string
+): Promise<HandlerResult> {
+  const { action, review, pull_request: pr, repository: repo } = payload;
+  const owner = repo.owner.login;
+  const repoName = repo.name;
+  const repoFullName = `${owner}/${repoName}`.toLowerCase();
+  const meta = {
+    trace_id: traceId,
+    repo: repoFullName,
+    pull_number: pr.number,
+    review_id: review.id,
+  };
+
+  // (a) Action filter — second half of loop-prevention (our own dismissal emits
+  // action "dismissed"). The router drops it too, but defend here as well.
+  if (action !== "submitted" && action !== "edited") {
+    return { outcome: "skipped", skip_reason: "unsupported_action" };
+  }
+
+  // (b) Only APPROVED / CHANGES_REQUESTED are dismissable and worth policing.
+  // The webhook delivers state in lowercase (unlike the REST list-reviews API).
+  const state = review.state.toLowerCase();
+  if (!DISMISSABLE_REVIEW_STATES.has(state)) {
+    log.debug("review_backstop.non_blocking_state", { ...meta, review_state: state });
+    return { outcome: "skipped", skip_reason: "non_blocking_review_state" };
+  }
+
+  // (c) Only police the Reef bot's own reviews — human and other-bot reviews are
+  // never touched. This identity gate precedes the config fetch.
+  if (review.user.login !== env.GITHUB_BOT_USERNAME) {
+    log.debug("review_backstop.not_bot_review", { ...meta, review_user: review.user.login });
+    return { outcome: "skipped", skip_reason: "review_not_by_bot" };
+  }
+
+  // (d) PR must be open.
+  if (pr.state !== "open") {
+    log.debug("review_backstop.pr_not_open", { ...meta, pr_state: pr.state });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
+  }
+
+  // (e) Resolve policy. getGitHubConfig fails CLOSED (autoApproveOnOpen=false) on
+  // any error, so a config outage dismisses — correct for a guardrail: when the
+  // policy is unknown, treat the formal review as forbidden.
+  //
+  // Deliberately NO `enabledRepos` gate here (unlike the session-creation
+  // handlers): this backstop is reactive and only fires on a review our own bot
+  // already submitted, so the repo is necessarily one we operate on. Gating on
+  // enabledRepos would also break the fail-closed contract — FAIL_CLOSED sets
+  // `enabledRepos: []`, which would early-return `repo_not_enabled` and leave the
+  // off-policy review in place on any config-fetch failure.
+  const config = await getGitHubConfig(env, repoFullName, log);
+
+  // (f) Formal reviews are permitted on this repo → leave it.
+  if (config.autoApproveOnOpen) {
+    log.info("review_backstop.allowed_by_policy", { ...meta, review_state: state });
+    return { outcome: "skipped", skip_reason: "auto_approve_allowed" };
+  }
+
+  // (g) Off-policy formal review by our bot → dismiss.
+  const userAgent = resolveAppName(env);
+  const token = await generateInstallationToken({
+    appId: env.GITHUB_APP_ID,
+    privateKey: env.GITHUB_APP_PRIVATE_KEY,
+    installationId: env.GITHUB_APP_INSTALLATION_ID,
+    userAgent,
+  });
+
+  const dismissed = await dismissPullRequestReview(
+    token,
+    owner,
+    repoName,
+    pr.number,
+    review.id,
+    "Reef does not submit approving or blocking PR reviews on this repository. This formal " +
+      "review state was dismissed automatically; see the inline comments and the Reef verdict " +
+      "comment for the full analysis.",
+    userAgent
+  );
+
+  if (!dismissed) {
+    // Best-effort: don't throw (a throw would clear the delivery dedupe and
+    // trigger a real GitHub retry). The `edited` action gives a natural retry.
+    log.warn("review_backstop.dismiss_failed", { ...meta, review_state: state });
+    return { outcome: "skipped", skip_reason: "dismiss_failed" };
+  }
+
+  log.info("review_backstop.dismissed", { ...meta, review_state: state });
+  return {
+    outcome: "processed",
+    session_id: "",
+    message_id: "",
+    handler_action: "review_dismissed",
+  };
 }

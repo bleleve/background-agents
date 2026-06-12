@@ -5,33 +5,30 @@ import useSWR, { mutate } from "swr";
 import useSWRMutation from "swr/mutation";
 import {
   Suspense,
-  memo,
   useState,
   useRef,
   useEffect,
-  useLayoutEffect,
   useCallback,
   useMemo,
+  useLayoutEffect,
+  memo,
 } from "react";
 import { useSessionSocket } from "@/hooks/use-session-socket";
-import { SafeMarkdown } from "@/components/safe-markdown";
-import { ToolCallGroup } from "@/components/tool-call-group";
-import { ScreenshotArtifactCard } from "@/components/screenshot-artifact-card";
 import { MediaLightbox } from "@/components/media-lightbox";
-import { Button } from "@/components/ui/button";
-import { useSidebarContext } from "@/components/sidebar-layout";
-import {
-  SessionRightSidebar,
-  SessionRightSidebarContent,
-} from "@/components/session-right-sidebar";
+import { SessionHeader } from "@/components/session-header";
+import { SessionDetailsOverlay } from "@/components/session-details-overlay";
+import { ToolCallGroup } from "@/components/tool-call-group";
+import { SafeMarkdown } from "@/components/safe-markdown";
+import { ScreenshotArtifactCard } from "@/components/screenshot-artifact-card";
+import { SessionRightSidebar } from "@/components/session-right-sidebar";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { ActionBar } from "@/components/action-bar";
 import { PlanApprovalBanner } from "@/components/plan-approval-banner";
 import { copyToClipboard, formatModelNameLower } from "@/lib/format";
-import { archiveSession } from "@/lib/archive-session";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { shouldWarmForPrompt } from "@/lib/sandbox-warming";
+import { archiveSession } from "@/lib/archive-session";
 import {
   isArchivedSessionListKey,
   isUnarchivedSessionListKey,
@@ -51,7 +48,6 @@ import { useEnabledModels } from "@/hooks/use-enabled-models";
 import { ReasoningEffortPills } from "@/components/reasoning-effort-pills";
 import type { Artifact, SandboxEvent } from "@/types/session";
 import {
-  SidebarIcon,
   ModelIcon,
   CheckIcon,
   SendIcon,
@@ -205,26 +201,6 @@ function dedupeAndGroupEvents(
   return groupEvents(filteredEvents.filter((event): event is SandboxEvent => event !== null));
 }
 
-function resolveSessionDisplayInfo(
-  sessionState: SessionState,
-  fallbackSessionInfo: FallbackSessionInfo
-): {
-  repoLabel: string;
-  title: string;
-} {
-  const resolvedRepoOwner = sessionState?.repoOwner ?? fallbackSessionInfo.repoOwner;
-  const resolvedRepoName = sessionState?.repoName ?? fallbackSessionInfo.repoName;
-  const repoLabel =
-    resolvedRepoOwner && resolvedRepoName
-      ? `${resolvedRepoOwner}/${resolvedRepoName}`
-      : "Loading session...";
-
-  return {
-    repoLabel,
-    title: sessionState?.title || fallbackSessionInfo.title || repoLabel,
-  };
-}
-
 export default function SessionPage() {
   return (
     <Suspense>
@@ -365,7 +341,6 @@ function SessionPageContent() {
   // Set when the user explicitly picks a model on this page. Until then, the
   // Plan toggle auto-swaps between the session baseline and defaultPlanModel.
   const userPickedModelRef = useRef(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -471,7 +446,6 @@ function SessionPageContent() {
       events={events}
       artifacts={artifacts}
       currentParticipantId={currentParticipantId}
-      messagesEndRef={messagesEndRef}
       prompt={prompt}
       isProcessing={isProcessing}
       selectedModel={selectedModel}
@@ -512,7 +486,6 @@ function SessionContent({
   events,
   artifacts,
   currentParticipantId,
-  messagesEndRef,
   prompt,
   isProcessing,
   selectedModel,
@@ -549,7 +522,6 @@ function SessionContent({
   events: ReturnType<typeof useSessionSocket>["events"];
   artifacts: ReturnType<typeof useSessionSocket>["artifacts"];
   currentParticipantId: string | null;
-  messagesEndRef: React.RefObject<HTMLDivElement | null>;
   prompt: string;
   isProcessing: boolean;
   selectedModel: string;
@@ -575,20 +547,11 @@ function SessionContent({
   selectedMediaArtifactId: string | null;
   setSelectedMediaArtifactId: (artifactId: string | null) => void;
 }) {
-  const { isOpen, toggle } = useSidebarContext();
   const isBelowLg = useMediaQuery("(max-width: 1023px)");
   const isPhone = useMediaQuery("(max-width: 767px)");
-  const resolvedRepoOwner = sessionState?.repoOwner ?? fallbackSessionInfo.repoOwner;
-  const resolvedRepoName = sessionState?.repoName ?? fallbackSessionInfo.repoName;
-  const fallbackRepoLabel =
-    resolvedRepoOwner && resolvedRepoName
-      ? `${resolvedRepoOwner}/${resolvedRepoName}`
-      : "Loading session...";
-  const baseResolvedTitle = sessionState?.title ?? fallbackSessionInfo.title ?? fallbackRepoLabel;
 
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isRelaunching, setIsRelaunching] = useState(false);
-  const [isRenaming, setIsRenaming] = useState(false);
 
   // A dead sandbox (stopped/failed/stale) can be brought back without sending a
   // prompt. Hidden while a turn is processing or once the sandbox is live again;
@@ -650,12 +613,8 @@ function SessionContent({
       });
     }
   };
-  const [title, setTitle] = useState(baseResolvedTitle);
-  const [optimisticTitle, setOptimisticTitle] = useState<string | null>(null);
-  const [sheetDragY, setSheetDragY] = useState(0);
-  const sheetDragYRef = useRef(0);
+
   const detailsButtonRef = useRef<HTMLButtonElement>(null);
-  const sheetTouchStartYRef = useRef<number | null>(null);
 
   // Terminal panel state
   const [terminalOpen, setTerminalOpen] = useState(() => {
@@ -677,191 +636,14 @@ function SessionContent({
   const ttydToken = sessionState?.ttydToken;
   const showTerminal = !!(ttydUrl && ttydToken && terminalOpen && !isBelowLg);
 
-  // Scroll pagination refs
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const topSentinelRef = useRef<HTMLDivElement>(null);
-  const hasScrolledRef = useRef(false);
-  const isPrependingRef = useRef(false);
-  const prevScrollHeightRef = useRef(0);
-  const isNearBottomRef = useRef(true);
-
-  const resetSheetDragState = useCallback(() => {
-    setSheetDragY(0);
-    sheetDragYRef.current = 0;
-  }, []);
-
-  const closeDetails = useCallback(() => {
-    setIsDetailsOpen(false);
-    resetSheetDragState();
-    detailsButtonRef.current?.focus();
-  }, [resetSheetDragState]);
-
   const toggleDetails = useCallback(() => {
-    setIsDetailsOpen((prev) => {
-      const next = !prev;
-      if (!next) {
-        resetSheetDragState();
-      }
-      return next;
-    });
-  }, [resetSheetDragState]);
-
-  const handleStartRename = () => {
-    setTitle(resolvedTitle);
-    setIsRenaming(true);
-  };
-
-  const handleRenameSubmit = async () => {
-    if (!sessionState) {
-      setIsRenaming(false);
-      return;
-    }
-
-    const trimmed = title.trim();
-
-    if (!trimmed || trimmed === resolvedTitle) {
-      setIsRenaming(false);
-      return;
-    }
-
-    const previousTitle = resolvedTitle;
-    setIsRenaming(false);
-    setOptimisticTitle(trimmed);
-
-    const success = await renameSession(trimmed);
-    if (!success) {
-      setOptimisticTitle(null);
-      setTitle(previousTitle);
-      setIsRenaming(true);
-    }
-  };
-
-  const resolvedTitle =
-    optimisticTitle ?? sessionState?.title ?? fallbackSessionInfo.title ?? fallbackRepoLabel;
-
-  useEffect(() => {
-    if (!optimisticTitle) return;
-    if (sessionState?.title === optimisticTitle) {
-      setOptimisticTitle(null);
-    }
-  }, [optimisticTitle, sessionState?.title]);
-
-  const handleSheetTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
-    const startY = event.touches[0]?.clientY;
-    sheetTouchStartYRef.current = startY ?? null;
+    setIsDetailsOpen((prev) => !prev);
   }, []);
-
-  const handleSheetTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
-    const startY = sheetTouchStartYRef.current;
-    const currentY = event.touches[0]?.clientY;
-
-    if (startY === null || currentY === undefined) return;
-
-    const delta = currentY - startY;
-    if (delta > 0) {
-      const nextDragY = Math.min(delta, 180);
-      sheetDragYRef.current = nextDragY;
-      setSheetDragY(nextDragY);
-    } else {
-      sheetDragYRef.current = 0;
-      setSheetDragY(0);
-    }
-  }, []);
-
-  const handleSheetTouchEnd = useCallback(() => {
-    if (sheetDragYRef.current > 100) {
-      closeDetails();
-      sheetTouchStartYRef.current = null;
-      return;
-    }
-
-    sheetDragYRef.current = 0;
-    setSheetDragY(0);
-    sheetTouchStartYRef.current = null;
-  }, [closeDetails]);
-
-  useEffect(() => {
-    if (!isRenaming) setTitle(sessionState?.title ?? "");
-  }, [sessionState?.title, isRenaming]);
 
   useEffect(() => {
     if (isBelowLg) return;
     setIsDetailsOpen(false);
-    resetSheetDragState();
-  }, [isBelowLg, resetSheetDragState]);
-
-  useEffect(() => {
-    if (!isDetailsOpen) return;
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeDetails();
-      }
-    };
-
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [closeDetails, isDetailsOpen]);
-
-  useEffect(() => {
-    if (!isDetailsOpen) return;
-
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = originalOverflow;
-    };
-  }, [isDetailsOpen]);
-
-  // Track user scroll
-  const handleScroll = useCallback(() => {
-    hasScrolledRef.current = true;
-    const el = scrollContainerRef.current;
-    if (el) {
-      isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-    }
-  }, []);
-
-  // IntersectionObserver to trigger loading older events
-  useEffect(() => {
-    const sentinel = topSentinelRef.current;
-    const container = scrollContainerRef.current;
-    if (!sentinel || !container) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (
-          entry.isIntersecting &&
-          hasScrolledRef.current &&
-          container.scrollHeight > container.clientHeight
-        ) {
-          // Capture scroll height BEFORE triggering load
-          prevScrollHeightRef.current = container.scrollHeight;
-          isPrependingRef.current = true;
-          loadOlderEvents();
-        }
-      },
-      { root: container, threshold: 0.1 }
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [loadOlderEvents]);
-
-  // Maintain scroll position when older events are prepended
-  useLayoutEffect(() => {
-    if (isPrependingRef.current && scrollContainerRef.current) {
-      const el = scrollContainerRef.current;
-      el.scrollTop += el.scrollHeight - prevScrollHeightRef.current;
-      isPrependingRef.current = false;
-    }
-  }, [events]);
-
-  // Auto-scroll to bottom only when near bottom (not when prepending older history)
-  useEffect(() => {
-    if (isNearBottomRef.current && !isPrependingRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
-    }
-  }, [events, messagesEndRef]);
+  }, [isBelowLg]);
 
   const isPlanAwaiting =
     sessionState?.planMode === true && sessionState?.planApprovalStatus === "awaiting_approval";
@@ -953,6 +735,65 @@ function SessionContent({
     }
     return result;
   }, [groupedEvents, plans, sessionState?.planApprovalStatus]);
+
+  // Scroll refs for the inline timeline
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const hasScrolledRef = useRef(false);
+  const isPrependingRef = useRef(false);
+  const prevScrollHeightRef = useRef(0);
+  const isNearBottomRef = useRef(true);
+
+  // Track user scroll
+  const handleScroll = useCallback(() => {
+    hasScrolledRef.current = true;
+    const el = scrollContainerRef.current;
+    if (el) {
+      isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    }
+  }, []);
+
+  // IntersectionObserver to trigger loading older events
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    const container = scrollContainerRef.current;
+    if (!sentinel || !container) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (
+          entry.isIntersecting &&
+          hasScrolledRef.current &&
+          container.scrollHeight > container.clientHeight
+        ) {
+          // Capture scroll height BEFORE triggering load
+          prevScrollHeightRef.current = container.scrollHeight;
+          isPrependingRef.current = true;
+          loadOlderEvents();
+        }
+      },
+      { root: container, threshold: 0.1 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadOlderEvents]);
+
+  // Maintain scroll position when older events are prepended
+  useLayoutEffect(() => {
+    if (isPrependingRef.current && scrollContainerRef.current) {
+      const el = scrollContainerRef.current;
+      el.scrollTop += el.scrollHeight - prevScrollHeightRef.current;
+      isPrependingRef.current = false;
+    }
+  }, [events]);
+
+  // Auto-scroll to bottom only when near bottom (not when prepending older history)
+  useEffect(() => {
+    if (isNearBottomRef.current && !isPrependingRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+    }
+  }, [events, messagesEndRef]);
+
   const mediaArtifacts = useMemo(
     () =>
       artifacts.filter((artifact) => artifact.type === "screenshot" || artifact.type === "video"),
@@ -963,100 +804,21 @@ function SessionContent({
     [mediaArtifacts, selectedMediaArtifactId]
   );
 
-  const sessionDisplayInfo = useMemo(
-    () => resolveSessionDisplayInfo(sessionState, fallbackSessionInfo),
-    [fallbackSessionInfo, sessionState]
-  );
   const showTimelineSkeleton = events.length === 0 && (connecting || replaying);
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
-      <header className="border-b border-border-muted flex-shrink-0">
-        <div className="px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {!isOpen && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={toggle}
-                title={`Open sidebar (${SHORTCUT_LABELS.TOGGLE_SIDEBAR})`}
-                aria-label={`Open sidebar (${SHORTCUT_LABELS.TOGGLE_SIDEBAR})`}
-              >
-                <SidebarIcon className="w-4 h-4" />
-              </Button>
-            )}
-            <div>
-              {isRenaming ? (
-                <input
-                  autoFocus
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  onFocus={(e) => e.currentTarget.select()}
-                  onBlur={handleRenameSubmit}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      e.currentTarget.blur();
-                    }
-                    if (e.key === "Escape") {
-                      setIsRenaming(false);
-                    }
-                  }}
-                  className="text-sm bg-transparent text-foreground outline-none focus:ring-inset focus:ring-ring font-medium max-w-40 truncate"
-                />
-              ) : (
-                <h1
-                  className="text-sm font-medium text-foreground max-w-40 truncate cursor-text"
-                  onClick={handleStartRename}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      handleStartRename();
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  title="Click to rename"
-                >
-                  {resolvedTitle}
-                </h1>
-              )}
-              <p className="text-sm text-muted-foreground">{sessionDisplayInfo.repoLabel}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <button
-              ref={detailsButtonRef}
-              type="button"
-              onClick={toggleDetails}
-              className="lg:hidden px-3 py-1.5 text-sm text-muted-foreground border border-border-muted hover:text-foreground hover:bg-muted transition"
-              aria-label="Toggle session details"
-              aria-controls="session-details-dialog"
-              aria-expanded={isDetailsOpen}
-            >
-              Details
-            </button>
-            {/* Mobile: single combined status dot */}
-            <div className="md:hidden">
-              <CombinedStatusDot
-                connected={connected}
-                connecting={connecting}
-                sandboxStatus={sessionState?.sandboxStatus}
-              />
-            </div>
-            {/* Desktop: full status indicators */}
-            <div className="hidden md:contents">
-              <ConnectionStatus connected={connected} connecting={connecting} />
-              <SandboxStatus
-                status={sessionState?.sandboxStatus}
-                dashboardUrl={sessionState?.sandboxDashboardUrl}
-              />
-              <ParticipantsList participants={participants} />
-            </div>
-          </div>
-        </div>
-      </header>
+      <SessionHeader
+        sessionState={sessionState}
+        fallbackSessionInfo={fallbackSessionInfo}
+        connected={connected}
+        connecting={connecting}
+        participants={participants}
+        isDetailsOpen={isDetailsOpen}
+        detailsButtonRef={detailsButtonRef}
+        onToggleDetails={toggleDetails}
+        renameSession={renameSession}
+      />
 
       {/* Connection error banner */}
       {(authError || connectionError) && (
@@ -1144,94 +906,20 @@ function SessionContent({
       </main>
 
       {isBelowLg && (
-        <div
-          className={`fixed inset-0 z-50 lg:hidden ${isDetailsOpen ? "" : "pointer-events-none"}`}
-        >
-          <div
-            className={`absolute inset-0 bg-overlay transition-opacity duration-200 ${
-              isDetailsOpen ? "opacity-100" : "opacity-0"
-            }`}
-            onClick={closeDetails}
-          />
-
-          {isPhone ? (
-            <div
-              id="session-details-dialog"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Session details"
-              className="absolute inset-x-0 bottom-0 max-h-[85vh] bg-background border-t border-border-muted shadow-xl flex flex-col"
-              style={{
-                transform: isDetailsOpen ? `translateY(${sheetDragY}px)` : "translateY(100%)",
-                transition: sheetDragY > 0 ? "none" : "transform 200ms ease-in-out",
-              }}
-            >
-              <div
-                className="px-4 pt-3 pb-2 border-b border-border-muted"
-                onTouchStart={handleSheetTouchStart}
-                onTouchMove={handleSheetTouchMove}
-                onTouchEnd={handleSheetTouchEnd}
-                onTouchCancel={handleSheetTouchEnd}
-              >
-                <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-muted" />
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-medium text-foreground">Session details</h2>
-                  <button
-                    type="button"
-                    onClick={closeDetails}
-                    className="text-sm text-muted-foreground hover:text-foreground transition"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-              <div className="overflow-y-auto">
-                <SessionRightSidebarContent
-                  sessionId={sessionId}
-                  sessionState={sessionState}
-                  participants={participants}
-                  events={events}
-                  artifacts={artifacts}
-                  terminalOpen={terminalOpen}
-                  onToggleTerminal={toggleTerminal}
-                  onOpenMedia={setSelectedMediaArtifactId}
-                />
-              </div>
-            </div>
-          ) : (
-            <div
-              id="session-details-dialog"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Session details"
-              className="absolute inset-y-0 right-0 w-80 max-w-[85vw] bg-background border-l border-border-muted shadow-xl flex flex-col transition-transform duration-200 ease-in-out"
-              style={{ transform: isDetailsOpen ? "translateX(0)" : "translateX(100%)" }}
-            >
-              <div className="px-4 py-3 border-b border-border-muted flex items-center justify-between">
-                <h2 className="text-sm font-medium text-foreground">Session details</h2>
-                <button
-                  type="button"
-                  onClick={closeDetails}
-                  className="text-sm text-muted-foreground hover:text-foreground transition"
-                >
-                  Close
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                <SessionRightSidebarContent
-                  sessionId={sessionId}
-                  sessionState={sessionState}
-                  participants={participants}
-                  events={events}
-                  artifacts={artifacts}
-                  terminalOpen={terminalOpen}
-                  onToggleTerminal={toggleTerminal}
-                  onOpenMedia={setSelectedMediaArtifactId}
-                />
-              </div>
-            </div>
-          )}
-        </div>
+        <SessionDetailsOverlay
+          open={isDetailsOpen}
+          onOpenChange={setIsDetailsOpen}
+          isPhone={isPhone}
+          returnFocusRef={detailsButtonRef}
+          sessionId={sessionId}
+          sessionState={sessionState}
+          participants={participants}
+          events={events}
+          artifacts={artifacts}
+          terminalOpen={terminalOpen}
+          onToggleTerminal={toggleTerminal}
+          onOpenMedia={setSelectedMediaArtifactId}
+        />
       )}
 
       <MediaLightbox
@@ -1429,113 +1117,6 @@ function SessionContent({
   );
 }
 
-function ConnectionStatus({ connected, connecting }: { connected: boolean; connecting: boolean }) {
-  if (connecting) {
-    return (
-      <span className="flex items-center gap-1 text-xs text-warning">
-        <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
-        Connecting...
-      </span>
-    );
-  }
-
-  if (connected) {
-    return (
-      <span className="flex items-center gap-1 text-xs text-success">
-        <span className="w-2 h-2 rounded-full bg-success" />
-        Connected
-      </span>
-    );
-  }
-
-  return (
-    <span className="flex items-center gap-1 text-xs text-destructive">
-      <span className="w-2 h-2 rounded-full bg-destructive" />
-      Disconnected
-    </span>
-  );
-}
-
-function SandboxStatus({
-  status,
-  dashboardUrl,
-}: {
-  status?: string;
-  dashboardUrl?: string | null;
-}) {
-  if (!status) return null;
-
-  const colors: Record<string, string> = {
-    pending: "text-muted-foreground",
-    warming: "text-warning",
-    syncing: "text-accent",
-    ready: "text-success",
-    running: "text-accent",
-    stopped: "text-muted-foreground",
-    failed: "text-destructive",
-  };
-
-  const className = `text-xs ${colors[status] || colors.pending}`;
-  const label = `Sandbox: ${status}`;
-
-  if (dashboardUrl) {
-    return (
-      <a
-        href={dashboardUrl}
-        target="_blank"
-        rel="noreferrer noopener"
-        title="Open sandbox in provider dashboard"
-        className={`${className} hover:underline`}
-      >
-        {label}
-        <span aria-hidden="true" className="ml-0.5">
-          ↗
-        </span>
-      </a>
-    );
-  }
-
-  return <span className={className}>{label}</span>;
-}
-
-function CombinedStatusDot({
-  connected,
-  connecting,
-  sandboxStatus,
-}: {
-  connected: boolean;
-  connecting: boolean;
-  sandboxStatus?: string;
-}) {
-  let color: string;
-  let pulse = false;
-  let label: string;
-
-  if (!connected && !connecting) {
-    color = "bg-destructive";
-    label = "Disconnected";
-  } else if (connecting) {
-    color = "bg-warning";
-    pulse = true;
-    label = "Connecting...";
-  } else if (sandboxStatus === "failed") {
-    color = "bg-destructive";
-    label = `Connected \u00b7 Sandbox: ${sandboxStatus}`;
-  } else if (["pending", "warming", "syncing"].includes(sandboxStatus || "")) {
-    color = "bg-warning";
-    label = `Connected \u00b7 Sandbox: ${sandboxStatus}`;
-  } else {
-    color = "bg-success";
-    label = sandboxStatus ? `Connected \u00b7 Sandbox: ${sandboxStatus}` : "Connected";
-  }
-
-  return (
-    <span title={label} className="flex items-center">
-      <span className={`w-2.5 h-2.5 rounded-full ${color}${pulse ? " animate-pulse" : ""}`} />
-    </span>
-  );
-}
-
 function ThinkingIndicator() {
   return (
     <div className="bg-card p-4 flex items-center gap-2">
@@ -1657,36 +1238,6 @@ function TimelineSkeleton() {
         <div className="h-3 w-32 bg-muted rounded" />
         <div className="h-3 w-3/4 bg-muted rounded" />
       </div>
-    </div>
-  );
-}
-
-function ParticipantsList({
-  participants,
-}: {
-  participants: { userId: string; name: string; status: string }[];
-}) {
-  if (participants.length === 0) return null;
-
-  // Deduplicate participants by userId (same user may have multiple connections)
-  const uniqueParticipants = Array.from(new Map(participants.map((p) => [p.userId, p])).values());
-
-  return (
-    <div className="flex -space-x-2">
-      {uniqueParticipants.slice(0, 3).map((p) => (
-        <div
-          key={p.userId}
-          className="w-8 h-8 rounded-full bg-card flex items-center justify-center text-xs font-medium text-foreground border-2 border-white"
-          title={p.name}
-        >
-          {p.name.charAt(0).toUpperCase()}
-        </div>
-      ))}
-      {uniqueParticipants.length > 3 && (
-        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium text-foreground border-2 border-white">
-          +{uniqueParticipants.length - 3}
-        </div>
-      )}
     </div>
   );
 }
