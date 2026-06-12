@@ -101,16 +101,6 @@ export interface SandboxSettings {
    * default.
    */
   memoryMib?: number | null;
-  /**
-   * Whether the coding agent in this session may submit a formal GitHub PR
-   * review (event APPROVE or REQUEST_CHANGES). Only github-bot sessions set
-   * this: review sessions inherit it from `autoApproveOnOpen`; comment-action
-   * and failed-checks sessions set it `false`. Absent ⇒ session is not governed
-   * (no enforcement) — inline comments and the verdict comment are always
-   * allowed regardless. The sandbox guard reads this (threaded via
-   * `SESSION_CONFIG.allow_formal_review`) to block off-policy formal reviews.
-   */
-  allowFormalReview?: boolean;
 }
 
 export type SlackMentionsPolicy = "allow" | "escape" | "strip";

@@ -1036,29 +1036,28 @@ class SandboxSupervisor:
                 )
         self._configure_langfuse(opencode_config)
 
-        # PR-review policy, defense-in-depth layer at the agent. Merged AFTER the
-        # user config so it can't be overridden. This is a best-effort early stop
-        # for the common, documented command shapes — the authoritative block is
-        # the gh wrapper (git_credential_helper `gh-guard`), which parses argv
-        # precisely. Patterns are kept specific to avoid false positives on body
-        # text; the bare `-a`/`-r` shorthands are left to the wrapper. The
-        # bash-level `"*": "allow"` keeps every other command permitted.
-        if self.session_config.get("allow_formal_review") is False:
-            opencode_config = _deep_merge(
-                opencode_config,
-                {
-                    "permission": {
-                        "bash": {
-                            "*pulls/*/reviews*event=APPROVE*": "deny",
-                            "*pulls/*/reviews*event=REQUEST_CHANGES*": "deny",
-                            "*pr review*--approve*": "deny",
-                            "*pr review*--request-changes*": "deny",
-                            "*": "allow",
-                        }
+        # Formal PR reviews must go through the `submit-pr-review` tool (which
+        # routes to the control plane for a live policy check), never raw gh. This
+        # best-effort deny rule stops the common documented command shapes early;
+        # the authoritative block is the gh wrapper (git_credential_helper
+        # `gh-guard`), which parses argv precisely. Merged AFTER the user config so
+        # it can't be overridden. Patterns are kept specific to avoid false
+        # positives on body text; the bare `-a`/`-r` shorthands are left to the
+        # wrapper. The bash-level `"*": "allow"` keeps every other command allowed.
+        opencode_config = _deep_merge(
+            opencode_config,
+            {
+                "permission": {
+                    "bash": {
+                        "*pulls/*/reviews*event=APPROVE*": "deny",
+                        "*pulls/*/reviews*event=REQUEST_CHANGES*": "deny",
+                        "*pr review*--approve*": "deny",
+                        "*pr review*--request-changes*": "deny",
+                        "*": "allow",
                     }
-                },
-            )
-            self.log.info("opencode.formal_review_denied")
+                }
+            },
+        )
 
         # Inject MCP servers
         mcp_servers = self._resolve_mcp_servers()
@@ -1082,18 +1081,8 @@ class SandboxSupervisor:
         opencode_dir = workdir / ".opencode"
         self._deploy_opencode_plugins(opencode_dir)
 
-        # Surface the PR-review policy to the gh wrapper. The wrapper runs as a
-        # child of opencode's bash tool and reads OI_ALLOW_FORMAL_REVIEW from the
-        # inherited env. Tri-state: only set when the session is governed
-        # (non-None) so non-github-bot sessions are entirely unaffected.
-        review_env: dict[str, str] = {}
-        allow_formal_review = self.session_config.get("allow_formal_review")
-        if allow_formal_review is not None:
-            review_env["OI_ALLOW_FORMAL_REVIEW"] = "true" if allow_formal_review else "false"
-
         env = {
             **os.environ,
-            **review_env,
             "OPENCODE_CONFIG_CONTENT": json.dumps(opencode_config),
             # Disable OpenCode's question tool in headless mode. The tool blocks
             # on a Promise waiting for user input via the HTTP API, but the bridge

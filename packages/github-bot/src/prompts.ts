@@ -275,18 +275,11 @@ export function buildCodeReviewPrompt(params: {
     includeWarning: false,
   });
 
-  const reviewInstruction = autoApproveOnOpen
-    ? `4. When your review is complete, submit it via:
+  const formalVerdictHint = autoApproveOnOpen
+    ? "This repo permits formal verdicts: APPROVE only for extremely low-risk changes (docs, comments, test-only, trivial config, or minor refactors with no behavioral change) when you found no issues; REQUEST_CHANGES for real blocking issues; COMMENT for non-blocking feedback. If you found no issues and the changes are not clearly low-risk, skip the formal verdict."
+    : "This repo does not permit approving or blocking verdicts — the tool will reject APPROVE and REQUEST_CHANGES, so at most submit a COMMENT, or skip the tool entirely.";
 
-   gh api -X POST "repos/${owner}/${repo}/pulls/${number}/reviews" \\
-     -f body="<your review summary>" \\
-     -f event="APPROVE|REQUEST_CHANGES|COMMENT"
-
-   Use APPROVE only if the changes are extremely low-risk (documentation, comments, test-only updates,
-   trivial config, or minor refactors with no behavioral change) and you found no issues. Use
-   REQUEST_CHANGES if you found real issues. Use COMMENT for general feedback that does not block merging.
-   If you found no issues and the changes are not clearly low-risk, do not submit a review at all.`
-    : `4. ${NO_FORMAL_REVIEW_GUARD}`;
+  const reviewInstruction = `4. A formal review verdict is OPTIONAL. If you want one, use the \`submit-pr-review\` tool (event APPROVE, REQUEST_CHANGES, or COMMENT) — it posts the review server-side after checking this repo's policy live. ${formalVerdictHint} NEVER submit a review with \`gh pr review\` or \`gh api ... repos/${owner}/${repo}/pulls/${number}/reviews\` — those are blocked in the sandbox. Your inline comments and the single verdict comment (below) are the primary output regardless of whether you submit a formal verdict.`;
 
   const largeDiffSection = largeDiff ? `\n${buildLookoutDiverGuidance()}\n` : "";
 

@@ -1,10 +1,11 @@
 """Unit tests for the `gh-guard` formal-review block.
 
-The guard (in ``git_credential_helper._gh_command_is_blocked``) is the
-authoritative enforcement of Reef's comment-only review process: it parses the
-argv passed to ``gh`` and blocks a formal review submission (event APPROVE or
-REQUEST_CHANGES) when ``OI_ALLOW_FORMAL_REVIEW`` forbids it. Inline comments,
-the verdict issue comment, GETs, and COMMENT-event reviews must always pass.
+The guard (in ``git_credential_helper._gh_command_is_blocked``) blocks any raw
+`gh` formal review submission (event APPROVE or REQUEST_CHANGES). Such reviews
+must go through the `submit-pr-review` tool (which routes to the control plane
+for a live policy check), so the guard is UNCONDITIONAL — there is no per-session
+flag. Inline comments, the verdict issue comment, GETs, and COMMENT-event reviews
+must always pass; everything non-review is untouched.
 
 These cover the gh flag-spelling matrix directly against the pure function;
 ``test_gh_wrapper.py`` covers the shell wiring around it.
@@ -16,10 +17,8 @@ import pytest
 
 from sandbox_runtime.credentials.git_credential_helper import _gh_command_is_blocked
 
-BLOCK_ENV = {"OI_ALLOW_FORMAL_REVIEW": "false"}
-
-# Commands that must be ALLOWED even when the policy blocks formal reviews.
-ALLOWED_WHEN_BLOCKED = [
+# Commands that must ALWAYS be allowed (not a formal-review submission).
+ALLOWED = [
     # Inline review comment (POST to the comments collection, not reviews).
     ["api", "repos/o/r/pulls/5/comments", "-f", "body=x"],
     # Verdict issue comment.
@@ -41,9 +40,9 @@ ALLOWED_WHEN_BLOCKED = [
     [],
 ]
 
-# Commands that must be BLOCKED when the policy forbids formal reviews. Covers
-# every gh field-flag spelling, glued and spaced, explicit and implicit POST.
-BLOCKED_WHEN_FORBIDDEN = [
+# Raw formal-review submissions that must ALWAYS be blocked. Covers every gh
+# field-flag spelling, glued and spaced, explicit and implicit POST.
+BLOCKED = [
     # Implicit POST (field present, no -X).
     ["api", "repos/o/r/pulls/5/reviews", "-f", "event=REQUEST_CHANGES", "-f", "body=x"],
     # Explicit -X POST.
@@ -69,42 +68,18 @@ BLOCKED_WHEN_FORBIDDEN = [
 ]
 
 
-@pytest.mark.parametrize("args", ALLOWED_WHEN_BLOCKED)
-def test_allowed_commands_pass_even_when_policy_blocks(args: list[str]) -> None:
-    assert _gh_command_is_blocked(args, BLOCK_ENV) is False
+@pytest.mark.parametrize("args", ALLOWED)
+def test_allowed_commands_pass(args: list[str]) -> None:
+    assert _gh_command_is_blocked(args) is False
 
 
-@pytest.mark.parametrize("args", BLOCKED_WHEN_FORBIDDEN)
-def test_formal_reviews_blocked_when_policy_forbids(args: list[str]) -> None:
-    assert _gh_command_is_blocked(args, BLOCK_ENV) is True
-
-
-@pytest.mark.parametrize("args", BLOCKED_WHEN_FORBIDDEN)
-def test_nothing_blocked_when_policy_allows(args: list[str]) -> None:
-    """OI_ALLOW_FORMAL_REVIEW=true → every formal review passes (current behavior)."""
-    assert _gh_command_is_blocked(args, {"OI_ALLOW_FORMAL_REVIEW": "true"}) is False
-
-
-@pytest.mark.parametrize("args", BLOCKED_WHEN_FORBIDDEN)
-def test_nothing_blocked_when_ungoverned(args: list[str]) -> None:
-    """Absent flag ⇒ session not governed ⇒ no enforcement (non-github-bot sessions)."""
-    assert _gh_command_is_blocked(args, {}) is False
-
-
-@pytest.mark.parametrize("raw", ["false", "FALSE", "False", "0", "no", ""])
-def test_block_values_enforce(raw: str) -> None:
-    args = ["api", "repos/o/r/pulls/5/reviews", "-f", "event=REQUEST_CHANGES"]
-    assert _gh_command_is_blocked(args, {"OI_ALLOW_FORMAL_REVIEW": raw}) is True
-
-
-@pytest.mark.parametrize("raw", ["true", "TRUE", "1", "yes", "anything"])
-def test_allow_values_permit(raw: str) -> None:
-    args = ["api", "repos/o/r/pulls/5/reviews", "-f", "event=REQUEST_CHANGES"]
-    assert _gh_command_is_blocked(args, {"OI_ALLOW_FORMAL_REVIEW": raw}) is False
+@pytest.mark.parametrize("args", BLOCKED)
+def test_raw_formal_reviews_blocked(args: list[str]) -> None:
+    assert _gh_command_is_blocked(args) is True
 
 
 def test_event_from_file_is_out_of_scope() -> None:
     """`-F event=@file` reads the value from a file; not parsed → not blocked here
     (documented residual, covered by the control-plane backstop)."""
     args = ["api", "repos/o/r/pulls/5/reviews", "-F", "event=@evt.txt"]
-    assert _gh_command_is_blocked(args, BLOCK_ENV) is False
+    assert _gh_command_is_blocked(args) is False

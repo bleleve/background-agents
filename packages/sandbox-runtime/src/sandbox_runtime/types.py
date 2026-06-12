@@ -132,8 +132,3 @@ class SessionConfig(BaseModel):
     provider: str = "anthropic"
     model: str = "claude-sonnet-4-6"
     mcp_servers: list[McpServerConfig] | None = None
-    # PR-review policy (tri-state). None ⇒ session not governed (the gh guard
-    # stays inert); False ⇒ block formal APPROVE/REQUEST_CHANGES reviews; True ⇒
-    # allow. Only github-bot sessions set this. The entrypoint translates a
-    # non-None value into the OI_ALLOW_FORMAL_REVIEW env var for the gh wrapper.
-    allow_formal_review: bool | None = None

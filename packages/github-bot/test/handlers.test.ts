@@ -1678,11 +1678,12 @@ describe("integration config", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
-    expect(promptBody.content).toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
-    expect(promptBody.content).not.toContain("Do not submit a pull request review.");
+    expect(promptBody.content).toContain("submit-pr-review");
+    expect(promptBody.content).toContain("permits formal verdicts");
+    expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 
-  it("omits APPROVE instruction and forbids review submission when autoApproveOnOpen is false", async () => {
+  it("routes verdicts through the tool and forbids raw gh when autoApproveOnOpen is false", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
 
@@ -1690,13 +1691,14 @@ describe("integration config", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
-    expect(promptBody.content).toContain("Do NOT submit a formal pull request review");
+    expect(promptBody.content).toContain("submit-pr-review");
+    expect(promptBody.content).toContain("NEVER submit a review with `gh pr review`");
     expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 });
 
 describe("handlePullRequestOpened autoApproveOnOpen", () => {
-  it("includes APPROVE/REQUEST_CHANGES instruction in prompt when autoApproveOnOpen is true", async () => {
+  it("permits formal verdicts via the tool when autoApproveOnOpen is true", async () => {
     vi.mocked(getGitHubConfig).mockResolvedValue({
       ...defaultConfig,
       autoApproveOnOpen: true,
@@ -1708,11 +1710,12 @@ describe("handlePullRequestOpened autoApproveOnOpen", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
-    expect(promptBody.content).toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
-    expect(promptBody.content).not.toContain("Do not submit a pull request review.");
+    expect(promptBody.content).toContain("submit-pr-review");
+    expect(promptBody.content).toContain("permits formal verdicts");
+    expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 
-  it("omits APPROVE instruction when autoApproveOnOpen is false", async () => {
+  it("routes verdicts through the tool when autoApproveOnOpen is false", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
 
@@ -1720,7 +1723,8 @@ describe("handlePullRequestOpened autoApproveOnOpen", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
-    expect(promptBody.content).toContain("Do NOT submit a formal pull request review");
+    expect(promptBody.content).toContain("submit-pr-review");
+    expect(promptBody.content).toContain("does not permit approving or blocking verdicts");
     expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 });
@@ -1888,7 +1892,10 @@ describe("handlePullRequestLabeled", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
-    expect(promptBody.content).toContain("Do NOT submit a formal pull request review");
+    // The labeled path forces the no-formal-verdict hint regardless of the repo
+    // setting; the tool would also reject it server-side.
+    expect(promptBody.content).toContain("submit-pr-review");
+    expect(promptBody.content).toContain("does not permit approving or blocking verdicts");
     expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 
@@ -2261,10 +2268,15 @@ describe("handlePullRequestReview", () => {
     expect(dismissPullRequestReview).not.toHaveBeenCalled();
   });
 
-  it("fails closed: dismisses when config resolution returns autoApproveOnOpen false", async () => {
-    // getGitHubConfig fails closed to autoApproveOnOpen:false on errors; assert
-    // the handler dismisses in that case rather than leaving the review.
-    vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoApproveOnOpen: false });
+  it("fails closed: dismisses on the FAIL_CLOSED config shape (enabledRepos: [])", async () => {
+    // getGitHubConfig fails closed on errors to autoApproveOnOpen:false AND
+    // enabledRepos:[] (empty allowlist). The backstop must still dismiss — it must
+    // NOT early-return on an enabledRepos gate (the bug the Reef review caught).
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      autoApproveOnOpen: false,
+      enabledRepos: [],
+    });
     const env = createMockEnv();
 
     const result = await handlePullRequestReview(

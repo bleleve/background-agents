@@ -27,14 +27,6 @@ export interface SessionConfigPayload {
   mcp_servers?: McpServerConfig[];
   /** Omitted from the serialized payload when undefined. */
   branch?: string;
-  /**
-   * Whether the agent may submit a formal GitHub PR review (APPROVE /
-   * REQUEST_CHANGES). Tri-state: omitted ⇒ session is not governed (the sandbox
-   * guard stays inert); `false` ⇒ block formal reviews; `true` ⇒ allow. Only
-   * github-bot sessions set it. Omitted from the serialized payload when
-   * undefined.
-   */
-  allow_formal_review?: boolean;
 }
 
 /** Provider-agnostic inputs needed to assemble a {@link SessionConfigPayload}. */
@@ -46,8 +38,6 @@ export interface SessionConfigInput {
   model: string;
   mcpServers?: McpServerConfig[];
   branch?: string;
-  /** See {@link SessionConfigPayload.allow_formal_review}. Undefined ⇒ omitted. */
-  allowFormalReview?: boolean;
 }
 
 /**
@@ -68,11 +58,6 @@ export function buildSessionConfig(input: SessionConfigInput): SessionConfigPayl
   };
   if (input.branch) {
     payload.branch = input.branch;
-  }
-  // Tri-state: only set the key when explicitly defined so an omitted value
-  // reaches the runtime as "not governed" rather than "block".
-  if (input.allowFormalReview !== undefined) {
-    payload.allow_formal_review = input.allowFormalReview;
   }
   return payload;
 }

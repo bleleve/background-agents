@@ -178,10 +178,11 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("DB migrations are in scope");
   });
 
-  it("forbids submitting a review when autoApproveOnOpen is false (default)", () => {
+  it("routes verdicts through the submit-pr-review tool and forbids raw gh (autoApproveOnOpen false)", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
-    expect(prompt).toContain("Do NOT submit a formal pull request review");
-    expect(prompt).toContain("do not run `gh pr review`");
+    expect(prompt).toContain("submit-pr-review");
+    expect(prompt).toContain("does not permit approving or blocking verdicts");
+    expect(prompt).toContain("NEVER submit a review with `gh pr review`");
     expect(prompt).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 
@@ -318,12 +319,14 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("Sonar");
   });
 
-  it("includes APPROVE/REQUEST_CHANGES/COMMENT submit instruction when autoApproveOnOpen is true", () => {
+  it("permits formal verdicts via the submit-pr-review tool when autoApproveOnOpen is true", () => {
     const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
-    expect(prompt).toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
-    expect(prompt).toContain("repos/acme/widgets/pulls/42/reviews");
+    expect(prompt).toContain("submit-pr-review");
+    expect(prompt).toContain("permits formal verdicts");
     expect(prompt).toContain("extremely low-risk");
-    expect(prompt).not.toContain("Do not submit a pull request review.");
+    // Raw gh review submission is never instructed, regardless of the policy.
+    expect(prompt).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
+    expect(prompt).toContain("NEVER submit a review with `gh pr review`");
   });
 
   it("autoApproveOnOpen: true still includes inline suggestion workflow", () => {

@@ -146,13 +146,6 @@ async function createSession(
     prBaseRef?: string;
     planMode?: boolean;
     planModel?: string;
-    /**
-     * PR-review policy: whether the agent may submit a formal GitHub review
-     * (APPROVE/REQUEST_CHANGES). Review sessions pass `autoApproveOnOpen`;
-     * comment-action and failed-checks sessions pass `false`. Omitted ⇒ the
-     * sandbox guard stays inert (ungoverned session).
-     */
-    allowFormalReview?: boolean;
   }
 ): Promise<string> {
   const body: Record<string, unknown> = {
@@ -165,9 +158,6 @@ async function createSession(
     scmAvatarUrl: params.scmAvatarUrl,
     spawnSource: "github-bot",
   };
-  if (params.allowFormalReview !== undefined) {
-    body.allowFormalReview = params.allowFormalReview;
-  }
   if (params.prNumber) {
     body.prNumber = params.prNumber;
     // Carry the PR descriptor so the control plane can seed a `pr` artifact at
@@ -606,10 +596,6 @@ async function runCodeReview(
       prState: params.prState,
       prHeadRef: params.prHeadRef,
       prBaseRef: params.prBaseRef,
-      // A review session may submit a formal review only when auto-approve is
-      // enabled for the repo; otherwise the sandbox guard blocks APPROVE/
-      // REQUEST_CHANGES (inline comments + verdict still post).
-      allowFormalReview: params.autoApproveOnOpen ?? false,
     });
     // Remember it so a later re-trigger (the `reef: ask for review` label) re-runs in
     // this session instead of spawning a new one.
@@ -1387,9 +1373,6 @@ export async function handleIssueComment(
     prState: issue.state,
     planMode,
     planModel,
-    // Comment-action sessions never submit a formal review (they push code and
-    // reply in-thread). Block APPROVE/REQUEST_CHANGES at the sandbox guard.
-    allowFormalReview: false,
   });
   log.info("session.created", {
     ...meta,
@@ -1539,9 +1522,6 @@ export async function handleReviewComment(
     prState: pr.state,
     prHeadRef: pr.head.ref,
     prBaseRef: pr.base.ref,
-    // Comment-action sessions never submit a formal review (they push code and
-    // reply in-thread). Block APPROVE/REQUEST_CHANGES at the sandbox guard.
-    allowFormalReview: false,
   });
   log.info("session.created", { ...meta, session_id: sessionId, action: "review_comment" });
 
@@ -1662,12 +1642,14 @@ export async function handlePullRequestReview(
   // (e) Resolve policy. getGitHubConfig fails CLOSED (autoApproveOnOpen=false) on
   // any error, so a config outage dismisses — correct for a guardrail: when the
   // policy is unknown, treat the formal review as forbidden.
+  //
+  // Deliberately NO `enabledRepos` gate here (unlike the session-creation
+  // handlers): this backstop is reactive and only fires on a review our own bot
+  // already submitted, so the repo is necessarily one we operate on. Gating on
+  // enabledRepos would also break the fail-closed contract — FAIL_CLOSED sets
+  // `enabledRepos: []`, which would early-return `repo_not_enabled` and leave the
+  // off-policy review in place on any config-fetch failure.
   const config = await getGitHubConfig(env, repoFullName, log);
-
-  if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
-    log.debug("review_backstop.repo_not_enabled", meta);
-    return { outcome: "skipped", skip_reason: "repo_not_enabled" };
-  }
 
   // (f) Formal reviews are permitted on this repo → leave it.
   if (config.autoApproveOnOpen) {

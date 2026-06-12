@@ -316,11 +316,16 @@ def _print_gh_token() -> int:
 # --- gh formal-review guard --------------------------------------------------
 #
 # The gh wrapper delegates to the `gh-guard` action (below) so the agent cannot
-# submit a formal PR review (APPROVE / REQUEST_CHANGES) when policy forbids it.
-# This is the authoritative enforcement of Reef's "comment-only review" process;
-# the prompt and the OpenCode permission rule are softer, bypassable layers.
-# Inline comments (`pulls/N/comments`), the verdict (`issues/N/comments`), GETs,
-# and COMMENT-event reviews are always allowed.
+# submit a formal PR review (APPROVE / REQUEST_CHANGES) via raw gh. Such reviews
+# must go through the `submit-pr-review` tool, which routes to the control plane
+# for a live policy check (the repo's `autoApproveOnOpen` setting) and posts the
+# review server-side. The guard is therefore unconditional: it always blocks raw
+# formal reviews so the sanctioned tool is the only path, and the policy decision
+# lives in one server-side place instead of being baked into the sandbox.
+#
+# This is the authoritative bypass-prevention layer; the OpenCode permission rule
+# is a softer early stop. Inline comments (`pulls/N/comments`), the verdict
+# (`issues/N/comments`), GETs, and COMMENT-event reviews are always allowed.
 
 # Exit code the wrapper interprets as "blocked by policy" (see GH_WRAPPER_BODY).
 GH_GUARD_BLOCK_RC = 3
@@ -336,32 +341,18 @@ _GH_FIELD_FLAGS = frozenset({"-f", "--field", "-F", "--raw-field"})
 _GH_BLOCKED_EVENTS = frozenset({"APPROVE", "REQUEST_CHANGES"})
 
 _GH_GUARD_BLOCK_MESSAGE = (
-    "BLOCKED by Open-Inspect review policy: this session may not submit a formal "
-    "pull request review (event APPROVE or REQUEST_CHANGES).\n"
+    "BLOCKED: do not submit a formal pull request review with raw gh (event "
+    "APPROVE or REQUEST_CHANGES).\n"
     "\n"
-    "Do this instead:\n"
+    "Use the `submit-pr-review` tool instead — it enforces the repo's review "
+    "policy and posts the review for you (or tells you it isn't permitted).\n"
+    "\n"
+    "For everything else, raw gh is fine:\n"
     "  - Inline code comment:  gh api repos/OWNER/REPO/pulls/N/comments "
     "-f body=... -f path=... -F line=...\n"
     "  - Overall verdict:      gh api repos/OWNER/REPO/issues/N/comments "
     "-f body='<your summary>'\n"
-    "  - A non-blocking COMMENT review is also allowed:  "
-    "gh api repos/OWNER/REPO/pulls/N/reviews -f event=COMMENT -f body=...\n"
-    "\n"
-    "Do not retry with APPROVE or REQUEST_CHANGES; it will be blocked again.\n"
 )
-
-
-def _formal_reviews_allowed(env: Mapping[str, str]) -> bool:
-    """Whether this session may submit a formal PR review.
-
-    Tri-state via ``OI_ALLOW_FORMAL_REVIEW``: absent ⇒ the session is not
-    governed (allow — preserves behavior for non-github-bot sessions);
-    ``false``/``0``/``no``/empty ⇒ blocked; anything else ⇒ allowed.
-    """
-    raw = env.get("OI_ALLOW_FORMAL_REVIEW")
-    if raw is None:
-        return True
-    return raw.strip().lower() not in ("false", "0", "no", "")
 
 
 def _event_from_field_token(token: str) -> str | None:
@@ -454,10 +445,12 @@ def _api_is_formal_review(args: list[str]) -> bool:
     return any(ev.upper() in _GH_BLOCKED_EVENTS for ev in events)
 
 
-def _gh_command_is_blocked(gh_args: list[str], env: Mapping[str, str]) -> bool:
-    """True if ``gh_args`` is a formal-review submission that policy forbids."""
-    if _formal_reviews_allowed(env):
-        return False
+def _gh_command_is_blocked(gh_args: list[str]) -> bool:
+    """True if ``gh_args`` is a raw formal-review submission (always blocked).
+
+    Formal APPROVE/REQUEST_CHANGES reviews must go through the `submit-pr-review`
+    tool, never raw gh — so this is unconditional.
+    """
     if not gh_args:
         return False
     sub = gh_args[0]
@@ -474,7 +467,7 @@ def _run_gh_guard(gh_args: list[str]) -> int:
     Receives the full argv passed to ``gh`` (the wrapper's ``"$@"``). Never reads
     stdin, so the wrapper's subsequent ``exec gh "$@"`` keeps stdin intact.
     """
-    if _gh_command_is_blocked(gh_args, os.environ):
+    if _gh_command_is_blocked(gh_args):
         sys.stderr.write(_GH_GUARD_BLOCK_MESSAGE)
         sys.stderr.flush()
         return GH_GUARD_BLOCK_RC

@@ -67,53 +67,6 @@ describe("ModalClient OpenCode config payload", () => {
     expect(body).not.toHaveProperty("opencodeUserConfig");
   });
 
-  it("derives allow_formal_review from sandboxSettings in createSandbox requests", async () => {
-    const client = new ModalClient("test-secret", "test-workspace");
-    fetchSpy.mockResolvedValue(
-      jsonResponse({
-        success: true,
-        data: { sandbox_id: "sandbox-123", status: "warming", created_at: Date.now() },
-      })
-    );
-
-    await client.createSandbox({
-      sessionId: "session-123",
-      sandboxId: "sandbox-123",
-      repoOwner: "owner",
-      repoName: "repo",
-      controlPlaneUrl: "https://control-plane.example.com",
-      sandboxAuthToken: "token",
-      sandboxSettings: { allowFormalReview: false },
-    });
-
-    const [, init] = fetchSpy.mock.calls[0];
-    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-    expect(body.allow_formal_review).toBe(false);
-  });
-
-  it("sends allow_formal_review null when sandboxSettings has no policy (ungoverned)", async () => {
-    const client = new ModalClient("test-secret", "test-workspace");
-    fetchSpy.mockResolvedValue(
-      jsonResponse({
-        success: true,
-        data: { sandbox_id: "sandbox-123", status: "warming", created_at: Date.now() },
-      })
-    );
-
-    await client.createSandbox({
-      sessionId: "session-123",
-      sandboxId: "sandbox-123",
-      repoOwner: "owner",
-      repoName: "repo",
-      controlPlaneUrl: "https://control-plane.example.com",
-      sandboxAuthToken: "token",
-    });
-
-    const [, init] = fetchSpy.mock.calls[0];
-    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-    expect(body.allow_formal_review).toBeNull();
-  });
-
   it("sends opencode_user_config in restoreSandbox requests", async () => {
     const client = new ModalClient("test-secret", "test-workspace");
     fetchSpy.mockResolvedValue(
