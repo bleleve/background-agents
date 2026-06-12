@@ -16,10 +16,16 @@ import type {
   ReviewCommentPayload,
   ReviewThreadPayload,
   CheckSuiteCompletedPayload,
+  PullRequestReviewPayload,
 } from "./types";
 import type { Logger } from "./logger";
 import { extractSessionIdFromBranch } from "@open-inspect/shared";
-import { generateInstallationToken, postReaction, checkSenderPermission } from "./github-auth";
+import {
+  generateInstallationToken,
+  postReaction,
+  checkSenderPermission,
+  dismissPullRequestReview,
+} from "./github-auth";
 import {
   buildCodeReviewPrompt,
   buildCommentActionPrompt,
@@ -223,7 +229,7 @@ async function lookupPrSession(
 }
 
 // ─── PR → review-session mapping (KV) ────────────────────────────────────────
-// Records the latest review session for a PR so a re-trigger (the `ask-for-review`
+// Records the latest review session for a PR so a re-trigger (the `reef: ask for review`
 // label) re-runs in the existing session instead of spawning a new one. Separate
 // key from the plan-mode mapping above. The web "Re-run review" button passes the
 // session id directly and does not need this.
@@ -553,7 +559,7 @@ interface RunCodeReviewParams {
  * Shared core for every full code review: resolve the target session (reuse the
  * existing one on a re-trigger, else create), detect a large diff, build the
  * review prompt, and send it with the `pr_review` completion callback context.
- * Used by the auto-review-on-open, review-requested, `ask-for-review` label, and
+ * Used by the auto-review-on-open, review-requested, `reef: ask for review` label, and
  * web-triggered re-review paths so they stay in sync.
  */
 async function runCodeReview(
@@ -591,7 +597,7 @@ async function runCodeReview(
       prHeadRef: params.prHeadRef,
       prBaseRef: params.prBaseRef,
     });
-    // Remember it so a later re-trigger (the `ask-for-review` label) re-runs in
+    // Remember it so a later re-trigger (the `reef: ask for review` label) re-runs in
     // this session instead of spawning a new one.
     await rememberReviewSession(env, repoFullName, params.prNumber, sessionId);
     log.info("session.created", {
@@ -668,6 +674,15 @@ export async function handleReviewRequested(
     return { outcome: "skipped", skip_reason: "review_not_for_bot" };
   }
 
+  if (pr.state !== "open") {
+    log.debug("handler.pr_not_open", {
+      trace_id: traceId,
+      pull_number: pr.number,
+      pr_state: pr.state,
+    });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
+  }
+
   const config = await getGitHubConfig(env, repoFullName, log);
 
   if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
@@ -678,6 +693,13 @@ export async function handleReviewRequested(
   if (config.privateReposOnly && !repo.private) {
     log.debug("handler.public_repo_skipped", { trace_id: traceId, repo: repoFullName });
     return { outcome: "skipped", skip_reason: "public_repo_skipped" };
+  }
+
+  // Reviews (including this requested-review trigger) are gated by the same
+  // auto-review setting as the open path — if it's off, no review runs.
+  if (!config.autoReviewOnOpen) {
+    log.debug("handler.auto_review_disabled", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "auto_review_disabled" };
   }
 
   const gating = await resolveCallerGating(
@@ -746,6 +768,15 @@ export async function handlePullRequestOpened(
   if (pr.draft) {
     log.debug("handler.draft_pr_skipped", { trace_id: traceId, pull_number: pr.number });
     return { outcome: "skipped", skip_reason: "draft_pr" };
+  }
+
+  if (pr.state !== "open") {
+    log.debug("handler.pr_not_open", {
+      trace_id: traceId,
+      pull_number: pr.number,
+      pr_state: pr.state,
+    });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
   }
 
   if (pr.user.login === env.GITHUB_BOT_USERNAME) {
@@ -823,7 +854,7 @@ export async function handlePullRequestOpened(
 }
 
 /**
- * A label was added to a PR. When it's the `ask-for-review` trigger label,
+ * A label was added to a PR. When it's the `reef: ask for review` trigger label,
  * re-run the full code review. The label is removed again when the review
  * completes (see handleCompleteCallback), so re-adding it re-triggers.
  */
@@ -848,6 +879,15 @@ export async function handlePullRequestLabeled(
     return { outcome: "skipped", skip_reason: "draft_pr" };
   }
 
+  if (pr.state !== "open") {
+    log.debug("handler.pr_not_open", {
+      trace_id: traceId,
+      pull_number: pr.number,
+      pr_state: pr.state,
+    });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
+  }
+
   const config = await getGitHubConfig(env, repoFullName, log);
 
   if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
@@ -858,6 +898,13 @@ export async function handlePullRequestLabeled(
   if (config.privateReposOnly && !repo.private) {
     log.debug("handler.public_repo_skipped", { trace_id: traceId, repo: repoFullName });
     return { outcome: "skipped", skip_reason: "public_repo_skipped" };
+  }
+
+  // Re-triggering a review via the label is gated by the same auto-review
+  // setting as the open path — if reviews are off, the label does nothing.
+  if (!config.autoReviewOnOpen) {
+    log.debug("handler.auto_review_disabled", { trace_id: traceId, repo: repoFullName });
+    return { outcome: "skipped", skip_reason: "auto_review_disabled" };
   }
 
   const gating = await resolveCallerGating(
@@ -957,6 +1004,13 @@ export async function handleReviewRequestInternal(
     return { ok: false, status: 403, error: "repo_not_enabled" };
   }
 
+  // The web "Re-run review" button is gated by the same auto-review setting as
+  // the open path — if reviews are off for this repo, re-running is not allowed.
+  if (!config.autoReviewOnOpen) {
+    log.info("internal_review.auto_review_disabled", meta);
+    return { ok: false, status: 403, error: "auto_review_disabled" };
+  }
+
   const userAgent = resolveAppName(env);
   const [ghToken, headers] = await Promise.all([
     generateInstallationToken({
@@ -972,6 +1026,11 @@ export async function handleReviewRequestInternal(
   if (!details) {
     log.info("internal_review.pr_not_found", meta);
     return { ok: false, status: 404, error: "pull_request_not_found" };
+  }
+
+  if (details.state !== "open") {
+    log.info("internal_review.pr_not_open", { ...meta, pr_state: details.state });
+    return { ok: false, status: 409, error: "pull_request_not_open" };
   }
 
   // Default to private when visibility can't be determined — the safe choice for
@@ -1182,6 +1241,15 @@ export async function handleIssueComment(
   if (!issue.pull_request) {
     log.debug("handler.not_a_pr", { trace_id: traceId, issue_number: issue.number });
     return { outcome: "skipped", skip_reason: "not_a_pr" };
+  }
+
+  if (issue.state !== "open") {
+    log.debug("handler.pr_not_open", {
+      trace_id: traceId,
+      issue_number: issue.number,
+      pr_state: issue.state,
+    });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
   }
 
   if (!hasAnyMention(comment.body, getTriggerMentions(env))) {
@@ -1396,6 +1464,15 @@ export async function handleReviewComment(
     return { outcome: "skipped", skip_reason: "no_mention" };
   }
 
+  if (pr.state !== "open") {
+    log.debug("handler.pr_not_open", {
+      trace_id: traceId,
+      pull_number: pr.number,
+      pr_state: pr.state,
+    });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
+  }
+
   const config = await getGitHubConfig(env, repoFullName, log);
 
   if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
@@ -1503,4 +1580,118 @@ export async function handleReviewThreadResolved(
 
   await resolveReviewSuggestions(env, log, traceId, commentIds);
   return { outcome: "skipped", skip_reason: "review_thread_resolved" };
+}
+
+/** Review states that change PR approval and can be dismissed via the API. */
+const DISMISSABLE_REVIEW_STATES = new Set(["approved", "changes_requested"]);
+
+/**
+ * Reactive backstop for the comment-only review policy. If the Reef bot submits
+ * a formal review (APPROVED / CHANGES_REQUESTED) on a repo where formal reviews
+ * are not permitted (`autoApproveOnOpen=false`), dismiss it as soon as the
+ * `pull_request_review` webhook arrives. This guarantees the PR never stays in a
+ * blocking/approving state caused by the agent going off-script, independent of
+ * (and as a backstop to) the sandbox `gh` guard. Inline comments and the verdict
+ * issue comment are left untouched.
+ *
+ * Loop-prevention: dismissing emits a `pull_request_review` event with action
+ * `dismissed` — dropped by the router and again by the action filter (a) below.
+ */
+export async function handlePullRequestReview(
+  env: Env,
+  log: Logger,
+  payload: PullRequestReviewPayload,
+  traceId: string
+): Promise<HandlerResult> {
+  const { action, review, pull_request: pr, repository: repo } = payload;
+  const owner = repo.owner.login;
+  const repoName = repo.name;
+  const repoFullName = `${owner}/${repoName}`.toLowerCase();
+  const meta = {
+    trace_id: traceId,
+    repo: repoFullName,
+    pull_number: pr.number,
+    review_id: review.id,
+  };
+
+  // (a) Action filter — second half of loop-prevention (our own dismissal emits
+  // action "dismissed"). The router drops it too, but defend here as well.
+  if (action !== "submitted" && action !== "edited") {
+    return { outcome: "skipped", skip_reason: "unsupported_action" };
+  }
+
+  // (b) Only APPROVED / CHANGES_REQUESTED are dismissable and worth policing.
+  // The webhook delivers state in lowercase (unlike the REST list-reviews API).
+  const state = review.state.toLowerCase();
+  if (!DISMISSABLE_REVIEW_STATES.has(state)) {
+    log.debug("review_backstop.non_blocking_state", { ...meta, review_state: state });
+    return { outcome: "skipped", skip_reason: "non_blocking_review_state" };
+  }
+
+  // (c) Only police the Reef bot's own reviews — human and other-bot reviews are
+  // never touched. This identity gate precedes the config fetch.
+  if (review.user.login !== env.GITHUB_BOT_USERNAME) {
+    log.debug("review_backstop.not_bot_review", { ...meta, review_user: review.user.login });
+    return { outcome: "skipped", skip_reason: "review_not_by_bot" };
+  }
+
+  // (d) PR must be open.
+  if (pr.state !== "open") {
+    log.debug("review_backstop.pr_not_open", { ...meta, pr_state: pr.state });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
+  }
+
+  // (e) Resolve policy. getGitHubConfig fails CLOSED (autoApproveOnOpen=false) on
+  // any error, so a config outage dismisses — correct for a guardrail: when the
+  // policy is unknown, treat the formal review as forbidden.
+  //
+  // Deliberately NO `enabledRepos` gate here (unlike the session-creation
+  // handlers): this backstop is reactive and only fires on a review our own bot
+  // already submitted, so the repo is necessarily one we operate on. Gating on
+  // enabledRepos would also break the fail-closed contract — FAIL_CLOSED sets
+  // `enabledRepos: []`, which would early-return `repo_not_enabled` and leave the
+  // off-policy review in place on any config-fetch failure.
+  const config = await getGitHubConfig(env, repoFullName, log);
+
+  // (f) Formal reviews are permitted on this repo → leave it.
+  if (config.autoApproveOnOpen) {
+    log.info("review_backstop.allowed_by_policy", { ...meta, review_state: state });
+    return { outcome: "skipped", skip_reason: "auto_approve_allowed" };
+  }
+
+  // (g) Off-policy formal review by our bot → dismiss.
+  const userAgent = resolveAppName(env);
+  const token = await generateInstallationToken({
+    appId: env.GITHUB_APP_ID,
+    privateKey: env.GITHUB_APP_PRIVATE_KEY,
+    installationId: env.GITHUB_APP_INSTALLATION_ID,
+    userAgent,
+  });
+
+  const dismissed = await dismissPullRequestReview(
+    token,
+    owner,
+    repoName,
+    pr.number,
+    review.id,
+    "Reef does not submit approving or blocking PR reviews on this repository. This formal " +
+      "review state was dismissed automatically; see the inline comments and the Reef verdict " +
+      "comment for the full analysis.",
+    userAgent
+  );
+
+  if (!dismissed) {
+    // Best-effort: don't throw (a throw would clear the delivery dedupe and
+    // trigger a real GitHub retry). The `edited` action gives a natural retry.
+    log.warn("review_backstop.dismiss_failed", { ...meta, review_state: state });
+    return { outcome: "skipped", skip_reason: "dismiss_failed" };
+  }
+
+  log.info("review_backstop.dismissed", { ...meta, review_state: state });
+  return {
+    outcome: "processed",
+    session_id: "",
+    message_id: "",
+    handler_action: "review_dismissed",
+  };
 }

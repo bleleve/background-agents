@@ -665,6 +665,10 @@ export class SessionRepository {
     );
   }
 
+  updateParticipantRole(participantId: string, role: ParticipantRole): void {
+    this.sql.exec(`UPDATE participants SET role = ? WHERE id = ?`, role, participantId);
+  }
+
   listParticipants(): ParticipantRow[] {
     const result = this.sql.exec(`SELECT * FROM participants ORDER BY joined_at`);
     return this.rows<ParticipantRow>(result);

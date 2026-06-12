@@ -18,7 +18,7 @@ describe("POST /internal/ws-token", () => {
     expect(body.participantId).toEqual(expect.any(String));
   });
 
-  it("creates new participant for unknown userId", async () => {
+  it("creates a viewer (not member) for an unknown userId that only fetched a token", async () => {
     const { stub } = await initSession({ userId: "user-1" });
 
     const res = await stub.fetch("http://internal/internal/ws-token", {
@@ -35,9 +35,11 @@ describe("POST /internal/ws-token", () => {
     );
     expect(participants.length).toBeGreaterThanOrEqual(2);
 
+    // Merely opening the session page (fetching a WS token) must not make the
+    // user a participant for PR reviewer/assignee purposes — they are a viewer.
     const newParticipant = participants.find((p) => p.user_id === "user-new");
     expect(newParticipant).toBeDefined();
-    expect(newParticipant!.role).toBe("member");
+    expect(newParticipant!.role).toBe("viewer");
   });
 
   it("stores token hash in participants table", async () => {

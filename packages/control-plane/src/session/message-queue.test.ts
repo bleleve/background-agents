@@ -96,6 +96,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
     updateMessageToProcessing: vi.fn(),
     getParticipantById: vi.fn(() => createParticipant()),
     updateParticipantCoalesce: vi.fn(),
+    updateParticipantRole: vi.fn(),
     updateMessageCompletion: vi.fn(),
     upsertExecutionCompleteEvent: vi.fn(),
     getCurrentPlan: vi.fn(
@@ -205,6 +206,28 @@ describe("SessionMessageQueue", () => {
     expect(h.setSessionStatus).toHaveBeenCalledWith("active");
   });
 
+  it("promotes a viewer to member when they send a prompt", async () => {
+    const h = buildQueue();
+    h.participantService.getByUserId.mockReturnValue(
+      createParticipant({ id: "viewer-1", role: "viewer" })
+    );
+
+    await h.queue.handlePromptMessage({} as WebSocket, { content: "hello" });
+
+    expect(h.repository.updateParticipantRole).toHaveBeenCalledWith("viewer-1", "member");
+  });
+
+  it("does not change role for an existing member sending a prompt", async () => {
+    const h = buildQueue();
+    h.participantService.getByUserId.mockReturnValue(
+      createParticipant({ id: "member-1", role: "member" })
+    );
+
+    await h.queue.handlePromptMessage({} as WebSocket, { content: "hello" });
+
+    expect(h.repository.updateParticipantRole).not.toHaveBeenCalled();
+  });
+
   it("dispatches prompt command when sandbox socket exists", async () => {
     const h = buildQueue();
     const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
@@ -283,7 +306,7 @@ describe("SessionMessageQueue", () => {
     );
     expect(h.repository.upsertExecutionCompleteEvent).toHaveBeenCalledWith(
       "msg-9",
-      expect.objectContaining({ type: "execution_complete", success: false }),
+      expect.objectContaining({ type: "execution_complete", success: false, cancelled: true }),
       expect.any(Number)
     );
     expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });
@@ -312,6 +335,13 @@ describe("SessionMessageQueue", () => {
       "msg-timeout",
       false,
       "Execution interrupted: sandbox stopped due to inactivity"
+    );
+    // A timeout is a genuine failure, not a deliberate stop — it must NOT be
+    // flagged cancelled (the flow renders it red, not neutral).
+    expect(h.repository.upsertExecutionCompleteEvent).toHaveBeenCalledWith(
+      "msg-timeout",
+      expect.not.objectContaining({ cancelled: true }),
+      expect.any(Number)
     );
   });
 

@@ -89,6 +89,7 @@ export function SessionRightSidebarContent({
           artifacts={artifacts}
           parentSessionId={sessionState.parentSessionId}
           totalCost={sessionState.totalCost}
+          spawnSource={sessionState.spawnSource}
         />
       </div>
 

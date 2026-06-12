@@ -14,9 +14,11 @@ import { resolveAppName, timingSafeEqual } from "@open-inspect/shared";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl, createModalClient } from "../sandbox/client";
 import { createDaytonaRestClient } from "../sandbox/daytona-rest-client";
+import { createVercelSandboxClient } from "../sandbox/providers/vercel/client";
 import { createModalProvider } from "../sandbox/providers/modal-provider";
 import { createDaytonaProvider } from "../sandbox/providers/daytona-provider";
-import { resolveSandboxBackendName } from "../sandbox/provider-name";
+import { createVercelProvider } from "../sandbox/providers/vercel/provider";
+import { resolveSandboxBackendName, supportsRepoImageBackend } from "../sandbox/provider-name";
 import { createLogger, parseLogLevel } from "../logger";
 import type { Logger } from "../logger";
 import {
@@ -206,6 +208,7 @@ export class SessionDO extends DurableObject<Env> {
     state: () => this.sessionLifecycleHandler.getState(),
     prompt: (request) => this.messagesHandler.enqueuePrompt(request),
     stop: () => this.messagesHandler.stop(),
+    relaunchSandbox: () => this.relaunchSandbox(),
     sandboxEvent: (request) => this.sandboxHandler.sandboxEvent(request),
     createMediaArtifact: (request) => this.sandboxHandler.createMediaArtifact(request),
     listParticipants: () => this.participantsHandler.listParticipants(),
@@ -221,6 +224,7 @@ export class SessionDO extends DurableObject<Env> {
     verifySandboxToken: (request) => this.sandboxHandler.verifySandboxToken(request),
     openaiTokenRefresh: () => this.sandboxHandler.openaiTokenRefresh(),
     scmCredentials: () => this.sandboxHandler.scmCredentials(),
+    bootProgress: () => this.sandboxHandler.bootProgress(),
     spawnContext: () => this.childSessionsHandler.getSpawnContext(),
     childSummary: (_request, url) => this.childSessionsHandler.getChildSummary(url),
     cancel: () => this.sessionLifecycleHandler.cancel(),
@@ -542,6 +546,7 @@ export class SessionDO extends DurableObject<Env> {
           Boolean(this.env.DB && this.env.REPO_SECRETS_ENCRYPTION_KEY),
         getScmCredentials: () =>
           new ScmCredentialsService(this.sourceControlProvider, this.log).getCredentials(),
+        recordBootProgress: () => this.lifecycleManager.onBootProgress(),
         broadcast: (message) => this.broadcast(message),
         generateId: () => generateId(),
         now: () => Date.now(),
@@ -715,58 +720,84 @@ export class SessionDO extends DurableObject<Env> {
   private createLifecycleManager(): SandboxLifecycleManager {
     const sandboxBackend = resolveSandboxBackendName(this.env.SANDBOX_PROVIDER);
 
-    const provider =
-      sandboxBackend === "daytona"
-        ? (() => {
-            if (
-              !this.env.DAYTONA_API_URL ||
-              !this.env.DAYTONA_API_KEY ||
-              !this.env.DAYTONA_BASE_SNAPSHOT
-            ) {
-              throw new Error(
-                "DAYTONA_API_URL, DAYTONA_API_KEY, and DAYTONA_BASE_SNAPSHOT are required when SANDBOX_PROVIDER=daytona"
-              );
-            }
+    const provider = (() => {
+      if (sandboxBackend === "daytona") {
+        if (
+          !this.env.DAYTONA_API_URL ||
+          !this.env.DAYTONA_API_KEY ||
+          !this.env.DAYTONA_BASE_SNAPSHOT
+        ) {
+          throw new Error(
+            "DAYTONA_API_URL, DAYTONA_API_KEY, and DAYTONA_BASE_SNAPSHOT are required when SANDBOX_PROVIDER=daytona"
+          );
+        }
 
-            const daytonaClient = createDaytonaRestClient({
-              apiUrl: this.env.DAYTONA_API_URL,
-              apiKey: this.env.DAYTONA_API_KEY,
-              target: this.env.DAYTONA_TARGET,
-              baseSnapshot: this.env.DAYTONA_BASE_SNAPSHOT,
-              autoStopIntervalMinutes: parseInt(
-                this.env.DAYTONA_AUTO_STOP_INTERVAL_MINUTES || "120",
-                10
-              ),
-              autoArchiveIntervalMinutes: parseInt(
-                this.env.DAYTONA_AUTO_ARCHIVE_INTERVAL_MINUTES || "10080",
-                10
-              ),
-            });
+        const daytonaClient = createDaytonaRestClient({
+          apiUrl: this.env.DAYTONA_API_URL,
+          apiKey: this.env.DAYTONA_API_KEY,
+          target: this.env.DAYTONA_TARGET,
+          baseSnapshot: this.env.DAYTONA_BASE_SNAPSHOT,
+          autoStopIntervalMinutes: parseInt(
+            this.env.DAYTONA_AUTO_STOP_INTERVAL_MINUTES || "120",
+            10
+          ),
+          autoArchiveIntervalMinutes: parseInt(
+            this.env.DAYTONA_AUTO_ARCHIVE_INTERVAL_MINUTES || "10080",
+            10
+          ),
+        });
 
-            const scmProvider = resolveScmProviderFromEnv(this.env.SCM_PROVIDER);
+        const scmProvider = resolveScmProviderFromEnv(this.env.SCM_PROVIDER);
 
-            return createDaytonaProvider(daytonaClient, {
-              scmProvider,
-              gitlabAccessToken: this.env.GITLAB_ACCESS_TOKEN,
-              // Reuses API key as HMAC secret for code-server password derivation
-              // (distinct message prefix prevents collision with auth use)
-              codeServerPasswordSecret: this.env.DAYTONA_API_KEY,
-            });
-          })()
-        : (() => {
-            if (!this.env.MODAL_API_SECRET || !this.env.MODAL_WORKSPACE) {
-              throw new Error(
-                "MODAL_API_SECRET and MODAL_WORKSPACE are required when SANDBOX_PROVIDER=modal"
-              );
-            }
+        return createDaytonaProvider(daytonaClient, {
+          scmProvider,
+          gitlabAccessToken: this.env.GITLAB_ACCESS_TOKEN,
+          // Reuses API key as HMAC secret for code-server password derivation
+          // (distinct message prefix prevents collision with auth use)
+          codeServerPasswordSecret: this.env.DAYTONA_API_KEY,
+        });
+      }
 
-            const modalClient = createModalClient(
-              this.env.MODAL_API_SECRET,
-              this.env.MODAL_WORKSPACE,
-              this.env.MODAL_ENVIRONMENT_WEB_SUFFIX
-            );
-            return createModalProvider(modalClient);
-          })();
+      if (sandboxBackend === "vercel") {
+        if (!this.env.VERCEL_TOKEN || !this.env.VERCEL_PROJECT_ID) {
+          throw new Error(
+            "VERCEL_TOKEN and VERCEL_PROJECT_ID are required when SANDBOX_PROVIDER=vercel"
+          );
+        }
+
+        const vercelClient = createVercelSandboxClient({
+          token: this.env.VERCEL_TOKEN,
+          projectId: this.env.VERCEL_PROJECT_ID,
+          teamId: this.env.VERCEL_TEAM_ID,
+          apiBaseUrl: this.env.VERCEL_SANDBOX_API_BASE_URL,
+        });
+
+        return createVercelProvider(vercelClient, {
+          scmProvider: resolveScmProviderFromEnv(this.env.SCM_PROVIDER),
+          token: this.env.VERCEL_TOKEN,
+          teamId: this.env.VERCEL_TEAM_ID,
+          apiBaseUrl: this.env.VERCEL_SANDBOX_API_BASE_URL,
+          baseSnapshotId: this.env.VERCEL_BASE_SNAPSHOT_ID,
+          baseSnapshotName: this.env.VERCEL_BASE_SNAPSHOT_NAME,
+          runtime: this.env.VERCEL_RUNTIME,
+          snapshotExpirationMs: parseInt(this.env.VERCEL_SNAPSHOT_EXPIRATION_MS || "0", 10),
+          codeServerPasswordSecret: this.env.VERCEL_TOKEN,
+        });
+      }
+
+      if (!this.env.MODAL_API_SECRET || !this.env.MODAL_WORKSPACE) {
+        throw new Error(
+          "MODAL_API_SECRET and MODAL_WORKSPACE are required when SANDBOX_PROVIDER=modal"
+        );
+      }
+
+      const modalClient = createModalClient(
+        this.env.MODAL_API_SECRET,
+        this.env.MODAL_WORKSPACE,
+        this.env.MODAL_ENVIRONMENT_WEB_SUFFIX
+      );
+      return createModalProvider(modalClient);
+    })();
 
     // Storage adapter
     const storage: SandboxStorage = {
@@ -783,6 +814,7 @@ export class SessionDO extends DurableObject<Env> {
         this.repository.updateSandboxSnapshotImageId(sandboxId, imageId),
       updateSandboxLastActivity: (timestamp) =>
         this.repository.updateSandboxLastActivity(timestamp),
+      updateSandboxHeartbeat: (timestamp) => this.repository.updateSandboxHeartbeat(timestamp),
       getIsProcessing: () => this.repository.getProcessingMessage() !== null,
       incrementCircuitBreakerFailure: (timestamp) =>
         this.repository.incrementCircuitBreakerFailure(timestamp),
@@ -898,13 +930,14 @@ export class SessionDO extends DurableObject<Env> {
       sandboxDashboardUrlBuilder,
     };
 
-    // Create repo image lookup if D1 is available (Modal-only — Daytona doesn't use repo images)
+    // Create repo image lookup if D1 is available and the provider supports repo images.
     let repoImageLookup: RepoImageLookup | undefined;
-    if (this.env.DB && sandboxBackend === "modal") {
+    if (this.env.DB && supportsRepoImageBackend(sandboxBackend)) {
       const repoImageStore = new RepoImageStore(this.env.DB);
+      const repoImageProvider = sandboxBackend === "vercel" ? "vercel" : "modal";
       repoImageLookup = {
         getLatestReady: (repoOwner, repoName, baseBranch) =>
-          repoImageStore.getLatestReady(repoOwner, repoName, baseBranch),
+          repoImageStore.getLatestReady(repoOwner, repoName, repoImageProvider, baseBranch),
       };
     }
 
@@ -1607,6 +1640,32 @@ export class SessionDO extends DurableObject<Env> {
   }
 
   /**
+   * User-triggered "Relaunch" of a dead sandbox. Only acts when the sandbox is
+   * in a recoverable terminal state (stopped/failed/stale); spawnSandbox() then
+   * resolves the right action (provider resume, snapshot restore, or fresh
+   * spawn) from the current state and broadcasts sandbox_status updates that the
+   * client watches. A no-op when the sandbox is already live.
+   */
+  private async relaunchSandbox(): Promise<Response> {
+    const session = this.getSession();
+    if (!session) {
+      return Response.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    const sandboxStatus = this.getSandbox()?.status;
+    const relaunchable: SandboxStatus[] = ["stopped", "failed", "stale"];
+    if (!sandboxStatus || !relaunchable.includes(sandboxStatus)) {
+      return Response.json({ status: "skipped", sandboxStatus: sandboxStatus ?? null });
+    }
+
+    await this.spawnSandbox();
+    return Response.json({
+      status: "relaunching",
+      sandboxStatus: this.getSandbox()?.status ?? null,
+    });
+  }
+
+  /**
    * Stop current execution.
    * Marks the processing message as failed, upserts synthetic execution_complete,
    * broadcasts synthetic execution_complete
@@ -1620,6 +1679,12 @@ export class SessionDO extends DurableObject<Env> {
    * Broadcast message to all authenticated clients.
    */
   private broadcast(message: ServerMessage): void {
+    // Mirror "agent is actively working" to the D1 index so the session list can
+    // show a "Working" dot without its own WebSocket. Every processing_status
+    // transition (dispatch, completion, stop, fail) funnels through here.
+    if (message.type === "processing_status") {
+      this.syncIsProcessingIndex(message.isProcessing);
+    }
     this.wsManager.forEachClientSocket("authenticated_only", (ws) => {
       this.wsManager.send(ws, message);
     });
@@ -1650,13 +1715,62 @@ export class SessionDO extends DurableObject<Env> {
     updatedAt: number
   ): void {
     if (!this.env.DB) return;
-    const sessionStore = new SessionIndexStore(this.env.DB);
     this.ctx.waitUntil(
-      sessionStore.updateStatus(sessionId, status, updatedAt).catch((error) => {
+      this.writeSessionIndexStatus(sessionId, status, updatedAt).catch((error) => {
         this.log.error("session_index.update_status.background_error", {
           session_id: sessionId,
           status,
           updated_at: updatedAt,
+          error,
+        });
+      })
+    );
+  }
+
+  /**
+   * Awaited D1 index status write. Used for terminal transitions, where a
+   * dropped fire-and-forget write would leave the sidebar stale (e.g. a
+   * "completed" session shown as "failed"). The monotonic `updated_at` guard in
+   * SessionIndexStore.updateStatus keeps out-of-order writes from regressing.
+   */
+  private async writeSessionIndexStatus(
+    sessionId: string,
+    status: SessionStatus,
+    updatedAt: number
+  ): Promise<void> {
+    if (!this.env.DB) return;
+    const sessionStore = new SessionIndexStore(this.env.DB);
+    await sessionStore.updateStatus(sessionId, status, updatedAt);
+  }
+
+  private syncSandboxStatusIndex(sandboxStatus: SandboxStatus): void {
+    if (!this.env.DB) return;
+    const session = this.getSession();
+    if (!session) return;
+    const sessionId = this.getPublicSessionId(session);
+    const sessionStore = new SessionIndexStore(this.env.DB);
+    this.ctx.waitUntil(
+      sessionStore.updateSandboxStatus(sessionId, sandboxStatus).catch((error) => {
+        this.log.error("session_index.update_sandbox_status.background_error", {
+          session_id: sessionId,
+          sandbox_status: sandboxStatus,
+          error,
+        });
+      })
+    );
+  }
+
+  private syncIsProcessingIndex(isProcessing: boolean): void {
+    if (!this.env.DB) return;
+    const session = this.getSession();
+    if (!session) return;
+    const sessionId = this.getPublicSessionId(session);
+    const sessionStore = new SessionIndexStore(this.env.DB);
+    this.ctx.waitUntil(
+      sessionStore.updateIsProcessing(sessionId, isProcessing).catch((error) => {
+        this.log.error("session_index.update_is_processing.background_error", {
+          session_id: sessionId,
+          is_processing: isProcessing,
           error,
         });
       })
@@ -1722,7 +1836,23 @@ export class SessionDO extends DurableObject<Env> {
 
     const updatedAt = Math.max(Date.now(), session.updated_at + 1);
     this.repository.updateSessionStatus(session.id, status, updatedAt);
-    this.syncSessionIndexStatus(publicSessionId, status, updatedAt);
+
+    if (TERMINAL_STATUSES.includes(status)) {
+      // The sidebar reads status from D1; persist terminal transitions durably
+      // (awaited) so the write can't be dropped and leave the index stale.
+      try {
+        await this.writeSessionIndexStatus(publicSessionId, status, updatedAt);
+      } catch (error) {
+        this.log.error("session_index.update_status.terminal_error", {
+          session_id: publicSessionId,
+          status,
+          updated_at: updatedAt,
+          error,
+        });
+      }
+    } else {
+      this.syncSessionIndexStatus(publicSessionId, status, updatedAt);
+    }
 
     this.broadcast({ type: "session_status", status });
 
@@ -1842,6 +1972,20 @@ export class SessionDO extends DurableObject<Env> {
     const messageCount = this.repository.getMessageCount();
     const isProcessing = this.getIsProcessing();
 
+    // Self-heal the D1 index from the authoritative DO status. A terminal-status
+    // index write can be dropped (fire-and-forget waitUntil), leaving the sidebar
+    // stale (e.g. a completed session shown as failed). Serving session state —
+    // e.g. when the detail page connects — re-mirrors it. Limited to terminal
+    // statuses, the only ones that can diverge and stick (live sessions keep
+    // getting fresh writes). The monotonic guard makes this a no-op when in sync.
+    if (session && TERMINAL_STATUSES.includes(session.status)) {
+      this.syncSessionIndexStatus(
+        this.getPublicSessionId(session),
+        session.status,
+        session.updated_at
+      );
+    }
+
     // Decrypt code-server password if stored encrypted
     let codeServerPassword: string | null = sandbox?.code_server_password ?? null;
     if (codeServerPassword && this.env.REPO_SECRETS_ENCRYPTION_KEY) {
@@ -1876,6 +2020,7 @@ export class SessionDO extends DurableObject<Env> {
       baseBranch: session?.base_branch ?? "main",
       branchName: session?.branch_name ?? null,
       status: session?.status ?? "created",
+      spawnSource: session?.spawn_source,
       sandboxStatus: sandbox?.status ?? "pending",
       messageCount,
       createdAt: session?.created_at ?? Date.now(),
@@ -2087,6 +2232,7 @@ export class SessionDO extends DurableObject<Env> {
 
   private updateSandboxStatus(status: string): void {
     this.repository.updateSandboxStatus(status as SandboxStatus);
+    this.syncSandboxStatusIndex(status as SandboxStatus);
   }
 
   // HTTP handlers

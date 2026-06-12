@@ -10,15 +10,9 @@
  * spawn attempts within the same request.
  */
 
-import {
-  MAX_TUNNEL_PORTS,
-  MAX_AWS_ROLES,
-  type SandboxSettings,
-  type AwsRoleConfig,
-} from "@open-inspect/shared";
+import { type McpServerConfig, type SandboxSettings } from "@open-inspect/shared";
 import type { SandboxStatus } from "../../types";
 import type { SandboxRow, SessionRow } from "../../session/types";
-import type { McpServerConfig } from "@open-inspect/shared";
 import { SandboxProviderError, type SandboxProvider, type CreateSandboxConfig } from "../provider";
 import {
   evaluateCircuitBreaker,
@@ -42,6 +36,7 @@ import { extractProviderAndModel } from "../../utils/models";
 import { createLogger, type Logger } from "../../logger";
 import { hashToken } from "../../auth/crypto";
 import { mintJwt } from "../../auth/jwt";
+import { normalizeSandboxSettings } from "../settings";
 
 const log = createLogger("lifecycle-manager");
 
@@ -93,6 +88,8 @@ export interface SandboxStorage {
   updateSandboxSnapshotImageId(sandboxId: string, imageId: string): void;
   /** Update last activity timestamp */
   updateSandboxLastActivity(timestamp: number): void;
+  /** Update last heartbeat timestamp (last sign of life from the sandbox) */
+  updateSandboxHeartbeat(timestamp: number): void;
   /** Whether there is an active execution (processing message) in progress */
   getIsProcessing(): boolean;
   /** Increment circuit breaker failure count */
@@ -206,8 +203,8 @@ export interface McpServerLookup {
 // ==================== Repo Image Lookup ====================
 
 /**
- * Lookup interface for pre-built repo images.
- * Returns the latest ready image for a repo, if any.
+ * Provider-scoped lookup interface for pre-built repo images.
+ * The Durable Object binds this to the active sandbox backend before injection.
  */
 export interface RepoImageLookup {
   getLatestReady(
@@ -454,7 +451,7 @@ export class SandboxLifecycleManager {
         repoImageId,
         repoImageSha,
         timeoutSeconds,
-        branch: session.base_branch,
+        branch: this.resolveCheckoutBranch(session),
         codeServerEnabled,
         agentSlackNotifyEnabled,
         mcpServers,
@@ -639,7 +636,7 @@ export class SandboxLifecycleManager {
         model: modelId,
         userEnvVars,
         timeoutSeconds,
-        branch: session.base_branch,
+        branch: this.resolveCheckoutBranch(session),
         codeServerEnabled,
         agentSlackNotifyEnabled,
         mcpServers,
@@ -874,10 +871,17 @@ export class SandboxLifecycleManager {
   }
 
   /**
-   * Whether the active provider owns stop/resume of long-lived sandboxes.
+   * Whether the active provider can stop a sandbox via its API.
+   */
+  private canStopProviderSandbox(): boolean {
+    return !!this.provider.capabilities.supportsExplicitStop && !!this.provider.stopSandbox;
+  }
+
+  /**
+   * Whether stopping should preserve provider-owned state for in-place resume.
    */
   private usesProviderManagedStop(): boolean {
-    return !!this.provider.capabilities.supportsExplicitStop && !!this.provider.stopSandbox;
+    return this.canStopProviderSandbox() && !!this.provider.capabilities.supportsPersistentResume;
   }
 
   /**
@@ -955,6 +959,7 @@ export class SandboxLifecycleManager {
     const connectingResult = evaluateConnectingTimeout(
       sandbox.status as SandboxStatus,
       sandbox.created_at,
+      sandbox.last_heartbeat,
       this.config.connectingTimeout,
       now
     );
@@ -968,7 +973,7 @@ export class SandboxLifecycleManager {
       await this.callbacks.onSandboxTerminating?.("connecting_timeout");
       this.storage.updateSandboxStatus("failed");
       this.clearSandboxAccessState();
-      if (this.usesProviderManagedStop()) {
+      if (this.canStopProviderSandbox()) {
         try {
           await this.stopProviderSandbox("connecting_timeout");
         } catch (error) {
@@ -1014,12 +1019,23 @@ export class SandboxLifecycleManager {
           });
         }
       } else {
-        // Fire-and-forget snapshot so status broadcast isn't delayed.
-        this.triggerSnapshot("heartbeat_timeout").catch((e) =>
-          this.log.error("Heartbeat snapshot failed", {
-            error: e instanceof Error ? e : String(e),
-          })
-        );
+        if (this.canStopProviderSandbox()) {
+          await this.triggerSnapshot("heartbeat_timeout");
+          try {
+            await this.stopProviderSandbox("heartbeat_timeout");
+          } catch (error) {
+            this.log.warn("Provider stop failed after heartbeat timeout", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        } else {
+          // Fire-and-forget snapshot so status broadcast isn't delayed.
+          this.triggerSnapshot("heartbeat_timeout").catch((e) =>
+            this.log.error("Heartbeat snapshot failed", {
+              error: e instanceof Error ? e : String(e),
+            })
+          );
+        }
         this.wsManager.sendToSandbox({ type: "shutdown" });
       }
 
@@ -1067,6 +1083,15 @@ export class SandboxLifecycleManager {
         } else {
           await this.triggerSnapshot("inactivity_timeout");
           this.wsManager.sendToSandbox({ type: "shutdown" });
+          if (this.canStopProviderSandbox()) {
+            try {
+              await this.stopProviderSandbox("inactivity_timeout");
+            } catch (error) {
+              this.log.error("Provider stop failed after inactivity timeout", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
         }
 
         this.wsManager.closeSandboxWebSocket(1000, "Inactivity timeout");
@@ -1133,6 +1158,28 @@ export class SandboxLifecycleManager {
   }
 
   /**
+   * Record a boot-progress ping from the in-sandbox supervisor.
+   *
+   * The supervisor posts these throughout a long setup.sh — before the bridge
+   * WebSocket exists — so the connecting-timeout watchdog can tell a
+   * slow-but-healthy boot apart from a stuck one. Each ping refreshes the
+   * heartbeat, which is the "last sign of life" the connecting timeout measures
+   * from (see evaluateConnectingTimeout). The existing alarm re-evaluates on its
+   * normal cadence and sees the fresh timestamp, so no reschedule is needed.
+   *
+   * No-op once the sandbox has left the spawning/connecting phase: after the
+   * bridge connects it sends real heartbeats, and refreshing the heartbeat here
+   * would mask a dead agent.
+   */
+  onBootProgress(): void {
+    const sandbox = this.storage.getSandbox();
+    if (!sandbox) return;
+    if (sandbox.status !== "spawning" && sandbox.status !== "connecting") return;
+    this.storage.updateSandboxHeartbeat(Date.now());
+    this.log.debug("Boot progress ping", { event: "sandbox.boot_progress" });
+  }
+
+  /**
    * Schedule an inactivity check alarm.
    */
   async scheduleInactivityCheck(): Promise<void> {
@@ -1159,6 +1206,26 @@ export class SandboxLifecycleManager {
    */
   private resolveProviderAndModel(session: SessionRow): { provider: string; model: string } {
     return extractProviderAndModel(session.model || this.config.model);
+  }
+
+  /**
+   * The branch the sandbox should check out on boot.
+   *
+   * Prefer the session's working branch (`branch_name`, set to
+   * `open-inspect/<sessionId>` once a PR is created) over the base branch. The
+   * agent commits its work locally and the PR push maps `HEAD` onto that branch
+   * on the remote — so on a relaunch/restore we must check out the working
+   * branch to recover that work. Checking out `base_branch` instead would
+   * `git checkout -B <base> origin/<base>` (see entrypoint `_checkout_branch`),
+   * resetting the local branch to the base tip and discarding the committed
+   * change, which only survives on the remote `open-inspect/<sessionId>` branch.
+   *
+   * `branch_name` is only persisted after a successful push, so when set its
+   * remote branch is guaranteed to exist and fetch cleanly. Before any PR it is
+   * null and we fall back to the base branch.
+   */
+  private resolveCheckoutBranch(session: SessionRow): string {
+    return session.branch_name ?? session.base_branch;
   }
 
   /**
@@ -1208,49 +1275,7 @@ export class SandboxLifecycleManager {
     if (!session.sandbox_settings) return {};
     try {
       const parsed: unknown = JSON.parse(session.sandbox_settings);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-
-      const settings = parsed as Record<string, unknown>;
-      const result: SandboxSettings = {};
-
-      // Validate tunnelPorts at the boundary — data may come from untrusted callers
-      if (settings.tunnelPorts !== undefined) {
-        if (!Array.isArray(settings.tunnelPorts)) return {};
-        const valid = settings.tunnelPorts.filter(
-          (p: unknown) => typeof p === "number" && Number.isInteger(p) && p >= 1 && p <= 65535
-        );
-        result.tunnelPorts = valid.slice(0, MAX_TUNNEL_PORTS);
-      }
-
-      if (typeof settings.terminalEnabled === "boolean") {
-        result.terminalEnabled = settings.terminalEnabled;
-      }
-
-      // Validate awsRoles at the boundary — data may come from untrusted callers
-      if (settings.awsRoles !== undefined) {
-        if (Array.isArray(settings.awsRoles)) {
-          const validRoles: AwsRoleConfig[] = [];
-          for (const role of settings.awsRoles) {
-            if (!role || typeof role !== "object" || Array.isArray(role)) continue;
-            const r = role as Record<string, unknown>;
-            const profileName = r.profileName;
-            const roleArn = r.roleArn;
-            if (
-              typeof profileName === "string" &&
-              profileName.trim() !== "" &&
-              typeof roleArn === "string" &&
-              roleArn.startsWith("arn:aws:iam::")
-            ) {
-              validRoles.push({ profileName, roleArn });
-            }
-          }
-          if (validRoles.length > 0) {
-            result.awsRoles = validRoles.slice(0, MAX_AWS_ROLES);
-          }
-        }
-      }
-
-      return result;
+      return normalizeSandboxSettings(parsed, { invalid: "omit" });
     } catch {
       this.log.warn("Failed to parse sandbox_settings, using defaults");
       return {};

@@ -11,6 +11,7 @@ Updated: 2026-01-15 to fix Sandbox.create API
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import secrets
@@ -41,6 +42,29 @@ DEFAULT_SANDBOX_TIMEOUT_SECONDS = 7200  # 2 hours
 SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS = 300
 MAX_TUNNEL_PORTS = 10
 DOCKER_EXPERIMENTAL_OPTIONS = {"enable_docker": True}
+
+
+def _resource_kwargs(settings: dict[str, Any] | None) -> dict:
+    """Map sandbox settings to Modal resource kwargs.
+
+    `cpuCores` -> Modal `cpu` (cores, fractional allowed), `memoryMib` -> Modal
+    `memory` (MiB). The control plane owns normalization; this only maps
+    already-normalized settings into provider-specific argument names.
+    """
+    if not settings:
+        return {}
+
+    kwargs: dict = {}
+
+    cpu_cores = settings.get("cpuCores")
+    if cpu_cores is not None:
+        kwargs["cpu"] = float(cpu_cores)
+
+    memory_mib = settings.get("memoryMib")
+    if memory_mib is not None:
+        kwargs["memory"] = memory_mib
+
+    return kwargs
 
 
 @dataclass
@@ -329,17 +353,19 @@ class SandboxManager:
         boots that clear can race with — and delete — this initial write.  A
         second write ~5 s later lands well within the supervisor's 30-second
         wait window and survives the clear.
+
+        Both write attempts are awaited inline to prevent the second attempt
+        from running after the caller's event loop starts shutting down, which
+        would cause a "can't create new thread at interpreter shutdown" error.
         """
         lines = [f"TUNNEL_{port}={url}" for port, url in sorted(tunnel_urls.items())]
         content = "\n".join(lines) + "\n"
 
         async def _write_once(attempt: int) -> None:
+            f = None
             try:
                 f = await sandbox.open.aio(TUNNEL_ENV_FILE_PATH, "w")
-                try:
-                    await f.write.aio(content)
-                finally:
-                    await f.close.aio()
+                await f.write.aio(content)
                 log.info(
                     "tunnel.urls_written",
                     sandbox_id=sandbox_id,
@@ -355,13 +381,17 @@ class SandboxManager:
                     exc=e,
                     attempt=attempt,
                 )
+            finally:
+                if f is not None:
+                    with contextlib.suppress(Exception):
+                        # Suppress close errors (e.g. RuntimeError: can't create
+                        # new thread at interpreter shutdown) so they don't mask
+                        # the original write failure or crash the event loop.
+                        await f.close.aio()
 
-        async def _write_with_retry() -> None:
-            await _write_once(1)
-            await asyncio.sleep(5)
-            await _write_once(2)
-
-        asyncio.create_task(_write_with_retry())
+        await _write_once(1)
+        await asyncio.sleep(5)
+        await _write_once(2)
 
     @staticmethod
     def _inject_vcs_env_vars(
@@ -515,6 +545,7 @@ class SandboxManager:
             "env": env_vars,
             # Enable Docker-in-Sandboxes support per Modal docs.
             "experimental_options": DOCKER_EXPERIMENTAL_OPTIONS,
+            **_resource_kwargs(config.settings),
         }
         if exposed_ports:
             create_kwargs["encrypted_ports"] = exposed_ports
@@ -875,6 +906,7 @@ class SandboxManager:
             "env": env_vars,
             # Enable Docker-in-Sandboxes support per Modal docs.
             "experimental_options": DOCKER_EXPERIMENTAL_OPTIONS,
+            **_resource_kwargs(settings),
         }
         if exposed_ports:
             create_kwargs["encrypted_ports"] = exposed_ports

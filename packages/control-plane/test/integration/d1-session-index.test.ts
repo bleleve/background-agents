@@ -33,6 +33,66 @@ describe("D1 SessionIndexStore", () => {
     expect(session!.status).toBe("created");
   });
 
+  it("mirrors and surfaces the sandbox status without reordering", async () => {
+    const store = new SessionIndexStore(env.DB);
+    const now = Date.now();
+
+    await store.create({
+      id: "sandbox-session-1",
+      title: null,
+      repoOwner: "acme",
+      repoName: "api",
+      model: "anthropic/claude-haiku-4-5",
+      reasoningEffort: null,
+      baseBranch: null,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Unset until the sandbox reports its first status.
+    expect((await store.get("sandbox-session-1"))!.sandboxStatus ?? null).toBeNull();
+
+    await store.updateSandboxStatus("sandbox-session-1", "failed");
+
+    const after = await store.get("sandbox-session-1");
+    expect(after!.sandboxStatus).toBe("failed");
+    // A sandbox transition must not bump updated_at (it would reorder the list).
+    expect(after!.updatedAt).toBe(now);
+
+    const listed = await store.list({ status: "active" });
+    expect(listed.sessions[0]!.sandboxStatus).toBe("failed");
+  });
+
+  it("mirrors and surfaces is_processing", async () => {
+    const store = new SessionIndexStore(env.DB);
+    const now = Date.now();
+
+    await store.create({
+      id: "processing-session-1",
+      title: null,
+      repoOwner: "acme",
+      repoName: "api",
+      model: "anthropic/claude-haiku-4-5",
+      reasoningEffort: null,
+      baseBranch: null,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Idle by default.
+    expect((await store.get("processing-session-1"))!.isProcessing).toBe(false);
+
+    await store.updateIsProcessing("processing-session-1", true);
+    expect((await store.get("processing-session-1"))!.isProcessing).toBe(true);
+    const listed = await store.list({ status: "active" });
+    expect(listed.sessions[0]!.isProcessing).toBe(true);
+
+    await store.updateIsProcessing("processing-session-1", false);
+    expect((await store.get("processing-session-1"))!.isProcessing).toBe(false);
+  });
+
   it("lists sessions with status filter", async () => {
     const store = new SessionIndexStore(env.DB);
     const now = Date.now();

@@ -25,7 +25,9 @@ import { mcpServerRoutes } from "./routes/mcp-servers";
 import { analyticsRoutes } from "./routes/analytics";
 import { providerIdentityRoutes } from "./routes/provider-identities";
 import { sessionRoutes } from "./routes/sessions";
+import { handleBootProgress } from "./routes/boot-progress";
 import { handleSlackNotify } from "./routes/slack-notify";
+import { prReviewRoutes } from "./routes/pr-review";
 import { reviewSuggestionRoutes } from "./routes/review-suggestions";
 import { webhookRoutes } from "./webhooks";
 
@@ -61,6 +63,8 @@ const PUBLIC_ROUTES: RegExp[] = [
   /^\/health$/,
   /^\/webhooks\/sentry\/[^/]+$/,
   /^\/webhooks\/automation\/[^/]+$/,
+  /^\/repo-images\/build-complete$/,
+  /^\/repo-images\/build-failed$/,
 ];
 
 /**
@@ -70,6 +74,7 @@ const PUBLIC_ROUTES: RegExp[] = [
  */
 const SANDBOX_AUTH_ROUTES: RegExp[] = [
   /^\/sessions\/[^/]+\/pr$/, // PR creation from sandbox
+  /^\/sessions\/[^/]+\/pr-review$/, // Formal PR review submission from sandbox (policy-checked)
   /^\/sessions\/[^/]+\/openai-token-refresh$/, // OpenAI token refresh from sandbox
   /^\/sessions\/[^/]+\/scm-credentials$/, // SCM credential broker for git credential helper
   /^\/sessions\/[^/]+\/media$/, // Media upload from sandbox
@@ -77,6 +82,7 @@ const SANDBOX_AUTH_ROUTES: RegExp[] = [
   /^\/sessions\/[^/]+\/children\/[^/]+$/, // GET child detail
   /^\/sessions\/[^/]+\/children\/[^/]+\/cancel$/, // POST cancel child
   /^\/sessions\/[^/]+\/slack-notify$/, // Agent-initiated Slack notification
+  /^\/sessions\/[^/]+\/boot-progress$/, // Supervisor boot-progress ping during setup
   /^\/sessions\/[^/]+\/plan$/, // Agent-saved plan artifact (POST/GET)
   /^\/sessions\/[^/]+\/plans$/, // Plan history list (GET)
 ];
@@ -336,6 +342,17 @@ const routes: Route[] = [
     pattern: parsePattern("/sessions/:id/slack-notify"),
     handler: handleSlackNotify,
   },
+
+  // Supervisor boot-progress ping during setup (sandbox-authenticated)
+  {
+    method: "POST",
+    pattern: parsePattern("/sessions/:id/boot-progress"),
+    handler: handleBootProgress,
+  },
+
+  // Formal PR review submission from the sandbox (sandbox-authenticated,
+  // policy-checked server-side). The `submit-pr-review` tool's only backend.
+  ...prReviewRoutes,
 
   // Repository management
   ...reposRoutes,

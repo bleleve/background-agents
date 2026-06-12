@@ -102,7 +102,7 @@ Open-Inspect uses a three-tier architecture spanning multiple cloud providers:
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                       Data Plane (Modal)                                 │
+│                 Data Plane (Sandbox Backend)                              │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
 │  │                        Session Sandbox                              │ │
 │  │  ┌────────────┐    ┌────────────┐    ┌────────────┐               │ │
@@ -149,10 +149,11 @@ Open-Inspect supports two backend patterns:
 
 - **Modal**: near-instant startup plus filesystem snapshot restore
 - **Daytona**: persistent stop/start sandboxes via direct REST API calls
+- **Vercel Sandboxes**: filesystem snapshot restore and repo-image builds via the Vercel Sandbox API
 
-Modal is still the only backend with repo-image builds and live filesystem snapshot restore. Daytona
-uses persistent sandboxes instead: the control plane stops the sandbox on inactivity or stale
-heartbeat, then resumes that same sandbox later with the same logical sandbox ID and auth token.
+Modal and Vercel support repo-image builds and live filesystem snapshot restore. Daytona uses
+persistent sandboxes instead: the control plane stops the sandbox on inactivity or stale heartbeat,
+then resumes that same sandbox later with the same logical sandbox ID and auth token.
 
 Both backends run the same in-sandbox logic from `packages/sandbox-runtime` — a provider-agnostic
 Python library that contains the bridge (WebSocket connection back to the control plane),
@@ -195,7 +196,7 @@ When you create a session for a repo without an existing snapshot:
                             scripts/.openinspect/setup.sh   scripts/.openinspect/start.sh
 ```
 
-1. **Sandbox created**: Modal spins up a new container from the base image
+1. **Sandbox created**: The selected backend creates a fresh sandbox from its base runtime
 2. **Git sync**: Clones your repository using brokered SCM credentials from the git credential
    helper
 3. **Setup script**: Runs `.openinspect/setup.sh` for provisioning (if present)
@@ -214,7 +215,7 @@ When restoring from a previous snapshot:
 └─────────────┘    └────────────┘    └─────────────┘    └───────┘
 ```
 
-1. **Restore snapshot**: Modal restores the filesystem from a saved image
+1. **Restore snapshot**: Modal or Vercel restores the filesystem from a saved snapshot
 2. **Quick sync**: Pulls latest changes (usually just a few commits)
 3. **Start script**: Runs `scripts/.openinspect/start.sh` for runtime startup (if present)
 4. **Ready**: Sandbox is ready almost instantly
@@ -241,9 +242,12 @@ If `start.sh` exists and fails, startup fails fast instead of continuing with a 
 
 ### Sandbox Warming
 
-To minimize perceived latency, sandboxes warm proactively:
+To minimize perceived latency, sandboxes warm proactively once a prompt shows real intent (more than
+a few non-whitespace characters):
 
-- When you start typing a prompt, the control plane begins warming a sandbox
+- On the new-session prompt, the control plane begins warming a fresh sandbox
+- In the in-session composer, typing a follow-up relaunches a stopped/idle sandbox (when it's
+  relaunchable) so it's coming back up before you submit
 - By the time you hit enter, the sandbox may already be ready
 - If restore is fast enough, you won't notice any delay
 
@@ -269,10 +273,10 @@ dotenv consumer can read it without parsing.
 2. Waits up to `TUNNEL_WAIT_TIMEOUT_SECONDS` (default `30`) for fresh URLs.
 3. Runs `.openinspect/start.sh`.
 
-If the wait times out (e.g. a Modal-side outage), `start.sh` proceeds without fresh local URLs and
-the supervisor logs `tunnel.env_file_wait_timeout`. The control plane still receives and broadcasts
-the URLs to clients on a separate path. The file is not written when `tunnelPorts` is empty or in
-build mode.
+If the wait times out (for example, because the backend has not resolved tunnel URLs yet),
+`start.sh` proceeds without fresh local URLs and the supervisor logs `tunnel.env_file_wait_timeout`.
+The control plane still receives and broadcasts the URLs to clients on a separate path. The file is
+not written when `tunnelPorts` is empty or in build mode.
 
 ---
 
@@ -434,7 +438,7 @@ That's potentially minutes before the agent can start working.
 
 ### How Snapshots Solve This
 
-Modal's filesystem snapshots let us capture a sandbox's state after setup:
+Modal and Vercel filesystem snapshots let us capture a sandbox's state after setup:
 
 ```
 First session:  Clone ─▶ Install/Build ─▶ Start Runtime ─▶ [Snapshot] ─▶ Work
@@ -445,6 +449,11 @@ Later sessions: [Restore Snapshot] ─▶ Quick sync ─▶ Start Runtime ─▶
 ```
 
 The first session for a repo pays the setup cost. Subsequent sessions restore in seconds.
+
+For Vercel, Terraform builds a base-runtime snapshot from the local checkout and wires a
+deterministic snapshot name into `VERCEL_BASE_SNAPSHOT_NAME`. Fresh Vercel sandboxes resolve that
+name to the newest created snapshot instead of cloning and installing the sandbox runtime on every
+session. See [Vercel Sandbox Provider](VERCEL_SANDBOX_PROVIDER.md) for the full provider flow.
 
 ### Image Prebuilding
 
@@ -502,8 +511,8 @@ You can configure environment variables (API keys, credentials) at global or per
 - Injected into sandboxes at startup
 - Never exposed to clients (only key names are visible)
 
-> **Daytona users**: LLM API keys (e.g., `ANTHROPIC_API_KEY` for Claude models) must be added as
-> global secrets. Modal injects these automatically via its own secrets mechanism.
+> **Daytona and Vercel users**: LLM API keys (e.g., `ANTHROPIC_API_KEY` for Claude models) must be
+> added as global secrets. Modal injects these automatically via its own secrets mechanism.
 
 See [Secrets Management](./SECRETS.md) for setup instructions.
 

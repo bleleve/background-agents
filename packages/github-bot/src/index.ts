@@ -15,6 +15,7 @@ import type {
   ReviewCommentPayload,
   ReviewThreadPayload,
   CheckSuiteCompletedPayload,
+  PullRequestReviewPayload,
 } from "./types";
 import type { Logger } from "./logger";
 import { createLogger, parseLogLevel } from "./logger";
@@ -27,6 +28,7 @@ import {
   handleReviewComment,
   handleReviewThreadResolved,
   handleCheckSuiteCompleted,
+  handlePullRequestReview,
   handleReviewRequestInternal,
   type HandlerResult,
   type InternalReviewRequest,
@@ -135,7 +137,7 @@ app.post("/internal/reviews", async (c) => {
   if (result.ok) {
     return c.json({ sessionId: result.sessionId }, 201);
   }
-  return c.json({ error: result.error }, result.status as 403 | 404 | 500);
+  return c.json({ error: result.error }, result.status as 403 | 404 | 409 | 500);
 });
 
 app.post("/webhooks/github", async (c) => {
@@ -359,6 +361,16 @@ function dispatchHandler(
       if (p.action === "resolved") {
         return handleReviewThreadResolved(env, log, payload as ReviewThreadPayload, traceId);
       }
+      return Promise.resolve({
+        outcome: "skipped",
+        skip_reason: "unsupported_action",
+      });
+    case "pull_request_review":
+      if (p.action === "submitted" || p.action === "edited") {
+        return handlePullRequestReview(env, log, payload as PullRequestReviewPayload, traceId);
+      }
+      // `dismissed` (including our own auto-dismissal) and any other action are
+      // ignored — this is the first half of the loop-prevention guard.
       return Promise.resolve({
         outcome: "skipped",
         skip_reason: "unsupported_action",

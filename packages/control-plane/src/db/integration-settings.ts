@@ -8,12 +8,13 @@ import {
   type GitHubBotSettings,
   type LinearBotSettings,
   type CodeServerSettings,
-  type SandboxSettings,
   type SlackGlobalSettings,
   type SlackMentionsPolicy,
+  type SandboxSettings,
   MAX_TUNNEL_PORTS,
   MAX_AWS_ROLES,
 } from "@open-inspect/shared";
+import { normalizeSandboxSettings } from "../sandbox/settings";
 
 type SettingsLevel = "global" | "repo";
 
@@ -44,7 +45,8 @@ export class IntegrationSettingsStore {
       .first<{ settings: string }>();
 
     if (!row) return null;
-    return JSON.parse(row.settings) as IntegrationSettingsMap[K]["global"];
+    const settings = JSON.parse(row.settings) as IntegrationSettingsMap[K]["global"];
+    return this.normalizeStoredGlobalSettings(integrationId, settings);
   }
 
   async setGlobal<K extends IntegrationId>(
@@ -103,7 +105,8 @@ export class IntegrationSettingsStore {
       .first<{ settings: string }>();
 
     if (!row) return null;
-    return JSON.parse(row.settings) as IntegrationSettingsMap[K]["repo"];
+    const settings = JSON.parse(row.settings) as IntegrationSettingsMap[K]["repo"];
+    return this.normalizeStoredRepoSettings(integrationId, settings);
   }
 
   async setRepoSettings<K extends IntegrationId>(
@@ -143,7 +146,10 @@ export class IntegrationSettingsStore {
 
     return results.map((row) => ({
       repo: row.repo,
-      settings: JSON.parse(row.settings) as IntegrationSettingsMap[K]["repo"],
+      settings: this.normalizeStoredRepoSettings(
+        integrationId,
+        JSON.parse(row.settings) as IntegrationSettingsMap[K]["repo"]
+      ),
     }));
   }
 
@@ -173,9 +179,35 @@ export class IntegrationSettingsStore {
       }
     }
 
-    return { enabledRepos, settings } as ResolvedIntegrationConfig<
+    const resolvedSettings =
+      integrationId === "sandbox"
+        ? normalizeSandboxSettings(settings, { invalid: "omit" })
+        : settings;
+
+    return { enabledRepos, settings: resolvedSettings } as ResolvedIntegrationConfig<
       NonNullable<IntegrationSettingsMap[K]["global"]["defaults"]>
     >;
+  }
+
+  private normalizeStoredGlobalSettings<K extends IntegrationId>(
+    integrationId: K,
+    settings: IntegrationSettingsMap[K]["global"]
+  ): IntegrationSettingsMap[K]["global"] {
+    if (integrationId !== "sandbox" || !settings.defaults) return settings;
+    return {
+      ...settings,
+      defaults: normalizeSandboxSettings(settings.defaults, { invalid: "omit" }),
+    } as IntegrationSettingsMap[K]["global"];
+  }
+
+  private normalizeStoredRepoSettings<K extends IntegrationId>(
+    integrationId: K,
+    settings: IntegrationSettingsMap[K]["repo"]
+  ): IntegrationSettingsMap[K]["repo"] {
+    if (integrationId !== "sandbox") return settings;
+    return normalizeSandboxSettings(settings, {
+      invalid: "omit",
+    }) as IntegrationSettingsMap[K]["repo"];
   }
 
   private validateAndNormalizeSettings<K extends IntegrationId>(
@@ -198,9 +230,10 @@ export class IntegrationSettingsStore {
     }
 
     if (integrationId === "sandbox") {
-      return this.validateSandboxSettings(
-        settings as SandboxSettings
-      ) as IntegrationSettingsMap[K]["repo"];
+      return normalizeSandboxSettings(settings, {
+        invalid: "throw",
+        createError: (message) => new IntegrationSettingsValidationError(message),
+      }) as IntegrationSettingsMap[K]["repo"];
     }
 
     if (integrationId === "slack") {
@@ -385,7 +418,7 @@ export class IntegrationSettingsStore {
       }
       normalized = {
         ...normalized,
-        awsRoles: settings.awsRoles.map((r) => ({
+        awsRoles: (settings.awsRoles as { profileName: string; roleArn: string }[]).map((r) => ({
           profileName: r.profileName.trim(),
           roleArn: r.roleArn,
         })),

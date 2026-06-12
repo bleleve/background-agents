@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { formatModelNameLower } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
+import { shouldWarmForPrompt } from "@/lib/sandbox-warming";
 import { isUnarchivedSessionListKey } from "@/lib/session-list";
 import { APP_NAME } from "@/lib/site-config";
 import {
@@ -291,9 +292,12 @@ export default function Home() {
   }, []);
 
   const handlePromptChange = (value: string) => {
-    const wasEmpty = prompt.length === 0;
     setPrompt(value);
-    if (wasEmpty && value.length > 0 && !pendingSessionId && !isCreatingSession && selectedRepo) {
+    // Warm a sandbox once the input shows real intent (see shouldWarmForPrompt)
+    // so it's ready by submit — but not for a stray space or a couple of
+    // keystrokes. createSessionForWarming() is idempotent (guards on
+    // pendingSessionId / the in-flight promise), so later keystrokes are no-ops.
+    if (shouldWarmForPrompt(value) && !pendingSessionId && !isCreatingSession && selectedRepo) {
       createSessionForWarming();
     }
   };

@@ -101,7 +101,8 @@ All TypeScript packages use **Vitest**; Python uses **pytest** + pytest-asyncio.
 
 ### Control-plane integration tests
 
-These run inside a real `workerd` runtime with Miniflare, using `defineWorkersConfig`. Important:
+These run inside a real `workerd` runtime with Miniflare, using the `cloudflareTest()` plugin from
+`@cloudflare/vitest-pool-workers`. Important:
 
 - `isolatedStorage: false` due to a workers-sdk SQLite WAL cleanup bug — tests share storage
 - Use `cleanD1Tables()` or equivalent cleanup in `beforeEach` to avoid cross-test pollution

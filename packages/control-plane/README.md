@@ -52,24 +52,26 @@ The control plane provides:
 
 ### Sessions
 
-| Endpoint                        | Method    | Description                    |
-| ------------------------------- | --------- | ------------------------------ |
-| `/sessions`                     | GET       | List user's sessions           |
-| `/sessions`                     | POST      | Create new session             |
-| `/sessions/:id`                 | GET       | Get session state              |
-| `/sessions/:id`                 | DELETE    | Delete session                 |
-| `/sessions/:id/prompt`          | POST      | Enqueue prompt                 |
-| `/sessions/:id/stop`            | POST      | Stop execution                 |
-| `/sessions/:id/ws`              | WebSocket | Real-time connection           |
-| `/sessions/:id/events`          | GET       | Paginated events               |
-| `/sessions/:id/artifacts`       | GET       | List artifacts                 |
-| `/sessions/:id/participants`    | GET/POST  | Manage participants            |
-| `/sessions/:id/messages`        | GET       | List messages                  |
-| `/sessions/:id/pr`              | POST      | Create pull request            |
-| `/sessions/:id/scm-credentials` | POST      | Broker sandbox git credentials |
-| `/sessions/:id/ws-token`        | POST      | Generate WebSocket token       |
-| `/sessions/:id/archive`         | POST      | Archive session                |
-| `/sessions/:id/unarchive`       | POST      | Unarchive session              |
+| Endpoint                         | Method    | Description                                                       |
+| -------------------------------- | --------- | ----------------------------------------------------------------- |
+| `/sessions`                      | GET       | List user's sessions                                              |
+| `/sessions`                      | POST      | Create new session                                                |
+| `/sessions/:id`                  | GET       | Get session state                                                 |
+| `/sessions/:id`                  | DELETE    | Delete session                                                    |
+| `/sessions/:id/prompt`           | POST      | Enqueue prompt                                                    |
+| `/sessions/:id/stop`             | POST      | Stop execution                                                    |
+| `/sessions/:id/sandbox/relaunch` | POST      | Relaunch a stopped/failed/stale sandbox                           |
+| `/sessions/:id/ws`               | WebSocket | Real-time connection                                              |
+| `/sessions/:id/events`           | GET       | Paginated events                                                  |
+| `/sessions/:id/artifacts`        | GET       | List artifacts                                                    |
+| `/sessions/:id/participants`     | GET/POST  | Manage participants                                               |
+| `/sessions/:id/messages`         | GET       | List messages                                                     |
+| `/sessions/:id/pr`               | POST      | Create pull request                                               |
+| `/sessions/:id/pr-review`        | POST      | Submit a formal PR review (policy-checked, sandbox-authenticated) |
+| `/sessions/:id/scm-credentials`  | POST      | Broker sandbox git credentials                                    |
+| `/sessions/:id/ws-token`         | POST      | Generate WebSocket token                                          |
+| `/sessions/:id/archive`          | POST      | Archive session                                                   |
+| `/sessions/:id/unarchive`        | POST      | Unarchive session                                                 |
 
 ### Plan Mode
 
@@ -209,7 +211,7 @@ Each session gets its own SQLite database with:
 - `messages`: Prompt queue and history
 - `events`: Agent events (tool calls, tokens)
 - `artifacts`: PRs, screenshots, previews
-- `sandbox`: Modal sandbox state
+- `sandbox`: selected backend sandbox state
 - `ws_client_mapping`: WebSocket ID to participant mapping (for hibernation recovery)
 
 See `src/session/schema.ts` for full schema.

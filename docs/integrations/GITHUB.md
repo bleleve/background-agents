@@ -30,7 +30,7 @@ App or deploying the bot worker, start with
 | Workflow                  | How it works                                                               |
 | ------------------------- | -------------------------------------------------------------------------- |
 | Auto-review new PRs       | Review non-draft PRs when they are opened, if auto-review is enabled       |
-| Re-run a review           | Re-trigger a review via the `ask-for-review` label or the web app button   |
+| Re-run a review           | Re-trigger a review via the `reef: ask for review` label or web app button |
 | Respond to PR comments    | Mention the bot in a PR conversation comment                               |
 | Respond to review threads | Mention the bot in an inline review comment                                |
 | Post back to GitHub       | Submit a PR review, reply to a review thread, or post a PR summary comment |
@@ -53,6 +53,7 @@ non-draft PRs in enabled repositories. The agent inspects the PR diff and posts 
 Auto-review is skipped when:
 
 - The PR is a draft
+- The PR is closed or merged
 - The PR was opened by the GitHub App bot itself
 - The repository is outside the configured GitHub Bot scope
 - The PR opener is not allowed to trigger the bot
@@ -64,20 +65,24 @@ follow-up after a draft becomes ready, mention the bot in a PR comment.
 ### What It Posts
 
 The agent posts its findings as inline `suggestion` comments on the relevant lines, plus a single
-**review verdict** comment that always lands — even on a clean PR. The verdict is a structured risk
-map:
+**review verdict** comment that always lands — even when nothing is flagged. The verdict is a
+structured risk map:
 
-- A header with a risk badge and one-line summary: `## 🟢 Reef Review — Low risk` (🟢 low · 🟡
-  medium · 🔴 high).
+- A header with a risk badge and one-line summary: `## 🔵 Reef Review — Low risk` (🔵 low · 🟡
+  medium · 🔴 high). **Low is the floor** — Reef is an automated review and never certifies a PR as
+  risk-free, so there is no "clean" badge; a PR with nothing flagged is 🔵 Low risk with
+  `No findings.` in the summary.
 - A **Summary** section: the verdict in one sentence and a count of findings by risk.
 - **Worth a look** — the findings that survived the quality bar, each linking back to its inline
   comment (omitted when there are none).
 - **Docs** — any documentation that drifted from the change (omitted when there is none).
-- **Reviewed, no concerns** — the areas that were checked and had nothing notable.
+- **Reviewed, no concerns** — the areas that were checked and had nothing notable, in a collapsed
+  `<details>` block so it stays out of the way of the summary.
 
-The bot also sets a matching `low-risk` / `medium-risk` / `high-risk` label on the PR and links the
-originating Open-Inspect session in the verdict footer. See
-[Re-running a Review](#re-running-a-review) for how a re-review replaces the previous verdict.
+The bot also sets a matching `reef: low risk` / `reef: medium risk` / `reef: high risk` label on the
+PR — derived from the verdict badge so it always matches — and links the originating Open-Inspect
+session in the verdict footer, alongside a reminder that the review is automated and not exhaustive.
+See [Re-running a Review](#re-running-a-review) for how a re-review replaces the previous verdict.
 
 ---
 
@@ -87,13 +92,16 @@ A completed review can be re-run two ways. On a re-review the bot replaces its p
 deletes the prior verdict comment and posts a fresh one, so subscribers get a new notification
 rather than a silent in-place edit.
 
-- **`ask-for-review` label** — add the `ask-for-review` label to a PR to re-run the full review. The
-  bot removes the label again once the review completes, so re-adding it triggers another run.
+- **`reef: ask for review` label** — add the `reef: ask for review` label to a PR to re-run the full
+  review. The bot removes the label again once the review completes, so re-adding it triggers
+  another run.
 - **"Re-run review" button** — open the PR's review session in the Open-Inspect web app and use the
   **Re-run review** button. The re-run is attributed to you and runs the same review.
 
 Re-running honors the same repository scope, visibility, and trigger-user gates as the original
-review.
+review. It also requires auto-review to be enabled: when **Auto-review new PRs** is off, every
+re-trigger path — the `reef: ask for review` label and the "Re-run review" button — is blocked.
+Closed or merged PRs are dropped as well, so re-triggering a review on one does nothing.
 
 ---
 
@@ -116,6 +124,16 @@ becomes the prompt.
 When you mention the bot in a PR review thread, Open-Inspect includes the file path and diff context
 from that thread. The agent can reply directly to the review thread and can also post a summary
 comment on the PR.
+
+### Requesting a Review
+
+If your mention reads as a request to review or re-review the PR — in any phrasing or language ("can
+you review this?", "PTAL", "take another look", "review again") — the agent runs a full PR review
+instead of a targeted reply. The agent classifies the intent itself from the comment's meaning;
+there is no keyword matching in the bot. A review-request mention produces the same inline
+`suggestion` comments and structured **verdict** comment (with the matching risk label) as an
+[automatic review](#what-it-posts), not a plain summary comment. The verdict footer links back to
+the session that produced it.
 
 ### Current Branch Behavior
 
@@ -144,8 +162,12 @@ GitHub rejects the reaction, the session can still start.
 For auto-review workflows, the agent posts inline `suggestion` comments plus the structured review
 verdict described in [What It Posts](#what-it-posts), and sets the matching risk label on the PR.
 
-For `@mention` workflows, the agent posts a PR comment summarizing its response or answering the
-question. If the request came from an inline review thread, the agent may also reply in that thread.
+For `@mention` workflows, the output depends on what the comment asks for. A targeted question or
+change gets a PR comment summarizing the response (or the pushed change); if the request came from
+an inline review thread, the agent may also reply in that thread. A request to review the PR runs a
+full review and posts the same inline suggestions and structured verdict described in
+[What It Posts](#what-it-posts), just like an automatic review — see
+[Requesting a Review](#requesting-a-review).
 
 GitHub does not receive the same managed completion message that Slack receives. After the initial
 eyes reaction, GitHub-facing output is written by the agent from inside the session. Use the

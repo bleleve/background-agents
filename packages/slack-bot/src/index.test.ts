@@ -17,11 +17,13 @@ const {
 }));
 
 vi.mock("@anthropic-ai/sdk", () => ({
-  default: vi.fn().mockImplementation(() => ({
-    messages: {
-      create: mockMessagesCreate,
-    },
-  })),
+  default: function () {
+    return {
+      messages: {
+        create: mockMessagesCreate,
+      },
+    };
+  },
 }));
 
 vi.mock("@open-inspect/shared", async () => {

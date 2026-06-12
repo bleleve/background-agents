@@ -52,7 +52,11 @@ export type EventType =
   | "plan_rejected";
 export type PlanApprovalStatus = "awaiting_approval" | "approved" | "rejected";
 export type PlanSource = "api" | "agent" | "web";
-export type ParticipantRole = "owner" | "member";
+// "viewer" — opened the session in the web UI but has not taken any action.
+// Viewers exist only to hold a WebSocket auth token; they are NOT counted as
+// having participated, so they are excluded from PR reviewers/assignees. Sending
+// a prompt promotes a viewer to "member".
+export type ParticipantRole = "owner" | "member" | "viewer";
 export type SpawnSource =
   | "user"
   | "agent"
@@ -84,6 +88,15 @@ export interface Session {
   currentSha: string | null;
   opencodeSessionId: string | null;
   status: SessionStatus;
+  /**
+   * Last known sandbox lifecycle status, mirrored onto the session index from
+   * the Durable Object. Null when unknown (rows predating the column, or a
+   * sandbox that never reported). Lets list views show sandbox health without a
+   * per-session WebSocket.
+   */
+  sandboxStatus?: SandboxStatus | null;
+  /** Whether the agent is actively processing a turn ("Thinking…"); list-only mirror. */
+  isProcessing?: boolean;
   parentSessionId: string | null;
   spawnSource: SpawnSource;
   spawnDepth: number;
@@ -288,6 +301,8 @@ export type SandboxEvent =
       type: "execution_complete";
       messageId: string;
       success: boolean;
+      // true = deliberate stop/cancel (vs failure). Drives the neutral render in the session flow.
+      cancelled?: boolean;
       error?: string;
       sandboxId: string;
       timestamp: number;
@@ -319,6 +334,16 @@ export type SandboxEvent =
       type: "session_title";
       title: string;
       sandboxId: string;
+      timestamp: number;
+    }
+  | {
+      type: "ready";
+      sandboxId: string;
+      opencodeSessionId?: string;
+      // Tunnel URLs the sandbox re-reports on (re)connect, parsed from its
+      // /workspace/.tunnels.env. Lets the control plane restore the preview
+      // links if a transient timeout cleared them while the sandbox was alive.
+      tunnelUrls?: Record<string, string>;
       timestamp: number;
     }
   | {
@@ -422,6 +447,8 @@ export interface SessionState {
   branchName: string | null;
   status: SessionStatus;
   sandboxStatus: SandboxStatus;
+  /** How the session was created (github-bot, linear-bot, automation, …). */
+  spawnSource?: SpawnSource;
   messageCount: number;
   createdAt: number;
   model?: string;

@@ -95,7 +95,7 @@ built for internal use where all employees are trusted and have access to compan
                                  │
                                  ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│               Data Plane (Modal or Daytona)                        │
+│               Data Plane (Modal, Daytona, or Vercel)               │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │                     Session Sandbox                          │  │
 │  │  ┌───────────┐  ┌───────────┐  ┌───────────┐                 │  │
@@ -144,7 +144,7 @@ Sessions start near-instantly through multiple layers of warming:
   instead of re-cloning
 - **Pre-built repo images** — Toggle per-repo in Settings; rebuilt every 30 minutes with latest
   commits and dependencies
-- **Proactive warming** — Sandbox begins spinning up as soon as you start typing, before you hit
+- **Proactive warming** — Sandbox begins spinning up while you type your prompt, before you hit
   Enter
 
 ### Multiplayer Sessions
@@ -173,12 +173,13 @@ Choose the AI model that fits your task, with per-session reasoning effort contr
 
 | Provider     | Models                                                               |
 | ------------ | -------------------------------------------------------------------- |
-| Anthropic    | Claude Haiku 4.5, Sonnet 4.5/4.6, Opus 4.5/4.6/4.7                   |
+| Anthropic    | Claude Haiku 4.5, Sonnet 4.5/4.6, Opus 4.5/4.6/4.7/4.8, Fable 5      |
 | OpenAI       | GPT 5.2, GPT 5.4, GPT 5.5, GPT 5.2 Codex, 5.3 Codex, 5.3 Codex Spark |
 | OpenCode Zen | Kimi K2.5, MiniMax M2.5, GLM 5 (opt-in)                              |
 
 OpenAI models work with your existing ChatGPT subscription via OAuth — no separate API key needed.
-See **[docs/OPENAI_MODELS.md](docs/OPENAI_MODELS.md)** for setup instructions.
+See **[docs/AVAILABLE_MODELS.md](docs/AVAILABLE_MODELS.md)** for the full model list and
+**[docs/OPENAI_MODELS.md](docs/OPENAI_MODELS.md)** for OpenAI setup instructions.
 
 ### Client Integrations
 
@@ -213,7 +214,7 @@ See **[docs/AUTOMATIONS.md](docs/AUTOMATIONS.md)** for setup instructions.
 
 ### Sandbox Environment
 
-Every session runs in an isolated Modal sandbox with a full development environment:
+Every session runs in an isolated sandbox backend with a full development environment:
 
 - **Pre-installed:** Node.js 22, Python 3.12, Bun, git, GitHub CLI, build-essential
 - **Browser automation:** agent-browser CLI with headless Chromium for screenshots, visual diffs,
@@ -274,6 +275,8 @@ Inspired by [Ramp's Inspect](https://builders.ramp.com/post/why-we-built-our-bac
 built with:
 
 - [Modal](https://modal.com) - Cloud sandbox infrastructure
+- [Daytona](https://www.daytona.io) - Cloud development sandboxes
+- [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) - Cloud sandbox infrastructure
 - [Cloudflare Workers](https://workers.cloudflare.com) - Edge computing
 - [OpenCode](https://opencode.ai) - Coding agent runtime
 - [Next.js](https://nextjs.org) - Web framework

@@ -1,4 +1,5 @@
-import { defineWorkersConfig, readD1Migrations } from "@cloudflare/vitest-pool-workers/config";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
+import { defineConfig } from "vitest/config";
 import path from "path";
 import { webcrypto } from "node:crypto";
 
@@ -10,48 +11,46 @@ function generateTestEncryptionKey(): string {
   return Buffer.from(key).toString("base64");
 }
 
-export default defineWorkersConfig(async () => {
-  // Upstream migrations (numeric prefixes) apply first, then fork-local ones
-  // (timestamp prefixes) from the fork/ subdirectory. readD1Migrations is not
-  // recursive, so read each directory and concatenate in apply order.
-  const migrations = [
-    ...(await readD1Migrations(migrationsPath)),
-    ...(await readD1Migrations(path.join(migrationsPath, "fork"))),
-  ];
+// vitest 4 / @cloudflare/vitest-pool-workers v0.16 replaced the
+// `defineWorkersConfig` + `test.poolOptions.workers` setup with the
+// `cloudflareTest()` Vite plugin, configured via `defineConfig` from
+// "vitest/config". The old `singleWorker`/`isolatedStorage` poolOptions are not
+// configured here; integration tests share one D1 instance and rely on explicit
+// `cleanD1Tables()` cleanup (see test/integration/cleanup.ts) for isolation.
+export default defineConfig({
+  plugins: [
+    cloudflareTest(async () => {
+      // Upstream migrations (numeric prefixes) apply first, then fork-local ones
+      // (timestamp prefixes) from the fork/ subdirectory. readD1Migrations is not
+      // recursive, so read each directory and concatenate in apply order.
+      const migrations = [
+        ...(await readD1Migrations(migrationsPath)),
+        ...(await readD1Migrations(path.join(migrationsPath, "fork"))),
+      ];
 
-  return {
-    test: {
-      include: ["test/integration/**/*.test.ts"],
-      setupFiles: ["test/integration/apply-migrations.ts"],
-      poolOptions: {
-        workers: {
-          singleWorker: true,
-          // SQLite-backed DOs create .sqlite-shm/.sqlite-wal files that break
-          // isolatedStorage's cleanup assertions (asserts all files end in .sqlite).
-          // The fix (workers-sdk#5667) never shipped in the pool package — the hard
-          // assert is still present in v0.12.10. Symbol.dispose on stubs doesn't
-          // help either: the pop runs at suite level after the DO constructor has
-          // already created WAL files. See: https://github.com/cloudflare/workers-sdk/issues/11031
-          isolatedStorage: false,
-          wrangler: {
-            configPath: "./wrangler.jsonc",
-          },
-          miniflare: {
-            bindings: {
-              INTERNAL_CALLBACK_SECRET: "test-hmac-secret-for-integration-tests",
-              TOKEN_ENCRYPTION_KEY: "test-encryption-key-32chars-long!",
-              REPO_SECRETS_ENCRYPTION_KEY: generateTestEncryptionKey(),
-              DEPLOYMENT_NAME: "integration-test",
-              MODAL_API_SECRET: "test-modal-api-secret",
-              MODAL_WORKSPACE: "test-workspace",
-              SLACK_BOT_TOKEN: "xoxb-test-integration",
-              WEB_APP_URL: "https://app.test.local",
-              APP_NAME: "Open-Inspect",
-              TEST_MIGRATIONS: migrations,
-            },
+      return {
+        wrangler: {
+          configPath: "./wrangler.jsonc",
+        },
+        miniflare: {
+          bindings: {
+            INTERNAL_CALLBACK_SECRET: "test-hmac-secret-for-integration-tests",
+            TOKEN_ENCRYPTION_KEY: "test-encryption-key-32chars-long!",
+            REPO_SECRETS_ENCRYPTION_KEY: generateTestEncryptionKey(),
+            DEPLOYMENT_NAME: "integration-test",
+            MODAL_API_SECRET: "test-modal-api-secret",
+            MODAL_WORKSPACE: "test-workspace",
+            SLACK_BOT_TOKEN: "xoxb-test-integration",
+            WEB_APP_URL: "https://app.test.local",
+            APP_NAME: "Open-Inspect",
+            TEST_MIGRATIONS: migrations,
           },
         },
-      },
-    },
-  };
+      };
+    }),
+  ],
+  test: {
+    include: ["test/integration/**/*.test.ts"],
+    setupFiles: ["test/integration/apply-migrations.ts"],
+  },
 });
