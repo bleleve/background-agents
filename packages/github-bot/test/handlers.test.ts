@@ -981,6 +981,29 @@ describe("handleIssueComment", () => {
     expect(generateInstallationToken).not.toHaveBeenCalled();
   });
 
+  it("does not fire the @reef alias on a longer handle like @reef-fountain", async () => {
+    // Regression: the @reef alias used to substring-match @reef-fountain, so the
+    // production bot reacted to comments meant only for a sibling deployment.
+    const env = {
+      ...createMockEnv(),
+      GITHUB_BOT_USERNAME: "fountain-reef[bot]",
+      REEF_ALIAS_ENABLED: "true",
+    };
+    const log = createMockLogger();
+    const payload: IssueCommentPayload = {
+      ...issueCommentPayload,
+      comment: {
+        ...issueCommentPayload.comment,
+        body: "@reef-fountain can you review it?",
+      },
+    };
+
+    const result = await handleIssueComment(env, log, payload, "trace-2");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "no_mention" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+  });
+
   it("returns early if not a PR", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
@@ -1120,6 +1143,25 @@ describe("handleReviewComment", () => {
     const payload: ReviewCommentPayload = {
       ...reviewCommentPayload,
       comment: { ...reviewCommentPayload.comment, body: "@reef can you fix this?" },
+    };
+
+    const result = await handleReviewComment(env, log, payload, "trace-3");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "no_mention" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it("does not fire the @reef alias on a longer handle like @reef-fountain", async () => {
+    // Regression: see the matching issue-comment test above.
+    const env = {
+      ...createMockEnv(),
+      GITHUB_BOT_USERNAME: "fountain-reef[bot]",
+      REEF_ALIAS_ENABLED: "true",
+    };
+    const log = createMockLogger();
+    const payload: ReviewCommentPayload = {
+      ...reviewCommentPayload,
+      comment: { ...reviewCommentPayload.comment, body: "@reef-fountain can you fix this?" },
     };
 
     const result = await handleReviewComment(env, log, payload, "trace-3");

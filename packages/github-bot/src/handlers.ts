@@ -341,16 +341,24 @@ function stripMarkdownBlockquotes(body: string): string {
     .join("\n");
 }
 
+// Match `@mention` only when it is bounded by non-username characters on both
+// sides. GitHub logins are alphanumerics plus single hyphens, so anchoring on
+// `[A-Za-z0-9-]` stops a short alias like `@reef` from matching a longer handle
+// such as `@reef-fountain` (or `notify@reef.example.com`). `flags` lets callers
+// choose detection (test, no `g`) vs. stripping (replace, `g`).
+function mentionRegex(mention: string, flags: string): RegExp {
+  return new RegExp(`(?<![A-Za-z0-9-])@${escapeForRegex(mention)}(?![A-Za-z0-9-])`, flags);
+}
+
 function hasAnyMention(body: string, mentions: string[]): boolean {
-  const bodyLower = stripMarkdownBlockquotes(body).toLowerCase();
-  return mentions.some((m) => bodyLower.includes(`@${m.toLowerCase()}`));
+  const stripped = stripMarkdownBlockquotes(body);
+  return mentions.some((m) => mentionRegex(m, "i").test(stripped));
 }
 
 function stripMentions(body: string, mentions: string[]): string {
   let result = stripMarkdownBlockquotes(body);
   for (const mention of mentions) {
-    const escaped = escapeForRegex(mention);
-    result = result.replace(new RegExp(`@${escaped}`, "gi"), "");
+    result = result.replace(mentionRegex(mention, "gi"), "");
   }
   return result.trim();
 }
