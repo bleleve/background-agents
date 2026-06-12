@@ -601,9 +601,15 @@ function SessionContent({
   const handleRelaunchSandbox = useCallback(async () => {
     setIsRelaunching(true);
     try {
-      await fetch(`/api/sessions/${sessionId}/sandbox/relaunch`, { method: "POST" });
+      const res = await fetch(`/api/sessions/${sessionId}/sandbox/relaunch`, { method: "POST" });
+      if (!res.ok) {
+        console.error(`Failed to relaunch sandbox: ${res.status}`);
+        return false;
+      }
+      return true;
     } catch (error) {
       console.error("Failed to relaunch sandbox:", error);
+      return false;
     } finally {
       setIsRelaunching(false);
     }
@@ -635,8 +641,13 @@ function SessionContent({
       !isRelaunching &&
       !warmRequestedRef.current
     ) {
+      // Hold the dedup ref through the request; release it if the relaunch
+      // fails so a later keystroke can retry. On success the sandbox_status
+      // broadcast drives the useEffect reset for the next down-cycle.
       warmRequestedRef.current = true;
-      void handleRelaunchSandbox();
+      void handleRelaunchSandbox().then((ok) => {
+        if (!ok) warmRequestedRef.current = false;
+      });
     }
   };
   const [title, setTitle] = useState(baseResolvedTitle);
