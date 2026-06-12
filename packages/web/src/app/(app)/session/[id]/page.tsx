@@ -31,6 +31,7 @@ import { PlanApprovalBanner } from "@/components/plan-approval-banner";
 import { copyToClipboard, formatModelNameLower } from "@/lib/format";
 import { archiveSession } from "@/lib/archive-session";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
+import { shouldWarmForPrompt } from "@/lib/sandbox-warming";
 import {
   isArchivedSessionListKey,
   isUnarchivedSessionListKey,
@@ -607,6 +608,37 @@ function SessionContent({
       setIsRelaunching(false);
     }
   }, [sessionId]);
+
+  // Warm a stopped/idle sandbox once a follow-up shows real intent, so it's
+  // ready by submit — mirrors the new-session prompt's warm-on-type. The guard
+  // ref keeps it to one relaunch per down-cycle: canRelaunchSandbox can briefly
+  // stay true between the relaunch POST resolving and the sandbox_status
+  // broadcast arriving, so we must dedupe rather than rely on status alone.
+  const warmRequestedRef = useRef(false);
+  useEffect(() => {
+    // Sandbox is live (or coming up) again — allow the next stop→type cycle to warm.
+    if (
+      sandboxStatus &&
+      sandboxStatus !== "stopped" &&
+      sandboxStatus !== "failed" &&
+      sandboxStatus !== "stale"
+    ) {
+      warmRequestedRef.current = false;
+    }
+  }, [sandboxStatus]);
+
+  const handleComposerChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    handleInputChange(e);
+    if (
+      shouldWarmForPrompt(e.target.value) &&
+      canRelaunchSandbox &&
+      !isRelaunching &&
+      !warmRequestedRef.current
+    ) {
+      warmRequestedRef.current = true;
+      void handleRelaunchSandbox();
+    }
+  };
   const [title, setTitle] = useState(baseResolvedTitle);
   const [optimisticTitle, setOptimisticTitle] = useState<string | null>(null);
   const [sheetDragY, setSheetDragY] = useState(0);
@@ -1239,7 +1271,7 @@ function SessionContent({
               <textarea
                 ref={inputRef}
                 value={prompt}
-                onChange={handleInputChange}
+                onChange={handleComposerChange}
                 onKeyDown={handleKeyDown}
                 placeholder={
                   isPlanAwaiting
