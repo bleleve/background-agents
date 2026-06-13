@@ -3,16 +3,15 @@ name: release-notes
 description: >-
   Draft concise Slack release notes from a release PR and git history. Formats with repo name,
   release label, PR summary, and a scannable change list. Use when the user asks for release notes,
-  changelog, what shipped or a stable/production cut summary.
-user-invocable: true
+  changelog, what shipped, or a release cut summary.
 ---
 
 # Release Notes
 
 Draft concise, scannable Slack release notes from a release PR and the commits it ships.
 
-Open-Inspect releases are branch-based: `main` → staging, `stable` → production. A release PR is
-typically `main` → `stable`.
+Run from the cloned repository root. If the repo defines custom release conventions, read
+`.claude/skills/release-notes/reference.md` when present before drafting.
 
 ## Hard rules
 
@@ -37,13 +36,16 @@ Ask or infer the release source:
 | Input                    | How to resolve                                                                 |
 | ------------------------ | ------------------------------------------------------------------------------ |
 | Release PR URL or number | `gh pr view <n> --json title,body,baseRefName,headRefName,url,mergedAt,number` |
-| No PR given              | `gh pr list --base stable --head main --state merged --limit 5`                |
-| Commit range only        | `git log <base>..<head> --oneline` (base = previous `stable` tip before merge) |
+| No PR given              | `gh pr list --state merged --limit 10` — pick the release PR or ask the user   |
+| Commit range only        | `git log <base>..<head> --oneline`                                             |
 
-Confirm environment from the target branch:
+Confirm environment from the release PR's **base branch** (or `reference.md` if present):
 
-- `stable` → _Production_
-- `main` → _Staging_
+| Base branch (common)                   | Label                  |
+| -------------------------------------- | ---------------------- |
+| `stable`, `production`, `prod`         | Production             |
+| `main`, `master`, `develop`, `staging` | Staging                |
+| Other                                  | Use branch name or ask |
 
 ## Phase 2 — Collect changes
 
@@ -62,11 +64,11 @@ opaque subjects into plain-language bullets. Use type prefixes only when they ai
 Default to a **single flat list** under _What changed_. Group into Features / Fixes / Other only
 when there are more than 10 items.
 
-Add a deploy-ops callout when commits touch:
+Add a deploy-ops callout when commits touch paths that typically need manual follow-up:
 
-- `terraform/d1/migrations/` — D1 migration required
-- `packages/modal-infra/src/images/base.py` (`CACHE_BUSTER`) — Modal image rebuild
-- `packages/sandbox-runtime/` — Modal image + Daytona snapshot rebuild
+- Database migrations (`**/migrations/**`, `alembic/`, `schema/`)
+- Container or image rebuild signals (`Dockerfile`, `docker-compose`, image version bumps)
+- Repo-specific paths listed in `.claude/skills/release-notes/reference.md`
 
 Use one extra bullet or a single `*Deploy notes*` line; do not bury ops details in feature bullets.
 
@@ -76,7 +78,7 @@ Use this structure exactly. Do not reorder or omit the header lines.
 
 ```
 *Release Notes — {owner/repo}*
-:rocket: *{Staging|Production} release*
+:rocket: *{Staging|Production|{environment}} release*
 
 {one-line from PR title or ## Summary — max ~120 chars}
 

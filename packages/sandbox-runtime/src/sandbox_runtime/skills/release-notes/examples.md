@@ -8,7 +8,7 @@
 - Body `## Summary`: Ships automations last-run tracking, sandbox status in session list, and a fix
   for processing-state sync.
 - Base: `stable`, Head: `main`
-- URL: `https://github.com/acme/open-inspect/pull/142`
+- URL: `https://github.com/acme/my-app/pull/142`
 
 **Input — commits (`git log stable@{1}..stable --pretty=format:'%s' --no-merges`):**
 
@@ -22,7 +22,7 @@ docs: document automations webhook setup
 **Output (Slack mrkdwn):**
 
 ```
-*Release Notes — acme/open-inspect*
+*Release Notes — acme/my-app*
 :rocket: *Production release*
 
 Ships automations last-run tracking, sandbox status in session list, and a fix for processing-state sync.
@@ -32,7 +32,7 @@ Ships automations last-run tracking, sandbox status in session list, and a fix f
 • Show sandbox status on the session dashboard
 • Fixed processing-state sync with sandbox lifecycle
 
-<https://github.com/acme/open-inspect/pull/142|Release PR #142>
+<https://github.com/acme/my-app/pull/142|Release PR #142>
 ```
 
 ---
@@ -45,7 +45,7 @@ Ships automations last-run tracking, sandbox status in session list, and a fix f
 - Body `## Summary`: Plan mode toggle in web composer, deployment-wide default model settings, and
   Linear bot model preference fixes.
 - Base: `main`, Head: `feature/plan-mode` (merged via PR #138 to `main`)
-- URL: `https://github.com/acme/open-inspect/pull/138`
+- URL: `https://github.com/acme/my-app/pull/138`
 
 **Input — commits:**
 
@@ -64,7 +64,7 @@ docs: add PLAN_MODE.md
 **Output (Slack mrkdwn):**
 
 ```
-*Release Notes — acme/open-inspect*
+*Release Notes — acme/my-app*
 :rocket: *Staging release*
 
 Plan mode toggle in web composer, deployment-wide default model settings, and Linear bot model preference fixes.
@@ -77,7 +77,7 @@ Plan mode toggle in web composer, deployment-wide default model settings, and Li
 • Documented plan mode workflow (PLAN_MODE.md)
 • Internal refactors, dependency updates, and test coverage (3 commits)
 
-<https://github.com/acme/open-inspect/pull/138|Release PR #138>
+<https://github.com/acme/my-app/pull/138|Release PR #138>
 ```
 
 Note: `chore`, `test`, and `refactor` commits are collapsed into one summary bullet unless the user
@@ -87,18 +87,18 @@ asks for the full list.
 
 ## Example 3 — Deploy ops callout
 
-When commits include a D1 migration and sandbox-runtime change:
+When commits include a database migration:
 
 ```
-*Release Notes — acme/open-inspect*
+*Release Notes — acme/my-app*
 :rocket: *Production release*
 
 Adds session processing flag and sandbox status to the sessions index.
 
 *What changed*
 • Added `is_processing` flag to sessions
-• Added sandbox status to session list and D1 index
-• *Deploy notes:* D1 migration runs on apply; rebuild Modal image and Daytona snapshot (sandbox-runtime changed)
+• Added sandbox status to session list and database index
+• *Deploy notes:* database migration required before deploy
 
-<https://github.com/acme/open-inspect/pull/155|Release PR #155>
+<https://github.com/acme/my-app/pull/155|Release PR #155>
 ```
