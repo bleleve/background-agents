@@ -37,6 +37,7 @@ The most common example:
 | Key                 | Description                                                                                                                                           |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY` | Required for Claude models when using the **Daytona** or **Vercel** sandbox provider (Modal injects this automatically via its own secrets mechanism) |
+| `DEEPSEEK_API_KEY`  | Required for DeepSeek models with any sandbox provider                                                                                                |
 
 > **Daytona and Vercel sandbox users**: If you plan to use Claude models, you must add
 > `ANTHROPIC_API_KEY` as a global secret after deploying. Without it, Claude sessions will fail with
@@ -113,6 +114,7 @@ If you try to save a reserved key, the UI will show a validation error.
 | Key                          | Scope  | Purpose                                                      |
 | ---------------------------- | ------ | ------------------------------------------------------------ |
 | `ANTHROPIC_API_KEY`          | Global | Claude API access (required for Daytona or Vercel sandboxes) |
+| `DEEPSEEK_API_KEY`           | Global | DeepSeek API access                                          |
 | `OPENAI_OAUTH_REFRESH_TOKEN` | Repo   | OpenAI Codex access ([setup guide](OPENAI_MODELS.md))        |
 | `OPENAI_OAUTH_ACCOUNT_ID`    | Repo   | OpenAI Codex access ([setup guide](OPENAI_MODELS.md))        |
 | `DATABASE_URL`               | Repo   | Database connection string                                   |
@@ -123,11 +125,11 @@ If you try to save a reserved key, the UI will show a validation error.
 
 ## Troubleshooting
 
-### "Model not found" errors (Daytona or Vercel sandbox provider)
+### "Model not found" errors
 
-If you're using `sandbox_provider = "daytona"` or `sandbox_provider = "vercel"` with Claude models
-and see "Model not found" errors, add your `ANTHROPIC_API_KEY` as a global secret in Settings.
-Unlike Modal, these providers do not inject LLM API keys automatically.
+If you see "Model not found" errors, add the API key for your selected model provider as a global
+secret in Settings. For Claude on Daytona or Vercel, add `ANTHROPIC_API_KEY`. For DeepSeek, add
+`DEEPSEEK_API_KEY`.
 
 ### Secret not appearing in sandbox
 
