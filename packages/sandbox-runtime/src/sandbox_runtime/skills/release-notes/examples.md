@@ -10,7 +10,7 @@
 - Base: `stable`, Head: `main`
 - URL: `https://github.com/acme/my-app/pull/142`
 
-**Input — commits (`git log stable@{1}..stable --pretty=format:'%s' --no-merges`):**
+**Input — commits (`gh pr view 142 --json commits --jq '.commits[].messageHeadline'`):**
 
 ```
 feat: add automations last_run_at column
