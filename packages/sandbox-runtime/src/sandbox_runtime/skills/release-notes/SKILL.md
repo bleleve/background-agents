@@ -56,7 +56,7 @@ gh repo view --json nameWithOwner
 gh pr view <n> --json title,body,url,mergedAt,baseRefName,headRefName,number
 git log <base>..<head> --pretty=format:'%s' --no-merges   # if PR is not yet merged
 # — or, if the PR is already merged —
-git log <base>@{1}..<base> --pretty=format:'%s' --no-merges
+gh pr view <n> --json commits --jq '.commits[].messageHeadline'
 ```
 
 Parse conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:`). Rewrite
