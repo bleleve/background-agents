@@ -41,10 +41,10 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("cat >/tmp/pr-suggestion.md");
     expect(prompt).toContain("```suggestion");
     expect(prompt).toContain("-F start_line=");
-    expect(prompt).toContain("remove code, not just add code");
+    expect(prompt).toContain("ELIGIBILITY GATE");
     expect(prompt).toContain("Apply suggestion");
-    expect(prompt).toContain("self-contained and valid when applied in isolation");
-    expect(prompt).toContain("skip the suggestion block and explain the change as plain text");
+    expect(prompt).toContain("Verify the anchor");
+    expect(prompt).toContain("explain in prose instead");
   });
 
   it("handles null body gracefully", () => {
@@ -145,7 +145,7 @@ describe("buildCodeReviewPrompt", () => {
   it("includes the suggestion quality bar before the inline-comment workflow", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
     const qualityIdx = prompt.indexOf("Quality bar — verify before posting");
-    const workflowIdx = prompt.indexOf("Find the exact replacement range");
+    const workflowIdx = prompt.indexOf("ELIGIBILITY GATE");
     expect(qualityIdx).toBeGreaterThan(-1);
     expect(workflowIdx).toBeGreaterThan(-1);
     expect(qualityIdx).toBeLessThan(workflowIdx);
@@ -256,15 +256,13 @@ describe("buildCodeReviewPrompt", () => {
 
   it("tells a resumed (re-review) session to sync the worktree to the latest head", () => {
     const fresh = buildCodeReviewPrompt(baseParams);
-    expect(fresh).toContain("The repository has been cloned and you are on the PR head branch.");
+    expect(fresh).toContain("cloned at its DEFAULT branch");
     expect(fresh).not.toContain("RE-REVIEW in an existing session");
 
     const resumed = buildCodeReviewPrompt({ ...baseParams, resumed: true });
     expect(resumed).toContain("RE-REVIEW in an existing session");
     expect(resumed).toContain("gh pr checkout 42 --force");
-    expect(resumed).not.toContain(
-      "The repository has been cloned and you are on the PR head branch."
-    );
+    expect(resumed).not.toContain("cloned at its DEFAULT branch");
   });
 
   it("deletes any prior verdict, then posts a fresh comment (re-reviews notify)", () => {
@@ -331,7 +329,7 @@ describe("buildCodeReviewPrompt", () => {
 
   it("autoApproveOnOpen: true still includes inline suggestion workflow", () => {
     const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
-    expect(prompt).toContain("Find the exact replacement range");
+    expect(prompt).toContain("ELIGIBILITY GATE");
     expect(prompt).toContain("Quality bar — verify before posting");
   });
 });
@@ -545,7 +543,7 @@ describe("buildCommentActionPrompt", () => {
   it("includes the suggestion quality bar before the inline-comment workflow", () => {
     const prompt = buildCommentActionPrompt(baseParams);
     const qualityIdx = prompt.indexOf("Quality bar — verify before posting");
-    const workflowIdx = prompt.indexOf("Find the exact replacement range");
+    const workflowIdx = prompt.indexOf("ELIGIBILITY GATE");
     expect(qualityIdx).toBeGreaterThan(-1);
     expect(workflowIdx).toBeGreaterThan(-1);
     expect(qualityIdx).toBeLessThan(workflowIdx);
@@ -626,7 +624,7 @@ describe("buildFailedChecksPrompt", () => {
   it("includes the suggestion quality bar before the inline-comment workflow", () => {
     const prompt = buildFailedChecksPrompt(baseParams);
     const qualityIdx = prompt.indexOf("Quality bar — verify before posting");
-    const workflowIdx = prompt.indexOf("Find the exact replacement range");
+    const workflowIdx = prompt.indexOf("ELIGIBILITY GATE");
     expect(qualityIdx).toBeGreaterThan(-1);
     expect(workflowIdx).toBeGreaterThan(-1);
     expect(qualityIdx).toBeLessThan(workflowIdx);

@@ -59,6 +59,27 @@ A confidently-wrong inline comment costs reviewer time and erodes trust over man
 - **Out of scope — do not post (unless a comment explicitly asks about it):** theoretical risks that need unlikely preconditions (but do flag silent data corruption or loss even when the trigger is rare); defense-in-depth suggestions when the primary defense is already adequate; issues in code this PR does not touch; "consider using library X" style preferences.
 - **When uncertain whether the issue is real, do not post.** A missed real issue is recoverable on the next review pass; a confidently-wrong one creates noise on every review.`;
 
+// Bumped whenever buildInlineSuggestionWorkflow, SUGGESTION_QUALITY_BAR, or
+// SUGGESTION_APPLICABILITY_GATE change. Used to A/B-attribute suggestion-apply-
+// quality changes to specific prompt versions via the review_suggestions D1 table.
+// The control-plane stamps this value against each recorded suggestion by looking
+// up the most recent github-bot session for the PR at record time.
+export const INLINE_SUGGESTION_PROMPT_VERSION = "v2";
+
+// Gate that every finding must pass BEFORE emitting an applyable ```suggestion block.
+// Evaluated step-by-step; a single failure → prose (or illustrative fence) instead.
+const SUGGESTION_APPLICABILITY_GATE = `**ELIGIBILITY GATE — evaluate BEFORE writing any replacement code.**
+An applyable \`\`\`suggestion block only when ALL of these hold:
+(a) The fix spans a **single contiguous range** in **one file** from the PR diff (RIGHT side). No second location needs a change for the fix to be complete.
+(b) No new symbol, import, method, or type is introduced that does not already exist at the anchor location. The replacement must be valid in isolation — it cannot call a function not yet imported there.
+(c) The change is **small** (≲15 lines replaced). Not a restructure or rewrite.
+(d) The target lines are in the PR diff and have unambiguous RIGHT-side line numbers in \`gh pr diff\`.
+(e) The fix corrects a behavior, not merely reformats or reorganises.
+
+If ANY condition fails → use **prose** to describe the fix. You may add a non-applyable illustrative fence (\`\`\`ts / \`\`\`ruby / \`\`\`diff — but NOT \`\`\`suggestion) to show the code.
+**For Ruby specifically** — even when all conditions hold, prefer prose for fixes that cross module/class/file boundaries (Ruby method resolution is dynamic; a missing method call is a runtime NoMethodError, invisible to static analysis).
+When in doubt, prose is always safe; an incorrect applyable block is never safe.`;
+
 // Shared guard forbidding a formal PR-review submission. The sandbox enforces
 // this for real (the gh wrapper blocks APPROVE/REQUEST_CHANGES when the session
 // is not permitted) — this is the prompt-level first line so the agent doesn't
@@ -76,45 +97,70 @@ function buildInlineSuggestionWorkflow(params: {
   number: number;
 }): string {
   const { owner, repo, number } = params;
-  return `- Find the exact replacement range in a file that is part of the PR diff (RIGHT side only). Include obsolete lines in the selected range so suggestions can remove code, not just add code.
-- Get PR head SHA for \`commit_id\`:
+  return `${SUGGESTION_APPLICABILITY_GATE}
+
+**If eligible — follow these steps exactly:**
+
+**Step 1 — Derive the anchor (do NOT hand-count from diff hunk headers alone).**
+If the \`ast-anchor\` tool is available in your toolset, call it with the owner, repo, head SHA, file path, and a short description of the target node. It returns the exact \`start_line\`, \`line\`, and leading indentation — use those values directly in Step 4.
+
+Otherwise derive the anchor manually:
+- Get the PR head SHA: \`SHA="$(gh pr view ${number} --repo ${owner}/${repo} --json headRefOid --jq .headRefOid)"\`
+- In \`gh pr diff ${number}\`, find the hunk header \`@@ -a,b +c,d @@\` containing the target lines. Start counting from line \`c\`, incrementing only for context lines (space prefix) and added lines (\`+\` prefix), skipping deleted lines (\`-\` prefix). The result is the 1-based RIGHT-side file line number.
+- Read the exact leading whitespace from the target line in the diff output — do not retype or guess it. GitHub applies the block verbatim.
+
+**Step 2 — Get the PR head SHA (if not already fetched).**
 
    SHA="$(gh pr view ${number} --repo ${owner}/${repo} --json headRefOid --jq .headRefOid)"
 
-- Write the markdown body to a temp file (to avoid escaping bugs). The first line MUST be a hidden risk marker — \`<!-- reef-risk: low -->\`, \`<!-- reef-risk: medium -->\`, or \`<!-- reef-risk: high -->\` — set to this finding's severity. It is invisible when rendered and is used only to bucket suggestions by risk in analytics, so do not omit it:
+**Step 3 — Write the comment body to a temp file.**
+The first line MUST be a hidden risk marker — \`<!-- reef-risk: low -->\`, \`<!-- reef-risk: medium -->\`, or \`<!-- reef-risk: high -->\` — set to this finding's severity. Invisible when rendered; used only for risk analytics. Do not omit it.
 
    cat >/tmp/pr-suggestion.md <<'EOF'
    <!-- reef-risk: <low|medium|high> -->
-   <what is wrong and why>
+   <what is wrong and why — one concise sentence>
 
    \`\`\`suggestion
-   <replacement code with exact indentation for the selected range>
+   <full replacement for the selected range, exact leading whitespace preserved>
    \`\`\`
+
+   *If new commits have landed since this comment was posted, re-run the review before applying.*
    EOF
 
-- Post the inline review comment using one of these forms:
+**Step 4 — Post the inline review comment and capture the response.**
 
    # Single-line replacement
    gh api -X POST "repos/${owner}/${repo}/pulls/${number}/comments" \\
      -f commit_id="$SHA" \\
      -f path="<file path from PR diff>" \\
-     -F line="<line number on RIGHT side>" \\
+     -F line="<RIGHT-side line number>" \\
      -f side="RIGHT" \\
-     -F body=@/tmp/pr-suggestion.md
+     -F body=@/tmp/pr-suggestion.md > /tmp/pr-suggestion-response.json
 
-   # Multi-line replacement (including removals)
+   # Multi-line replacement (including removals — include obsolete lines in the range)
    gh api -X POST "repos/${owner}/${repo}/pulls/${number}/comments" \\
      -f commit_id="$SHA" \\
      -f path="<file path from PR diff>" \\
-     -F start_line="<first line on RIGHT side>" \\
+     -F start_line="<first RIGHT-side line>" \\
      -f start_side="RIGHT" \\
-     -F line="<last line on RIGHT side>" \\
+     -F line="<last RIGHT-side line>" \\
      -f side="RIGHT" \\
-     -F body=@/tmp/pr-suggestion.md
+     -F body=@/tmp/pr-suggestion.md > /tmp/pr-suggestion-response.json
 
-- In the suggestion block, provide the full replacement for the selected range. When lines should be removed, omit them from the replacement.
-- The suggestion block must be self-contained and valid when applied in isolation. Do not suggest code that calls a function, method, or variable that does not already exist at that location. If a fix requires changes in multiple places (e.g. extracting a helper and calling it), skip the suggestion block and explain the change as plain text instead.
-- Confirm the API response \`html_url\` is a diff comment with an **Apply suggestion** button.`;
+   COMMENT_ID="$(jq .id /tmp/pr-suggestion-response.json)"
+
+In the suggestion block, provide the full replacement for the selected range. When lines should be removed, omit them from the replacement. Do not suggest code that calls a function, method, or variable that does not already exist at that location; if a fix requires changes in multiple places, skip the block and explain in prose instead.
+
+**Step 4b — Record the suggestion (if the \`record-suggestion\` tool is available).**
+If \`record-suggestion\` is in your toolset, call it immediately with the comment ID, file, line, and risk score. This records the suggestion directly without waiting for the GitHub webhook, giving more reliable analytics. Best-effort: a failure here does not affect the posted comment.
+
+**Step 5 — Verify the anchor (post-hoc read-back, mandatory).**
+   gh api "repos/${owner}/${repo}/pulls/comments/$COMMENT_ID" \\
+     --jq '{path: .path, line: .line, start_line: .start_line, side: .side}'
+
+Confirm that \`path\`, \`line\`, and \`side\` match what you intended and that the comment has an **Apply suggestion** button. If \`line\` is null or \`side\` is not RIGHT, the comment is outdated or mis-anchored — delete it and either re-anchor correctly or downgrade to prose:
+
+   gh api -X DELETE "repos/${owner}/${repo}/pulls/comments/$COMMENT_ID"`;
 }
 
 // Hidden HTML marker that prefixes the review-verdict comment body. Invisible when
@@ -148,7 +194,7 @@ function buildVerdictWorkflow(params: {
    - **Header:** a level-2 heading with a risk badge: \`## <🔵|🟡|🔴> Reef Review — <Low|Medium|High> risk\`. Badge: 🔵 low · 🟡 medium · 🔴 high. **Every verdict is at least Low risk** — Reef is an automated review and never certifies a PR as risk-free, so there is no "clean" / "no risk" badge.
    - **\`### Summary\`** — a one-sentence verdict as a blockquote (\`> …\`), then a count line: \`**<N> finding(s)**\` with a per-severity parenthetical (e.g. \`(1 low, 2 medium, 1 high)\`) when there are findings, then \` · <M> areas reviewed, no concerns.\`. When nothing survived, write \`**No findings.**\` instead of a count — the badge stays 🔵 Low risk (the floor), since "found nothing" is not a guarantee.
    - **\`### Worth a look\`** — only if findings survived the quality bar, highest-risk first. One bullet per finding: \`<🔵|🟡|🔴> \`path:line\` — <the concrete risk in a few words> → [inline](<html_url of the inline comment you posted in step 6>)\`. The dot is the finding's **own severity**, on the same scale as the header badge: 🔵 low · 🟡 medium · 🔴 high. Omit this whole section when nothing survived.
-   - **\`### Docs\`** — only if the pr-doc-sentinel returned findings, one bullet each: \`📝 \`path\` — <what diverged>\`. Omit this section entirely when there is no doc drift.
+   - **\`### Docs\`** — only if the pr-doc-sentinel returned findings, one bullet each: \`📝 \`path\` — <what diverged>\`. Omit this section entirely when there is no doc drift. When this section is present, add one line immediately before the footer: \`*To apply doc fixes: mention Reef with \\\`fix the doc drift above\\\`*\`.
    - **Reviewed, no concerns** — collapsed by default so it doesn't bury the summary. Unlike the sections above, this one has **no \`###\` heading**: the \`<summary>\` line is its title, so do NOT also write a \`### Reviewed, no concerns\` line before the block — that renders the title twice. Use a \`<details>\` block (keep the blank line after \`</summary>\` so the body renders): \`<summary>Reviewed, no concerns</summary>\` followed by a **bullet list, one bullet per area** you checked: \`- **<area>** — <what you verified>\`. Keep each note to a **single short clause** — no nested parentheticals, no chained sub-points; if a note needs more than one clause it probably belongs in "Worth a look" instead. Do NOT collapse the areas into one comma-joined paragraph.
    - Footer line, exactly: \`${footer}\`.
    - Do not invent findings to justify a verdict. A PR with nothing to flag is still 🔵 Low risk: just the header + the \`### Summary\` (with \`**No findings.**\`) + the collapsed "Reviewed, no concerns" \`<details>\` + the footer (no "Worth a look" section). Never emit a "no risk" / "clean" verdict.
@@ -171,6 +217,8 @@ function buildVerdictWorkflow(params: {
 
    ### Docs
    - 📝 \`<path>\` — <what diverged>
+
+   *To apply doc fixes: mention Reef with \`fix the doc drift above\`*
 
    <details>
    <summary>Reviewed, no concerns</summary>
@@ -283,9 +331,12 @@ export function buildCodeReviewPrompt(params: {
 
   const largeDiffSection = largeDiff ? `\n${buildLookoutDiverGuidance()}\n` : "";
 
+  // The first-pass review session is cloned at the repo's DEFAULT branch (not the PR
+  // head) — the prompt must not claim otherwise. Only the re-review path does a
+  // force-sync to the PR head. Access PR content via `gh pr diff` / contents API.
   const worktreeNote = resumed
     ? `This is a RE-REVIEW in an existing session — the PR may have new commits since your last pass. Before reviewing, sync the worktree to the latest PR head: \`gh pr checkout ${number} --force\` (or \`git fetch origin && git reset --hard "origin/${head}"\`). Do not rely on inline suggestions you posted earlier; re-evaluate the current diff from scratch.`
-    : `The repository has been cloned and you are on the PR head branch.`;
+    : `The repository is cloned at its DEFAULT branch (not the PR head). Read PR content via \`gh pr diff ${number}\` and \`gh api repos/${owner}/${repo}/contents/<path>?ref=<headSHA>\` — do NOT assume the working tree is on the PR head branch.`;
 
   return `You are reviewing Pull Request #${number} in ${owner}/${repo}.
 ${worktreeNote}
@@ -366,7 +417,7 @@ export function buildCommentActionPrompt(params: {
   } = params;
 
   const intro = head
-    ? `You are working on Pull Request #${number} in ${owner}/${repo}.\nThe repository has been cloned and you are on the ${head} branch.`
+    ? `You are working on Pull Request #${number} in ${owner}/${repo}.\nThe repository is cloned at its DEFAULT branch (not the PR head) — read PR content via \`gh pr diff ${number}\` and the contents API.`
     : `You are working on Pull Request #${number} in ${owner}/${repo}.`;
 
   let prDetails = "";
@@ -493,7 +544,7 @@ export function buildFailedChecksPrompt(params: {
   });
 
   return `You are fixing failed CI checks for Pull Request #${number} in ${owner}/${repo}.
-The repository has been cloned and you are on the PR head branch.
+The repository has been cloned and you are on the PR head branch (${head}).
 
 ## Iteration
 - This is auto-fix attempt ${attempt} of ${maxAttempts} for this PR.

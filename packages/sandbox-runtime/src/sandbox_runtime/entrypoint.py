@@ -50,8 +50,16 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+# Maps tool filename → env var that gates its installation. A tool is installed
+# only when its env var is set to "true" (case-insensitive). Two naming schemes:
+#   Legacy: AGENT_SLACK_NOTIFY_ENABLED (pre-existing, kept for back-compat)
+#   Generic: AGENT_TOOL_<UPPER_SNAKE> (e.g. "ast-anchor.js" → AGENT_TOOL_AST_ANCHOR_JS)
+#            Set via agentToolFlags in the control-plane session config.
 AGENT_TOOLS_GATED_ON_ENV: dict[str, str] = {
     "slack-notify.js": "AGENT_SLACK_NOTIFY_ENABLED",
+    "ast-anchor.js": "AGENT_TOOL_AST_ANCHOR_JS",
+    "validate-suggestion.js": "AGENT_TOOL_VALIDATE_SUGGESTION_JS",
+    "record-suggestion.js": "AGENT_TOOL_RECORD_SUGGESTION_JS",
 }
 
 # Wrapper installed at /usr/local/bin/gh (ahead of the real /usr/bin/gh in
@@ -1021,6 +1029,13 @@ class SandboxSupervisor:
         opencode_config: dict = {
             "model": f"{provider}/{model}",
             "permission": {"*": {"*": "allow"}},
+            # Enable LSP opportunistically. Useful only after the PR-head checkout fix
+            # and when repo deps are installed; on a first-pass review against the
+            # default branch it adds latency without semantic value.
+            # Never used as a gate — diagnostics surface best-effort via edit/write output.
+            # Only TS/JS gets a bundled server (typescript-language-server@5.3.0);
+            # other languages depend on the target repo's own toolchain.
+            "lsp": True,
         }
 
         # Apply user-supplied OpenCode config (deep-merged on top of system config)

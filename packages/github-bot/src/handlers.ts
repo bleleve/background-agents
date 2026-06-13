@@ -31,6 +31,7 @@ import {
   buildCommentActionPrompt,
   buildFailedChecksPrompt,
   REEF_RISK_MARKER_RE,
+  INLINE_SUGGESTION_PROMPT_VERSION,
 } from "./prompts";
 import { getGitHubConfig, type ResolvedGitHubConfig } from "./utils/integration-config";
 import {
@@ -70,6 +71,7 @@ async function recordReviewSuggestion(
     file?: string | null;
     line?: number | null;
     riskScore?: string | null;
+    promptVersion?: string | null;
   }
 ): Promise<void> {
   try {
@@ -144,6 +146,14 @@ async function createSession(
     prState?: string;
     prHeadRef?: string;
     prBaseRef?: string;
+    /**
+     * When set, the sandbox will clone this branch instead of the repo default.
+     * For read-only review sessions, pass prHeadRef here so the working tree
+     * reflects the PR head (same-repo PRs only; omit for forks to fall back to
+     * the default branch). The control-plane validates against /^[\w.\-/]+$/ —
+     * skip gracefully if the branch name does not match.
+     */
+    cloneBranch?: string;
     planMode?: boolean;
     planModel?: string;
   }
@@ -167,6 +177,12 @@ async function createSession(
     if (params.prState) body.prState = params.prState;
     if (params.prHeadRef) body.prHeadRef = params.prHeadRef;
     if (params.prBaseRef) body.prBaseRef = params.prBaseRef;
+  }
+  // Thread the clone branch so the sandbox checks out the PR head rather than
+  // the repo default. Validated against the control-plane regex — omit if the
+  // name contains characters outside [\w.\-/].
+  if (params.cloneBranch && /^[\w.\-/]+$/.test(params.cloneBranch)) {
+    body.branch = params.cloneBranch;
   }
   if (params.reasoningEffort) {
     body.reasoningEffort = params.reasoningEffort;
@@ -604,6 +620,11 @@ async function runCodeReview(
       prState: params.prState,
       prHeadRef: params.prHeadRef,
       prBaseRef: params.prBaseRef,
+      // Clone the PR head branch so the sandbox tree reflects the PR content.
+      // Only meaningful for same-repo PRs (forks share the same origin but the
+      // head ref lives on a different remote — the regex guard in createSession
+      // accepts the name, but the actual clone will still be remote-correct).
+      cloneBranch: params.prHeadRef,
     });
     // Remember it so a later re-trigger (the `reef: ask for review` label) re-runs in
     // this session instead of spawning a new one.
@@ -1459,6 +1480,7 @@ export async function handleReviewComment(
       // it stand in for `line`, or the metric's line column gets a hunk offset.
       line: comment.line ?? null,
       riskScore,
+      promptVersion: INLINE_SUGGESTION_PROMPT_VERSION,
     });
     return { outcome: "skipped", skip_reason: "recorded_bot_suggestion" };
   }
