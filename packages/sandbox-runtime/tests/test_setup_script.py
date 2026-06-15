@@ -1,6 +1,7 @@
 """Tests for SandboxSupervisor.run_setup_script() and its integration in run()."""
 
 import asyncio
+import signal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sandbox_runtime.entrypoint import SandboxSupervisor
@@ -185,15 +186,25 @@ class TestSetupScriptTimeout:
         sup = _make_supervisor(tmp_path)
         _create_setup_script(sup.repo_path)
         fake_proc = _fake_process()
+        fake_proc.pid = 4321
         fake_proc.communicate = AsyncMock(side_effect=TimeoutError)
 
-        with patch(
-            "asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=fake_proc
+        # Patch os.getpgid/os.killpg so the test exercises the process-group kill
+        # path deterministically without signaling a real group. (A bare MagicMock
+        # pid coerces to 1, which previously made os.killpg target a live process
+        # group on the CI runner and hung the whole suite.)
+        with (
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=fake_proc),
+            patch("os.getpgid", return_value=4321) as mock_getpgid,
+            patch("os.killpg") as mock_killpg,
         ):
             result = await sup.run_setup_script()
 
         assert result is False
-        fake_proc.kill.assert_called_once()
+        # On timeout the hook must kill the whole process group (not just bash) so
+        # background children can't keep the stdout pipe open and block the read.
+        mock_getpgid.assert_called_once_with(4321)
+        mock_killpg.assert_called_once_with(4321, signal.SIGKILL)
         fake_proc.wait.assert_awaited_once()
 
     async def test_default_timeout_1800(self, tmp_path):
