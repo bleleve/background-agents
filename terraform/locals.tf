@@ -2,7 +2,6 @@ locals {
   name_suffix         = var.deployment_name
   use_modal_backend   = var.sandbox_provider == "modal"
   use_daytona_backend = var.sandbox_provider == "daytona"
-  use_vercel_backend  = var.sandbox_provider == "vercel"
 
   # URLs for cross-service configuration
   control_plane_host = "open-inspect-control-plane-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev"
@@ -17,12 +16,7 @@ locals {
   cloudflare_web_app_custom_host         = trimsuffix(trimprefix(local.cloudflare_web_app_custom_url, "https://"), "/")
   cloudflare_web_app_default_workers_url = "https://open-inspect-web-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev"
 
-  # Web app URL depends on deployment platform
-  web_app_url = var.web_platform == "cloudflare" ? (
-    local.has_cloudflare_web_app_custom_domain ? local.cloudflare_web_app_custom_url : local.cloudflare_web_app_default_workers_url
-    ) : (
-    "https://open-inspect-${local.name_suffix}.vercel.app"
-  )
+  web_app_url = local.has_cloudflare_web_app_custom_domain ? local.cloudflare_web_app_custom_url : local.cloudflare_web_app_default_workers_url
 
   # Worker script paths (deterministic output locations)
   control_plane_script_path = "${var.project_root}/packages/control-plane/dist/index.js"

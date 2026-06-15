@@ -24,19 +24,6 @@ variable "cloudflare_worker_subdomain" {
   type        = string
 }
 
-variable "vercel_api_token" {
-  description = "Vercel API token (required only when web_platform = 'vercel'). Do NOT set to empty string — the Vercel provider validates this on init even when no Vercel resources are created. Leave unset to use the built-in dummy token for Cloudflare-only deployments."
-  type        = string
-  sensitive   = true
-  default     = "000000000000000000000000"
-}
-
-variable "vercel_team_id" {
-  description = "Vercel team ID (required only when web_platform = 'vercel'). Leave unset when using Cloudflare."
-  type        = string
-  default     = "unused"
-}
-
 variable "modal_token_id" {
   description = "Modal API token ID"
   type        = string
@@ -328,59 +315,6 @@ variable "daytona_target" {
   default     = ""
 }
 
-variable "vercel_sandbox_token" {
-  description = "Vercel API token for the Vercel Sandbox API"
-  type        = string
-  sensitive   = true
-  default     = ""
-
-  validation {
-    condition     = var.sandbox_provider != "vercel" || length(var.vercel_sandbox_token) > 0
-    error_message = "vercel_sandbox_token must be set when sandbox_provider = 'vercel'."
-  }
-}
-
-variable "vercel_sandbox_project_id" {
-  description = "Vercel project ID used to scope Sandbox API calls"
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = var.sandbox_provider != "vercel" || length(var.vercel_sandbox_project_id) > 0
-    error_message = "vercel_sandbox_project_id must be set when sandbox_provider = 'vercel'."
-  }
-}
-
-variable "vercel_sandbox_team_id" {
-  description = "Optional Vercel team ID used to scope Sandbox API calls"
-  type        = string
-  default     = ""
-}
-
-variable "vercel_sandbox_api_base_url" {
-  description = "Optional Vercel Sandbox API base URL override"
-  type        = string
-  default     = ""
-}
-
-variable "vercel_base_snapshot_id" {
-  description = "Optional manual Vercel Sandbox snapshot ID containing the Open-Inspect base runtime. When set, Terraform skips managed Vercel base snapshot builds."
-  type        = string
-  default     = ""
-}
-
-variable "vercel_sandbox_runtime" {
-  description = "Vercel Sandbox runtime identifier"
-  type        = string
-  default     = "node24"
-}
-
-variable "vercel_snapshot_expiration_ms" {
-  description = "Vercel Sandbox snapshot expiration in milliseconds; 0 means no expiration"
-  type        = number
-  default     = 0
-}
-
 variable "nextauth_secret" {
   description = "NextAuth.js secret (generate with: openssl rand -base64 32)"
   type        = string
@@ -392,29 +326,29 @@ variable "nextauth_secret" {
 # =============================================================================
 
 variable "sandbox_provider" {
-  description = "Sandbox backend for session execution: 'modal', 'daytona', or 'vercel'"
+  description = "Sandbox backend for session execution: 'modal' or 'daytona'"
   type        = string
   default     = "modal"
 
   validation {
-    condition     = contains(["modal", "daytona", "vercel"], var.sandbox_provider)
-    error_message = "sandbox_provider must be 'modal', 'daytona', or 'vercel'."
+    condition     = contains(["modal", "daytona"], var.sandbox_provider)
+    error_message = "sandbox_provider must be 'modal' or 'daytona'."
   }
 }
 
 variable "web_platform" {
-  description = "Platform for the web app deployment: 'vercel' or 'cloudflare' (OpenNext)"
+  description = "Platform for the web app deployment: 'cloudflare' (OpenNext)"
   type        = string
   default     = "cloudflare"
 
   validation {
-    condition     = contains(["vercel", "cloudflare"], var.web_platform)
-    error_message = "web_platform must be 'vercel' or 'cloudflare'."
+    condition     = var.web_platform == "cloudflare"
+    error_message = "web_platform must be 'cloudflare'."
   }
 }
 
 variable "deployment_name" {
-  description = "Unique deployment name used in URLs and resource names. Use something unique like your GitHub username or company name (e.g., 'acme', 'johndoe'). This will create URLs like: open-inspect-{deployment_name}.vercel.app"
+  description = "Unique deployment name used in URLs and resource names. Use something unique like your GitHub username or company name (e.g., 'acme', 'johndoe')."
   type        = string
 }
 
