@@ -148,7 +148,9 @@ function isScmAgnosticRoute(path: string): boolean {
   return (
     /^\/analytics\/(summary|timeseries|breakdown)$/.test(path) ||
     /^\/analytics\/review-suggestions(\/(breakdown|timeseries))?$/.test(path) ||
-    /^\/provider-identities\/github\/[^/]+$/.test(path) ||
+    // Identity upserts are independent of the SCM provider. Only the known auth
+    // providers are agnostic; an unimplemented SCM (e.g. gitlab) still 501s.
+    /^\/provider-identities\/(github|slack|linear|google)\/[^/]+$/.test(path) ||
     /^\/sessions\/[^/]+\/tunnel-urls$/.test(path)
   );
 }

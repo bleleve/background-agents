@@ -51,6 +51,15 @@ describe("model utilities", () => {
       expect(isValidModel("deepseek/deepseek-v4-pro")).toBe(true);
     });
 
+    it("returns true for OpenCode Zen models", () => {
+      expect(isValidModel("opencode/kimi-k2.5")).toBe(true);
+      expect(isValidModel("opencode/kimi-k2.6")).toBe(true);
+      expect(isValidModel("opencode/minimax-m2.5")).toBe(true);
+      expect(isValidModel("opencode/qwen3.7-max")).toBe(true);
+      expect(isValidModel("opencode/glm-5")).toBe(true);
+      expect(isValidModel("opencode/glm-5.1")).toBe(true);
+    });
+
     it("accepts bare GPT model names via normalization", () => {
       expect(isValidModel("gpt-5.4")).toBe(true);
       expect(isValidModel("gpt-5.5")).toBe(true);
@@ -568,6 +577,20 @@ describe("model utilities", () => {
   });
 
   describe("MODEL_OPTIONS", () => {
+    it("includes OpenCode Zen models in an opt-in category", () => {
+      const openCodeZenCategory = MODEL_OPTIONS.find((group) => group.category === "OpenCode Zen");
+
+      expect(openCodeZenCategory?.models.map((model) => model.id)).toEqual([
+        "opencode/kimi-k2.5",
+        "opencode/kimi-k2.6",
+        "opencode/minimax-m2.5",
+        "opencode/qwen3.7-max",
+        "opencode/glm-5",
+        "opencode/glm-5.1",
+      ]);
+      expect(DEFAULT_ENABLED_MODELS).not.toContain("opencode/glm-5.1");
+    });
+
     it("includes DeepSeek models in an opt-in category", () => {
       const deepseekCategory = MODEL_OPTIONS.find((group) => group.category === "DeepSeek");
 
