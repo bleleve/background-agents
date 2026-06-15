@@ -138,12 +138,15 @@ class StructuredLogger:
         exc: BaseException | None = None,
         **kw: Any,
     ) -> None:
-        extra = {
-            **self._context,
-            **kw,
-            "_component": self._component,
-            "_service": self._service,
-        }
+        # Merge context + call-site kwargs, then strip any keys that are
+        # reserved LogRecord attributes.  Passing a reserved name (e.g.
+        # "message", "msg", "args") into logging.Logger.log() via `extra`
+        # raises a KeyError inside makeRecord() — guard against that here
+        # so callers never have to worry about the reserved-name list.
+        merged = {**self._context, **kw}
+        extra: dict[str, Any] = {k: v for k, v in merged.items() if k not in _STANDARD_ATTRS}
+        extra["_component"] = self._component
+        extra["_service"] = self._service
         self._logger.log(
             level,
             event,

@@ -49,8 +49,9 @@ KUBECTL_VERSION = "v1.35.0"
 DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
-# v79: bundle web-tree-sitter + grammars for ast-anchor / validate-suggestion tools
-CACHE_BUSTER = "v79-tree-sitter-suggestion-tools"
+# v80: bundle web-tree-sitter + grammars for ast-anchor / validate-suggestion tools;
+# prebuild langfuse plugin deps to prevent session-create timeout
+CACHE_BUSTER = "v80-tree-sitter-tools-langfuse-prebuild"
 
 # Base image with all development tools
 base_image = (
@@ -241,10 +242,13 @@ base_image = (
     # OpenCode's Npm.install() finds package-lock.json in sync and skips
     # the slow arborist reify() call (2-22s) that would otherwise block
     # the first prompt and exceed the bridge's HTTP timeout.
+    # opencode-plugin-langfuse is included here so its transitive deps are
+    # in the lockfile — without this, OpenCode reifies langfuse at session
+    # creation time, hitting npm registry and causing intermittent ReadTimeout.
     .run_commands(
         "mkdir -p /app/opencode-deps",
         'echo \'{"name":"opencode-tools","type":"module",'
-        '"dependencies":{"@opencode-ai/plugin":"*"}}\''
+        '"dependencies":{"@opencode-ai/plugin":"*","opencode-plugin-langfuse":"latest"}}\''
         " > /app/opencode-deps/package.json",
         "cd /app/opencode-deps && npm install --ignore-scripts --no-audit --no-fund",
     )
