@@ -25,7 +25,6 @@ function createHandler() {
     handler: createMessagesHandler({
       messageService,
       getLog: () => log,
-      getSessionStatus: () => null,
     }),
     messageService,
     log,

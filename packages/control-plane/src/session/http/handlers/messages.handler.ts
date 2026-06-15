@@ -1,9 +1,6 @@
 import type { Logger } from "../../../logger";
 import type { EnqueuePromptRequest, MessageService } from "../../services/message.service";
-import type { SessionStatus } from "../../../types";
 import { parseEventListCursor } from "../../event-cursor";
-
-const TERMINAL_STATUSES = new Set<SessionStatus>(["completed", "archived", "cancelled", "failed"]);
 
 /**
  * Valid event types for filtering.
@@ -33,7 +30,6 @@ const VALID_MESSAGE_STATUSES = ["pending", "processing", "completed", "failed"] 
 export interface MessagesHandlerDeps {
   messageService: MessageService;
   getLog: () => Logger;
-  getSessionStatus: () => SessionStatus | null;
 }
 
 export interface MessagesHandler {
@@ -47,11 +43,6 @@ export interface MessagesHandler {
 export function createMessagesHandler(deps: MessagesHandlerDeps): MessagesHandler {
   return {
     async enqueuePrompt(request: Request): Promise<Response> {
-      const sessionStatus = deps.getSessionStatus();
-      if (sessionStatus !== null && TERMINAL_STATUSES.has(sessionStatus)) {
-        return Response.json({ error: "Session is no longer active" }, { status: 409 });
-      }
-
       try {
         const body = (await request.json()) as EnqueuePromptRequest;
         return Response.json(await deps.messageService.enqueuePrompt(body));
