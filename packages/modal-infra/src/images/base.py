@@ -49,8 +49,8 @@ KUBECTL_VERSION = "v1.35.0"
 DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
-# v81: release notes threading from sandbox skills - repo-agnostic skills
-CACHE_BUSTER = "v81-release-notes-threading"
+# v82: fix hook timeout hang when start.sh spawns background processes
+CACHE_BUSTER = "v82-fix-hook-timeout-hang"
 
 # Base image with all development tools
 base_image = (

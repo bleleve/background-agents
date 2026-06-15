@@ -85,6 +85,7 @@ function createHandler() {
     createSandbox: vi.fn(),
     createParticipant: vi.fn(),
     createArtifact: vi.fn(),
+    createMessage: vi.fn(),
   };
   const getDurableObjectId = vi.fn(() => "session-do-id");
   const encryptToken = vi.fn();
@@ -110,6 +111,8 @@ function createHandler() {
   const sendToSandbox = vi.fn();
   const updateSandboxStatus = vi.fn();
 
+  const createSystemMessage = vi.fn();
+
   const handler = createSessionLifecycleHandler({
     repository,
     getDurableObjectId,
@@ -130,6 +133,7 @@ function createHandler() {
     getSandboxSocket,
     sendToSandbox,
     updateSandboxStatus,
+    createSystemMessage,
   });
 
   return {
@@ -152,6 +156,7 @@ function createHandler() {
     getSandboxSocket,
     sendToSandbox,
     updateSandboxStatus,
+    createSystemMessage,
   };
 }
 

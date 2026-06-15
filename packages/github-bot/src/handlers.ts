@@ -286,6 +286,10 @@ function getReviewSessionKey(repoFullName: string, prNumber: number): string {
   return `review-session:${repoFullName}:${prNumber}`;
 }
 
+function getReviewSessionPrevKey(repoFullName: string, prNumber: number): string {
+  return `review-session-prev:${repoFullName}:${prNumber}`;
+}
+
 async function rememberReviewSession(
   env: Env,
   repoFullName: string,
@@ -644,6 +648,12 @@ async function runCodeReview(
       review_model: params.model,
     });
   } else {
+    // Look up any previous failed session before creating the new one, so we
+    // can supersede it once we have the new session ID.
+    const prevSessionId = await env.GITHUB_KV.get(
+      getReviewSessionPrevKey(repoFullName, params.prNumber)
+    );
+
     sessionId = await createSession(env.CONTROL_PLANE, headers, {
       repoOwner: params.owner,
       repoName: params.repoName,
@@ -672,6 +682,32 @@ async function runCodeReview(
       action: params.actionLabel,
       review_model: params.model,
     });
+
+    // Supersede the previous failed session: inject a system notice and archive
+    // it so it disappears from the active list and can no longer receive prompts.
+    // Best-effort and fire-and-forget — a failure here must never block the review.
+    if (prevSessionId) {
+      const newSessionUrl = `${env.WEB_APP_URL}/session/${sessionId}`;
+      env.CONTROL_PLANE.fetch(`https://internal/sessions/${prevSessionId}/supersede`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ newSessionId: sessionId, newSessionUrl }),
+      }).then(
+        (res) =>
+          log.debug(res.ok ? "prev_session.superseded" : "prev_session.supersede_failed", {
+            ...params.meta,
+            prev_session_id: prevSessionId,
+            status: res.status,
+          }),
+        (err) =>
+          log.debug("prev_session.supersede_error", {
+            ...params.meta,
+            prev_session_id: prevSessionId,
+            error: err instanceof Error ? err.message : String(err),
+          })
+      );
+      env.GITHUB_KV.delete(getReviewSessionPrevKey(repoFullName, params.prNumber)).catch(() => {});
+    }
   }
 
   const largeDiff = await isLargeDiff(ghToken, params.owner, params.repoName, params.prNumber);
