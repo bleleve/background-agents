@@ -692,7 +692,7 @@ class TestStashLocalChanges:
         assert result is True
         supervisor.log.info.assert_called_once_with(
             "git.stash_created",
-            message="Saved working directory and index state WIP on main",
+            stash_output="Saved working directory and index state WIP on main",
         )
 
     @pytest.mark.asyncio

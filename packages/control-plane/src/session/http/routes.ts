@@ -33,6 +33,7 @@ export interface SessionInternalRouteHandlers {
   openaiTokenRefresh: SessionInternalRouteHandler;
   scmCredentials: SessionInternalRouteHandler;
   bootProgress: SessionInternalRouteHandler;
+  tunnelUrls: SessionInternalRouteHandler;
   spawnContext: SessionInternalRouteHandler;
   childSummary: SessionInternalRouteHandler;
   cancel: SessionInternalRouteHandler;
@@ -105,6 +106,7 @@ export function createSessionInternalRoutes(
       path: SessionInternalPaths.bootProgress,
       handler: handlers.bootProgress,
     },
+    { method: "GET", path: SessionInternalPaths.tunnelUrls, handler: handlers.tunnelUrls },
     { method: "GET", path: SessionInternalPaths.spawnContext, handler: handlers.spawnContext },
     { method: "GET", path: SessionInternalPaths.childSummary, handler: handlers.childSummary },
     { method: "POST", path: SessionInternalPaths.cancel, handler: handlers.cancel },

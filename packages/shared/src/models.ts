@@ -28,6 +28,8 @@ export const VALID_MODELS = [
   "opencode/minimax-m2.5",
   "opencode/glm-5",
   "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.6",
+  "deepseek/deepseek-v4-flash",
+  "deepseek/deepseek-v4-pro",
 ] as const;
 
 export type ValidModel = (typeof VALID_MODELS)[number];
@@ -260,6 +262,13 @@ export const MODEL_OPTIONS: ModelCategory[] = [
         name: "Kimi K2.6",
         description: "Cloudflare Workers AI",
       },
+    ],
+  },
+  {
+    category: "DeepSeek",
+    models: [
+      { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash", description: "Fast model" },
+      { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro", description: "Most capable" },
     ],
   },
 ];
