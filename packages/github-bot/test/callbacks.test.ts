@@ -44,7 +44,10 @@ function createMockEnv(): Env {
     INTERNAL_CALLBACK_SECRET: SECRET,
     APP_NAME: "Reef-Test",
     WEB_APP_URL: "https://reef.test",
-    GITHUB_KV: { delete: vi.fn().mockResolvedValue(undefined) },
+    GITHUB_KV: {
+      delete: vi.fn().mockResolvedValue(undefined),
+      put: vi.fn().mockResolvedValue(undefined),
+    },
   } as unknown as Env;
 }
 

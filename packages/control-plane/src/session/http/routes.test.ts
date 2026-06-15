@@ -40,6 +40,7 @@ describe("createSessionInternalRoutes", () => {
       listPlans: noopHandler(),
       approvePlan: noopHandler(),
       rejectPlan: noopHandler(),
+      supersede: noopHandler(),
     });
 
     const methodPathSet = new Set(routes.map((route) => `${route.method} ${route.path}`));
@@ -77,6 +78,7 @@ describe("createSessionInternalRoutes", () => {
         `GET ${SessionInternalPaths.plans}`,
         `POST ${SessionInternalPaths.planApprove}`,
         `POST ${SessionInternalPaths.planReject}`,
+        `POST ${SessionInternalPaths.supersede}`,
       ])
     );
   });

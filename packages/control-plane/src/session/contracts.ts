@@ -33,6 +33,7 @@ export const SessionInternalPaths = {
   plans: "/internal/plans",
   planApprove: "/internal/plan/approve",
   planReject: "/internal/plan/reject",
+  supersede: "/internal/supersede",
 } as const;
 
 export type SessionInternalPath = (typeof SessionInternalPaths)[keyof typeof SessionInternalPaths];

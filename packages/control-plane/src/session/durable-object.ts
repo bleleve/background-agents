@@ -221,6 +221,7 @@ export class SessionDO extends DurableObject<Env> {
     updateTitle: (request) => this.sessionLifecycleHandler.updateTitle(request),
     archive: (request) => this.sessionLifecycleHandler.archive(request),
     unarchive: (request) => this.sessionLifecycleHandler.unarchive(request),
+    supersede: (request) => this.sessionLifecycleHandler.supersede(request),
     verifySandboxToken: (request) => this.sandboxHandler.verifySandboxToken(request),
     openaiTokenRefresh: () => this.sandboxHandler.openaiTokenRefresh(),
     scmCredentials: () => this.sandboxHandler.scmCredentials(),
@@ -403,6 +404,7 @@ export class SessionDO extends DurableObject<Env> {
       this._messagesHandler = createMessagesHandler({
         messageService: this.messageService,
         getLog: () => this.log,
+        getSessionStatus: () => this.getSession()?.status ?? null,
       });
     }
 
@@ -611,6 +613,20 @@ export class SessionDO extends DurableObject<Env> {
               actorDisplayName,
             })
           );
+        },
+        createSystemMessage: (content: string) => {
+          let systemParticipant = this.participantService.getByUserId(SYSTEM_USER_ID);
+          if (!systemParticipant) {
+            systemParticipant = this.participantService.create(SYSTEM_USER_ID, SYSTEM_DISPLAY_NAME);
+          }
+          this.repository.createMessage({
+            id: generateId(),
+            authorId: systemParticipant.id,
+            content,
+            source: "system",
+            status: "completed",
+            createdAt: Date.now(),
+          });
         },
       });
     }

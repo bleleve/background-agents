@@ -54,7 +54,7 @@ interface InitRequest {
 export interface SessionLifecycleHandlerDeps {
   repository: Pick<
     SessionRepository,
-    "upsertSession" | "createSandbox" | "createParticipant" | "createArtifact"
+    "upsertSession" | "createSandbox" | "createParticipant" | "createArtifact" | "createMessage"
   >;
   getDurableObjectId: () => string;
   tokenEncryptionKey?: string;
@@ -88,6 +88,13 @@ export interface SessionLifecycleHandlerDeps {
     actorAuthorId: string | null;
     actorDisplayName?: string | null;
   }) => void;
+  /**
+   * Inject a completed system message into the session's message history.
+   * Used to annotate a session before archiving it (e.g. supersession notice).
+   * The message is stored with status "completed" so it is never processed by
+   * the agent.
+   */
+  createSystemMessage: (content: string) => void;
 }
 
 function sessionTitleUpdateStatus(
@@ -110,6 +117,7 @@ export interface SessionLifecycleHandler {
   archive: (request: Request) => Promise<Response>;
   unarchive: (request: Request) => Promise<Response>;
   cancel: () => Promise<Response>;
+  supersede: (request: Request) => Promise<Response>;
 }
 
 function parseUserIdBody(body: unknown): { userId?: string; actorDisplayName?: string } {
@@ -392,6 +400,30 @@ export function createSessionLifecycleHandler(
       }
 
       return Response.json({ status: "cancelled" });
+    },
+
+    async supersede(request: Request): Promise<Response> {
+      const session = deps.getSession();
+      if (!session) {
+        return Response.json({ error: "Session not found" }, { status: 404 });
+      }
+
+      let body: { newSessionId?: string; newSessionUrl?: string };
+      try {
+        body = (await request.json()) as { newSessionId?: string; newSessionUrl?: string };
+      } catch {
+        body = {};
+      }
+
+      const noticeContent =
+        body.newSessionUrl && body.newSessionId
+          ? `This review session was superseded — a new review session was started: [View new session](${body.newSessionUrl}).`
+          : "This review session was superseded. A new review session was started to replace it.";
+
+      deps.createSystemMessage(noticeContent);
+      await deps.transitionSessionStatus("archived");
+
+      return Response.json({ status: "superseded" });
     },
   };
 }

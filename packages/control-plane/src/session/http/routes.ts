@@ -43,6 +43,7 @@ export interface SessionInternalRouteHandlers {
   listPlans: SessionInternalRouteHandler;
   approvePlan: SessionInternalRouteHandler;
   rejectPlan: SessionInternalRouteHandler;
+  supersede: SessionInternalRouteHandler;
 }
 
 /**
@@ -120,5 +121,6 @@ export function createSessionInternalRoutes(
     { method: "GET", path: SessionInternalPaths.plans, handler: handlers.listPlans },
     { method: "POST", path: SessionInternalPaths.planApprove, handler: handlers.approvePlan },
     { method: "POST", path: SessionInternalPaths.planReject, handler: handlers.rejectPlan },
+    { method: "POST", path: SessionInternalPaths.supersede, handler: handlers.supersede },
   ];
 }
