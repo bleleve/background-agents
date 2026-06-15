@@ -235,13 +235,29 @@ beforeEach(() => {
   vi.mocked(dismissPullRequestReview).mockResolvedValue(true);
   vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig });
   // Default PR-details fetch: small diff, so review handlers see largeDiff=false.
+  // Includes head/base (and head.repo for fork detection) so handlers that resolve
+  // a clone branch from fetched PR details (e.g. handleIssueComment) work.
   // Tests that need a large diff (or check-suite details) override this per test.
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ number: 42, additions: 1, deletions: 1, changed_files: 1 }), {
-        status: 200,
-      })
+      new Response(
+        JSON.stringify({
+          number: 42,
+          title: "Test PR",
+          body: null,
+          html_url: "https://github.com/acme/widgets/pull/42",
+          state: "open",
+          draft: false,
+          user: { login: "pr-author" },
+          head: { ref: "feature/cache", sha: "abc123", repo: { full_name: "acme/widgets" } },
+          base: { ref: "main", repo: { private: true, full_name: "acme/widgets" } },
+          additions: 1,
+          deletions: 1,
+          changed_files: 1,
+        }),
+        { status: 200 }
+      )
     )
   );
 });

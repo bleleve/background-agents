@@ -68,7 +68,7 @@ export interface PullRequestOpenedPayload {
     html_url: string;
     state: string;
     user: { login: string };
-    head: { ref: string; sha: string };
+    head: { ref: string; sha: string; repo?: { full_name: string } };
     base: { ref: string };
     draft: boolean;
     labels?: Array<{ name: string }>;
@@ -87,7 +87,7 @@ export interface PullRequestLabeledPayload {
     html_url: string;
     state: string;
     user: { login: string };
-    head: { ref: string; sha: string };
+    head: { ref: string; sha: string; repo?: { full_name: string } };
     base: { ref: string };
     draft: boolean;
     labels?: Array<{ name: string }>;
@@ -105,7 +105,7 @@ export interface ReviewRequestedPayload {
     html_url: string;
     state: string;
     user: { login: string };
-    head: { ref: string; sha: string };
+    head: { ref: string; sha: string; repo?: { full_name: string } };
     base: { ref: string };
     labels?: Array<{ name: string }>;
   };
@@ -140,7 +140,7 @@ export interface ReviewCommentPayload {
     title: string;
     html_url: string;
     state: string;
-    head: { ref: string; sha: string };
+    head: { ref: string; sha: string; repo?: { full_name: string } };
     base: { ref: string };
     labels?: Array<{ name: string }>;
   };
