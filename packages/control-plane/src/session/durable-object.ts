@@ -404,7 +404,6 @@ export class SessionDO extends DurableObject<Env> {
       this._messagesHandler = createMessagesHandler({
         messageService: this.messageService,
         getLog: () => this.log,
-        getSessionStatus: () => this.getSession()?.status ?? null,
       });
     }
 
