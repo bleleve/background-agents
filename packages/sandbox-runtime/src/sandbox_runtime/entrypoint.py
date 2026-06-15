@@ -26,6 +26,7 @@ import httpx
 from .constants import (
     CODE_SERVER_PORT,
     EXPECTED_TUNNEL_PORTS_ENV_VAR,
+    SANDBOX_ENV_FILE_PATH,
     TTYD_PORT,
     TTYD_PROXY_PORT,
     TUNNEL_ENV_FILE_PATH,
@@ -1473,7 +1474,48 @@ class SandboxSupervisor:
         """Build environment for startup hooks."""
         env = os.environ.copy()
         env["OPENINSPECT_BOOT_MODE"] = self.boot_mode
+        # Use filesystem polling rather than inotify: Modal container kernels often
+        # have low inotify watch limits, causing Next.js/webpack to miss file changes.
+        # setdefault so repos can opt out by explicitly setting these to "false".
+        env.setdefault("WATCHPACK_POLLING", "true")
+        env.setdefault("CHOKIDAR_USEPOLLING", "true")
         return env
+
+    def _persist_hook_env(self) -> None:
+        """Write a shell-sourceable snapshot of the hook environment to SANDBOX_ENV_FILE_PATH.
+
+        Merges the base hook env with any tunnel URLs already present in
+        TUNNEL_ENV_FILE_PATH, then writes the result as `export KEY='value'`
+        lines.  Agents can `source /workspace/.env.sandbox` before restarting
+        a service to recover sandbox-injected vars (tunnel URLs, repo secrets,
+        polling flags) that would otherwise be lost in a fresh shell.
+        """
+        import shlex
+
+        env = self._hook_env()
+
+        tunnel_path = Path(TUNNEL_ENV_FILE_PATH)
+        if tunnel_path.exists():
+            try:
+                for line in tunnel_path.read_text().splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, _, value = line.partition("=")
+                        env[key.strip()] = value.strip()
+            except Exception as e:
+                self.log.warn("sandbox_env.tunnel_read_failed", path=str(tunnel_path), exc=e)
+
+        sandbox_env_path = Path(SANDBOX_ENV_FILE_PATH)
+        try:
+            lines = [f"export {key}={shlex.quote(value)}" for key, value in sorted(env.items())]
+            sandbox_env_path.write_text("\n".join(lines) + "\n")
+            self.log.info(
+                "sandbox_env.persisted",
+                path=str(sandbox_env_path),
+                count=len(env),
+            )
+        except Exception as e:
+            self.log.warn("sandbox_env.persist_failed", path=str(sandbox_env_path), exc=e)
 
     async def _run_hook(
         self,
@@ -1812,6 +1854,10 @@ class SandboxSupervisor:
             start_success: bool | None = None
             if self.boot_mode != "build":
                 await self._wait_for_tunnel_env_file(expected_tunnel_ports)
+                # Persist the full hook environment (tunnel URLs + repo secrets +
+                # polling flags) so agents can `source /workspace/.env.sandbox`
+                # when restarting services without losing sandbox configuration.
+                self._persist_hook_env()
                 start_success = await self.run_start_script()
                 if not start_success:
                     raise RuntimeError("start hook failed")
