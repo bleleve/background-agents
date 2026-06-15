@@ -403,7 +403,7 @@ class SandboxSupervisor:
             return False
         stash_output = stdout.decode().strip()
         if stash_output and stash_output != "No local changes to stash":
-            self.log.info("git.stash_created", message=stash_output)
+            self.log.info("git.stash_created", stash_output=stash_output)
         return True
 
     async def _checkout_branch(self, branch: str) -> bool:

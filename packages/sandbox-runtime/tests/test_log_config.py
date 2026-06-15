@@ -166,6 +166,29 @@ class TestStructuredLogger:
         record = _capture_log(log, sandbox_id="sb-override")
         assert record["sandbox_id"] == "sb-override"
 
+    def test_reserved_logrecord_key_does_not_raise(self):
+        """Passing a reserved LogRecord key (e.g. 'message') must not raise KeyError.
+
+        Python's logging.makeRecord() raises KeyError when `extra` contains a
+        key that collides with a built-in LogRecord attribute such as 'message'.
+        StructuredLogger._log() must silently drop such keys rather than
+        propagating the error.
+        """
+        log = get_logger("reserved-key-test")
+        # This previously raised: KeyError: "Attempt to overwrite 'message' in LogRecord"
+        record = _capture_log(log, message="stash output text")
+        # The reserved key is silently dropped; the event name is still present.
+        assert record["event"] == "test.event"
+        # The 'message' kwarg must NOT appear in output (it was dropped).
+        assert "message" not in record
+
+    def test_reserved_key_msg_does_not_raise(self):
+        """'msg' is also a reserved LogRecord attribute."""
+        log = get_logger("reserved-key-msg")
+        record = _capture_log(log, msg="some message")
+        assert record["event"] == "test.event"
+        assert "msg" not in record
+
 
 class TestConfigureLogging:
     def test_configures_root_logger(self):
