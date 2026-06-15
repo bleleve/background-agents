@@ -77,6 +77,7 @@ const SANDBOX_AUTH_ROUTES: RegExp[] = [
   /^\/sessions\/[^/]+\/pr-review$/, // Formal PR review submission from sandbox (policy-checked)
   /^\/sessions\/[^/]+\/openai-token-refresh$/, // OpenAI token refresh from sandbox
   /^\/sessions\/[^/]+\/scm-credentials$/, // SCM credential broker for git credential helper
+  /^\/sessions\/[^/]+\/tunnel-urls$/, // Tunnel URL fetch for sandboxes whose .tunnels.env write isn't visible from inside
   /^\/sessions\/[^/]+\/media$/, // Media upload from sandbox
   /^\/sessions\/[^/]+\/children$/, // POST spawn, GET list
   /^\/sessions\/[^/]+\/children\/[^/]+$/, // GET child detail
@@ -145,7 +146,8 @@ function isScmAgnosticRoute(path: string): boolean {
   return (
     /^\/analytics\/(summary|timeseries|breakdown)$/.test(path) ||
     /^\/analytics\/review-suggestions(\/(breakdown|timeseries))?$/.test(path) ||
-    /^\/provider-identities\/github\/[^/]+$/.test(path)
+    /^\/provider-identities\/github\/[^/]+$/.test(path) ||
+    /^\/sessions\/[^/]+\/tunnel-urls$/.test(path)
   );
 }
 
