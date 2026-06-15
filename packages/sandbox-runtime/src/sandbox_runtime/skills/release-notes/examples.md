@@ -19,7 +19,16 @@ fix: sync is_processing flag with sandbox lifecycle
 docs: document automations webhook setup
 ```
 
-**Output (Slack mrkdwn):**
+**Output — thread root** (top-level, first release today):
+
+```
+*Release Notes — acme/my-app*
+2026-06-13 09:15 UTC
+Production — Ships automations last-run tracking, sandbox status, and processing-state sync fix.
+<https://github.com/acme/my-app/pull/142|Release PR #142>
+```
+
+**Output — full release note** (thread reply):
 
 ```
 *Release Notes — acme/my-app*
@@ -102,3 +111,35 @@ Adds session processing flag and sandbox status to the sessions index.
 
 <https://github.com/acme/my-app/pull/155|Release PR #155>
 ```
+
+---
+
+## Example 4 — Slack threading (second release same repo, same day)
+
+**Context:** `acme/my-app` already has a production release thread today in the releases channel the
+user indicated. The anchor message has `messageTs` `1718287200.123456`. A second production release
+merges later the same day.
+
+**Output (Slack mrkdwn)** — full release note only; post as thread reply (same Phase 3 template as
+Example 1):
+
+```
+*Release Notes — acme/my-app*
+:rocket: *Production release*
+
+Hotfix for automations webhook retry on timeout.
+
+*What changed*
+• Fixed automations webhook retry when the upstream times out
+
+<https://github.com/acme/my-app/pull/148|Release PR #148>
+```
+
+**Post as thread reply** (not a new channel message):
+
+```
+slack-notify channel="ops-releases" thread_ts="1718287200.123456" text="..."
+```
+
+**First release of the day** posts the minimal thread root top-level, then the full note as the
+first reply. A release for `acme/other-app` the same day starts a separate thread with its own root.

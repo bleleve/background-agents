@@ -50,7 +50,7 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
 # v71: keep opencode-ai pinned and add ffmpeg for MP4 browser recordings
-CACHE_BUSTER = "v79-release-notes-skill"
+CACHE_BUSTER = "v80-release-notes-threading"
 
 # Base image with all development tools
 base_image = (
