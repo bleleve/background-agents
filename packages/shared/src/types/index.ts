@@ -488,6 +488,7 @@ export interface InstallationRepository {
   description: string | null;
   private: boolean;
   defaultBranch: string;
+  archived: boolean;
   language?: string | null;
   topics?: string[];
 }

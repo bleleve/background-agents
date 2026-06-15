@@ -25,10 +25,11 @@ export const VALID_MODELS = [
   "openai/gpt-5.3-codex",
   "openai/gpt-5.3-codex-spark",
   "opencode/kimi-k2.5",
+  "opencode/kimi-k2.6",
   "opencode/minimax-m2.5",
+  "opencode/qwen3.7-max",
   "opencode/glm-5",
-  "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.6",
-  "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code",
+  "opencode/glm-5.1",
   "deepseek/deepseek-v4-flash",
   "deepseek/deepseek-v4-pro",
 ] as const;
@@ -251,23 +252,11 @@ export const MODEL_OPTIONS: ModelCategory[] = [
     category: "OpenCode Zen",
     models: [
       { id: "opencode/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
+      { id: "opencode/kimi-k2.6", name: "Kimi K2.6", description: "Moonshot AI" },
       { id: "opencode/minimax-m2.5", name: "MiniMax M2.5", description: "MiniMax" },
+      { id: "opencode/qwen3.7-max", name: "Qwen3.7 Max", description: "Alibaba Cloud" },
       { id: "opencode/glm-5", name: "GLM 5", description: "Z.ai 744B MoE" },
-    ],
-  },
-  {
-    category: "Cloudflare",
-    models: [
-      {
-        id: "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.6",
-        name: "Kimi K2.6",
-        description: "Cloudflare Workers AI",
-      },
-      {
-        id: "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code",
-        name: "Kimi K2.7",
-        description: "Cloudflare Workers AI",
-      },
+      { id: "opencode/glm-5.1", name: "GLM 5.1", description: "Z.ai" },
     ],
   },
   {
