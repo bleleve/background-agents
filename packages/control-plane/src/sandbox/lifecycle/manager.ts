@@ -404,16 +404,29 @@ export class SandboxLifecycleManager {
       ]);
       const { provider, model: modelId } = this.resolveProviderAndModel(session);
 
-      // Look up pre-built repo image (graceful fallback on failure)
+      // Look up pre-built repo image (graceful fallback on failure).
+      // Images are built on the default branch. When a session targets a
+      // non-default branch (e.g. a PR head), first try an exact branch match,
+      // then fall back to the most recent image regardless of branch so the
+      // sandbox can do a fast git-switch instead of a full cold clone.
       let repoImageId: string | null = null;
       let repoImageSha: string | null = null;
       if (this.repoImageLookup) {
         try {
-          const repoImage = await this.repoImageLookup.getLatestReady(
+          let repoImage = await this.repoImageLookup.getLatestReady(
             session.repo_owner,
             session.repo_name,
-            session.base_branch
+            session.base_branch ?? undefined
           );
+          if (!repoImage) {
+            // No branch-specific image — fall back to any ready image for this
+            // repo (typically the default-branch snapshot). The entrypoint will
+            // do a git fetch + checkout to the target branch on top of it.
+            repoImage = await this.repoImageLookup.getLatestReady(
+              session.repo_owner,
+              session.repo_name
+            );
+          }
           if (repoImage) {
             repoImageId = repoImage.provider_image_id;
             repoImageSha = repoImage.base_sha;

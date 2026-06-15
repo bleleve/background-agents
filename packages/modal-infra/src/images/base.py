@@ -49,8 +49,9 @@ KUBECTL_VERSION = "v1.35.0"
 DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
-# v71: keep opencode-ai pinned and add ffmpeg for MP4 browser recordings
-CACHE_BUSTER = "v79-langfuse-prebuild-deps"
+# v80: bundle web-tree-sitter + grammars for ast-anchor / validate-suggestion tools;
+# prebuild langfuse plugin deps to prevent session-create timeout
+CACHE_BUSTER = "v80-tree-sitter-tools-langfuse-prebuild"
 
 # Base image with all development tools
 base_image = (
@@ -230,6 +231,9 @@ base_image = (
         "npm install -g oxlint@latest",
         "oxlint --version",
         "npm install -g typescript-language-server@5.3.0",
+        # web-tree-sitter (WASM) + grammars for ast-anchor / validate-suggestion tools.
+        # Pinned for ABI stability; grammars ship prebuilt .wasm files (no native compile).
+        "npm install -g web-tree-sitter@^0.25.10 tree-sitter-typescript tree-sitter-ruby",
         # Langfuse OpenCode plugin (loaded when LANGFUSE_* env vars are provided)
         "npm install -g opencode-plugin-langfuse@latest",
     )

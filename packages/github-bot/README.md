@@ -121,7 +121,7 @@ access model and can authenticate auxiliary private repos on the configured SCM 
 | `pull_request`                | `review_requested`   | Compatibility event path                                                                            | `handleReviewRequested`      |
 | `pull_request`                | `labeled`            | `reef: ask for review` added                                                                        | `handlePullRequestLabeled`   |
 | `issue_comment`               | `created`            | @mention in a PR comment                                                                            | `handleIssueComment`         |
-| `pull_request_review_comment` | `created`            | @mention in a review thread                                                                         | `handleReviewComment`        |
+| `pull_request_review_comment` | `created`            | @mention in a review thread; bot's own comments are recorded as suggestions (webhook fallback path) | `handleReviewComment`        |
 | `pull_request_review_thread`  | `resolved`           | Review thread resolved                                                                              | `handleReviewThreadResolved` |
 | `pull_request_review`         | `submitted`,`edited` | Bot submitted a formal APPROVED/CHANGES_REQUESTED review on a no-auto-approve repo (auto-dismissed) | `handlePullRequestReview`    |
 
