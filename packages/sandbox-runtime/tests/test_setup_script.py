@@ -186,8 +186,6 @@ class TestSetupScriptTimeout:
         _create_setup_script(sup.repo_path)
         fake_proc = _fake_process()
         fake_proc.communicate = AsyncMock(side_effect=TimeoutError)
-        fake_proc.stdout = MagicMock()
-        fake_proc.stdout.read = AsyncMock(return_value=b"partial output\n")
 
         with patch(
             "asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=fake_proc

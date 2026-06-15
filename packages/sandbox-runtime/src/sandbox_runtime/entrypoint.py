@@ -1578,13 +1578,31 @@ class SandboxSupervisor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 env=self._hook_env(),
+                # Put the hook in its own process group so that killing it on
+                # timeout also reaps background children (e.g. dev servers started
+                # by start.sh that would otherwise keep the pipe write-end open,
+                # causing process.stdout.read() to block indefinitely).
+                start_new_session=True,
             )
 
             try:
                 stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
             except TimeoutError:
-                process.kill()
-                stdout = await process.stdout.read() if process.stdout else b""
+                # Kill the entire process group, not just bash. Background
+                # processes spawned by the hook inherit the pipe's write fd; if
+                # only bash is killed they keep the pipe open and any subsequent
+                # read() blocks forever.
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except OSError:
+                    # Process or group already gone, or insufficient permissions
+                    # (e.g. restricted test environments). Fall back to killing
+                    # just the process itself.
+                    process.kill()
+                # Do NOT read from process.stdout here — orphaned children may
+                # still hold the write end open. We have no usable data anyway
+                # since communicate() was cancelled.
+                stdout = b""
                 await process.wait()
                 output_tail = "\n".join(stdout.decode(errors="replace").splitlines()[-50:])
                 duration_ms = int((time.time() - start_time) * 1000)
