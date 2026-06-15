@@ -122,6 +122,17 @@ export async function handleCompleteCallback(
     () => log.debug("review_label.clear_failed", meta)
   );
 
+  // When the session failed, evict the review-session KV entry so a re-trigger
+  // spawns a fresh session rather than reusing the dead one (which would cause
+  // sendPrompt to fail and the retry loop to never make progress).
+  if (!payload.success) {
+    const reviewKey = `review-session:${owner.toLowerCase()}/${repo.toLowerCase()}:${prNumber}`;
+    env.GITHUB_KV.delete(reviewKey).then(
+      () => log.debug("review_session_kv.cleared", meta),
+      () => log.debug("review_session_kv.clear_failed", meta)
+    );
+  }
+
   const existing = await findIssueCommentByMarker(
     token,
     owner,
