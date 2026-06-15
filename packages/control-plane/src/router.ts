@@ -29,6 +29,7 @@ import { handleBootProgress } from "./routes/boot-progress";
 import { handleSlackNotify } from "./routes/slack-notify";
 import { prReviewRoutes } from "./routes/pr-review";
 import { reviewSuggestionRoutes } from "./routes/review-suggestions";
+import { recordSuggestionRoutes } from "./routes/record-suggestion";
 import { webhookRoutes } from "./webhooks";
 
 const logger = createLogger("router");
@@ -82,6 +83,7 @@ const SANDBOX_AUTH_ROUTES: RegExp[] = [
   /^\/sessions\/[^/]+\/children$/, // POST spawn, GET list
   /^\/sessions\/[^/]+\/children\/[^/]+$/, // GET child detail
   /^\/sessions\/[^/]+\/children\/[^/]+\/cancel$/, // POST cancel child
+  /^\/sessions\/[^/]+\/record-suggestion$/, // Inline review suggestion recorded directly by agent
   /^\/sessions\/[^/]+\/slack-notify$/, // Agent-initiated Slack notification
   /^\/sessions\/[^/]+\/boot-progress$/, // Supervisor boot-progress ping during setup
   /^\/sessions\/[^/]+\/plan$/, // Agent-saved plan artifact (POST/GET)
@@ -337,6 +339,10 @@ const routes: Route[] = [
     pattern: parsePattern("/sessions/:id/plan/reject"),
     handler: handleRejectPlan,
   },
+
+  // Inline review suggestion recorded directly by the agent tool (sandbox-authenticated).
+  // INSERT OR IGNORE on comment_id makes this idempotent with the webhook fallback path.
+  ...recordSuggestionRoutes,
 
   // Agent-initiated Slack notification (sandbox-authenticated)
   {

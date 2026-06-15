@@ -66,6 +66,14 @@ export interface CreateSandboxRequest {
   branch?: string;
   codeServerEnabled?: boolean;
   agentSlackNotifyEnabled?: boolean;
+  /**
+   * Generic map of per-tool feature flags. Each entry maps a tool filename
+   * (e.g. "ast-anchor.js") to a boolean; true means the tool is installed in
+   * the sandbox. Keys are converted to AGENT_TOOL_<UPPER_SNAKE> env vars and
+   * read by AGENT_TOOLS_GATED_ON_ENV in entrypoint.py. Takes precedence over
+   * the legacy agentSlackNotifyEnabled for new tools.
+   */
+  agentToolFlags?: Record<string, boolean>;
   mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
   opencodeUserConfig?: string;
@@ -97,6 +105,7 @@ export interface RestoreSandboxRequest {
   branch?: string;
   codeServerEnabled?: boolean;
   agentSlackNotifyEnabled?: boolean;
+  agentToolFlags?: Record<string, boolean>;
   mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
   opencodeUserConfig?: string;
@@ -263,6 +272,7 @@ export class ModalClient {
           branch: request.branch || null,
           code_server_enabled: request.codeServerEnabled ?? false,
           agent_slack_notify_enabled: request.agentSlackNotifyEnabled ?? false,
+          agent_tool_flags: request.agentToolFlags ?? null,
           mcp_servers: request.mcpServers || null,
           sandbox_settings: request.sandboxSettings ?? null,
           opencode_user_config: request.opencodeUserConfig ?? null,
@@ -345,6 +355,7 @@ export class ModalClient {
           timeout_seconds: request.timeoutSeconds || null,
           code_server_enabled: request.codeServerEnabled ?? false,
           agent_slack_notify_enabled: request.agentSlackNotifyEnabled ?? false,
+          agent_tool_flags: request.agentToolFlags ?? null,
           sandbox_settings: request.sandboxSettings ?? null,
           opencode_user_config: request.opencodeUserConfig ?? null,
         }),

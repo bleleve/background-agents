@@ -834,7 +834,12 @@ export interface AnalyticsBreakdownResponse {
 // repo/model/risk). `resolved` is the count of resolved review threads — a WEAK
 // proxy that conflates "applied" and "dismissed", never an acceptance/quality rate.
 
-export const REVIEW_SUGGESTION_BREAKDOWN_BY = ["repo", "model", "risk_score"] as const;
+export const REVIEW_SUGGESTION_BREAKDOWN_BY = [
+  "repo",
+  "model",
+  "risk_score",
+  "prompt_version",
+] as const;
 export type ReviewSuggestionBreakdownBy = (typeof REVIEW_SUGGESTION_BREAKDOWN_BY)[number];
 
 export interface ReviewSuggestionsSummaryResponse {

@@ -31,6 +31,7 @@ import {
   buildCommentActionPrompt,
   buildFailedChecksPrompt,
   REEF_RISK_MARKER_RE,
+  INLINE_SUGGESTION_PROMPT_VERSION,
 } from "./prompts";
 import { getGitHubConfig, type ResolvedGitHubConfig } from "./utils/integration-config";
 import {
@@ -45,6 +46,36 @@ import {
 export type HandlerResult =
   | { outcome: "processed"; session_id: string; message_id: string; handler_action: string }
   | { outcome: "skipped"; skip_reason: string };
+
+// Control plane validates branch names with this same regex — omit if it wouldn't pass.
+const BRANCH_NAME_RE = /^[\w.\-/]+$/;
+
+/**
+ * Resolve the branch the sandbox should clone for a PR session — the PR head ref,
+ * but only when it is safe to fetch from the base repo's origin:
+ *
+ * - **Fork PRs return undefined.** A fork's head ref does not exist on the base
+ *   repo's origin, so `git fetch origin <ref>` would fail. Falling back to the
+ *   default branch is correct: the agent still reviews the right diff via
+ *   `gh pr diff` (GitHub API), it just reads out-of-diff context from the base.
+ * - **Invalid branch names return undefined.** Mirrors the control-plane regex so
+ *   a name with characters outside [\w.\-/] degrades gracefully to the default
+ *   branch instead of hard-failing session creation.
+ *
+ * `headRepoFullName` is undefined when the payload omits it (older webhook shapes);
+ * in that case we assume same-repo, matching prior behavior.
+ */
+function prCloneBranch(
+  headRef: string,
+  headRepoFullName: string | undefined,
+  baseRepoFullName: string
+): string | undefined {
+  if (headRepoFullName && headRepoFullName.toLowerCase() !== baseRepoFullName.toLowerCase()) {
+    return undefined;
+  }
+  if (!BRANCH_NAME_RE.test(headRef)) return undefined;
+  return headRef;
+}
 
 async function getAuthHeaders(env: Env, traceId: string): Promise<Record<string, string>> {
   return {
@@ -70,6 +101,7 @@ async function recordReviewSuggestion(
     file?: string | null;
     line?: number | null;
     riskScore?: string | null;
+    promptVersion?: string | null;
   }
 ): Promise<void> {
   try {
@@ -144,6 +176,14 @@ async function createSession(
     prState?: string;
     prHeadRef?: string;
     prBaseRef?: string;
+    /**
+     * When set, the sandbox will clone this branch instead of the repo default.
+     * For read-only review sessions, pass prHeadRef here so the working tree
+     * reflects the PR head (same-repo PRs only; omit for forks to fall back to
+     * the default branch). The control-plane validates against /^[\w.\-/]+$/ —
+     * skip gracefully if the branch name does not match.
+     */
+    cloneBranch?: string;
     planMode?: boolean;
     planModel?: string;
   }
@@ -167,6 +207,12 @@ async function createSession(
     if (params.prState) body.prState = params.prState;
     if (params.prHeadRef) body.prHeadRef = params.prHeadRef;
     if (params.prBaseRef) body.prBaseRef = params.prBaseRef;
+  }
+  // Thread the clone branch so the sandbox checks out the PR head rather than
+  // the repo default. Validated against the control-plane regex — omit if the
+  // name contains characters outside [\w.\-/].
+  if (params.cloneBranch && /^[\w.\-/]+$/.test(params.cloneBranch)) {
+    body.branch = params.cloneBranch;
   }
   if (params.reasoningEffort) {
     body.reasoningEffort = params.reasoningEffort;
@@ -389,10 +435,12 @@ interface GitHubPullRequestDetails {
   body: string | null;
   html_url: string;
   user: { login: string };
-  head: { ref: string; sha: string };
+  // `head.repo.full_name` lets us detect fork PRs (head repo ≠ base repo) so we
+  // don't try to clone a head ref that isn't on the base origin.
+  head: { ref: string; sha: string; repo?: { full_name: string } };
   // `base.repo.private` lets the internal review endpoint (which has no webhook
   // payload) resolve repo visibility for the prompt's untrusted-content guidance.
-  base: { ref: string; repo?: { private: boolean } };
+  base: { ref: string; repo?: { private: boolean; full_name?: string } };
   draft: boolean;
   state: string;
   additions?: number;
@@ -555,6 +603,12 @@ interface RunCodeReviewParams {
   scmAvatarUrl: string;
   actionLabel: ReviewActionLabel;
   /**
+   * Branch to clone on sandbox boot — the fork-aware PR head ref (see
+   * {@link prCloneBranch}). Undefined for fork PRs / invalid names, which fall
+   * back to the repo default branch.
+   */
+  cloneBranch?: string;
+  /**
    * When set, re-run the review in this existing session (a fresh prompt/turn)
    * instead of creating a new one. Used by the re-trigger paths so a re-review
    * stays in the same session/thread.
@@ -604,6 +658,10 @@ async function runCodeReview(
       prState: params.prState,
       prHeadRef: params.prHeadRef,
       prBaseRef: params.prBaseRef,
+      // Clone the PR head branch so the sandbox tree reflects the PR content.
+      // Resolved fork-aware by each caller (forks → undefined → default branch),
+      // since a fork's head ref is not fetchable from the base repo's origin.
+      cloneBranch: params.cloneBranch,
     });
     // Remember it so a later re-trigger (the `reef: ask for review` label) re-runs in
     // this session instead of spawning a new one.
@@ -758,6 +816,7 @@ export async function handleReviewRequested(
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
     actionLabel: "review",
+    cloneBranch: prCloneBranch(pr.head.ref, pr.head.repo?.full_name, repoFullName),
     meta,
   });
 }
@@ -857,6 +916,7 @@ export async function handlePullRequestOpened(
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
     actionLabel: "auto_review",
+    cloneBranch: prCloneBranch(pr.head.ref, pr.head.repo?.full_name, repoFullName),
     meta,
   });
 }
@@ -965,6 +1025,7 @@ export async function handlePullRequestLabeled(
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
     actionLabel: "rereview",
+    cloneBranch: prCloneBranch(pr.head.ref, pr.head.repo?.full_name, repoFullName),
     existingSessionId,
     meta,
   });
@@ -1071,6 +1132,7 @@ export async function handleReviewRequestInternal(
     scmUserId: String(req.requestedBy.id),
     scmAvatarUrl: req.requestedBy.avatarUrl ?? "",
     actionLabel: "rereview",
+    cloneBranch: prCloneBranch(details.head.ref, details.head.repo?.full_name, repoFullName),
     // Re-run in the session the button was clicked from (no new session).
     existingSessionId: req.sessionId,
     meta,
@@ -1357,6 +1419,18 @@ export async function handleIssueComment(
   const planModel = planMode ? await resolvePlanModel(env, issueLabels) : undefined;
   const commentBody = rawCommentBody;
 
+  // issue_comment payloads don't carry the PR's branch refs, so fetch them to
+  // clone the PR head (fork-aware) instead of the repo default. Best-effort: on
+  // failure the session falls back to the default branch (review still works via
+  // `gh pr diff`), so we log and continue rather than aborting the @mention.
+  const prDetails = await fetchPullRequestDetails(ghToken, owner, repoName, issue.number);
+  if (!prDetails) {
+    log.warn("handler.issue_comment_pr_fetch_failed", {
+      trace_id: traceId,
+      issue_number: issue.number,
+    });
+  }
+
   const meta = { trace_id: traceId, repo: repoFullName, pull_number: issue.number };
   fireAndForgetReaction(
     log,
@@ -1376,9 +1450,14 @@ export async function handleIssueComment(
     scmUserId: String(sender.id),
     scmAvatarUrl: sender.avatar_url,
     prNumber: issue.number,
-    // issue_comment carries the PR's html_url/state but not its branches.
     prUrl: issue.html_url,
     prState: issue.state,
+    // Branch refs come from the PR fetch above (issue_comment payloads omit them).
+    prHeadRef: prDetails?.head?.ref,
+    prBaseRef: prDetails?.base?.ref,
+    cloneBranch: prDetails
+      ? prCloneBranch(prDetails.head.ref, prDetails.head.repo?.full_name, repoFullName)
+      : undefined,
     planMode,
     planModel,
   });
@@ -1459,6 +1538,7 @@ export async function handleReviewComment(
       // it stand in for `line`, or the metric's line column gets a hunk offset.
       line: comment.line ?? null,
       riskScore,
+      promptVersion: INLINE_SUGGESTION_PROMPT_VERSION,
     });
     return { outcome: "skipped", skip_reason: "recorded_bot_suggestion" };
   }
@@ -1531,6 +1611,7 @@ export async function handleReviewComment(
     prState: pr.state,
     prHeadRef: pr.head.ref,
     prBaseRef: pr.base.ref,
+    cloneBranch: prCloneBranch(pr.head.ref, pr.head.repo?.full_name, repoFullName),
   });
   log.info("session.created", { ...meta, session_id: sessionId, action: "review_comment" });
 
