@@ -32,6 +32,7 @@ export const VALID_MODELS = [
   "opencode/glm-5.1",
   "deepseek/deepseek-v4-flash",
   "deepseek/deepseek-v4-pro",
+  "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code",
 ] as const;
 
 export type ValidModel = (typeof VALID_MODELS)[number];
@@ -245,6 +246,16 @@ export const MODEL_OPTIONS: ModelCategory[] = [
         id: "openai/gpt-5.3-codex-spark",
         name: "GPT 5.3 Codex Spark",
         description: "Low-latency codex variant",
+      },
+    ],
+  },
+  {
+    category: "Cloudflare",
+    models: [
+      {
+        id: "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code",
+        name: "Kimi K2.7",
+        description: "Cloudflare Workers AI",
       },
     ],
   },
