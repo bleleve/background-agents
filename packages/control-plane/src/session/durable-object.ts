@@ -96,6 +96,7 @@ import {
   createPullRequestHandler,
   type PullRequestHandler,
 } from "./http/handlers/pull-request.handler";
+import { createPrStateHandler, type PrStateHandler } from "./http/handlers/pr-state.handler";
 import {
   createParticipantsHandler,
   type ParticipantsHandler,
@@ -196,6 +197,8 @@ export class SessionDO extends DurableObject<Env> {
   private _sessionLifecycleHandler: SessionLifecycleHandler | null = null;
   // Pull request handler (lazily initialized)
   private _pullRequestHandler: PullRequestHandler | null = null;
+  // PR state handler (lazily initialized)
+  private _prStateHandler: PrStateHandler | null = null;
   // Participants handler (lazily initialized)
   private _participantsHandler: ParticipantsHandler | null = null;
   // Alarm handler (lazily initialized)
@@ -218,6 +221,7 @@ export class SessionDO extends DurableObject<Env> {
     listArtifacts: (_request, url) => this.messagesHandler.listArtifacts(url),
     listMessages: (_request, url) => this.messagesHandler.listMessages(url),
     createPr: (request) => this.pullRequestHandler.createPr(request),
+    updatePrState: (request) => this.prStateHandler.updatePrState(request),
     wsToken: (request) => this.wsTokenHandler.generateWsToken(request),
     updateTitle: (request) => this.sessionLifecycleHandler.updateTitle(request),
     archive: (request) => this.sessionLifecycleHandler.archive(request),
@@ -673,6 +677,17 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     return this._pullRequestHandler;
+  }
+
+  private get prStateHandler(): PrStateHandler {
+    if (!this._prStateHandler) {
+      this._prStateHandler = createPrStateHandler({
+        repository: this.repository,
+        broadcast: (message) => this.broadcast(message),
+        parseArtifactMetadata: (artifact) => this.parseArtifactMetadata(artifact),
+      });
+    }
+    return this._prStateHandler;
   }
 
   private get participantsHandler(): ParticipantsHandler {
