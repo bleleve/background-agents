@@ -317,7 +317,8 @@ describe("SessionSandboxEventProcessor", () => {
     expect(h.repository.updateMessageCompletion).toHaveBeenCalledWith(
       "msg-1",
       "completed",
-      expect.any(Number)
+      expect.any(Number),
+      null
     );
     expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_event", event });
     expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });

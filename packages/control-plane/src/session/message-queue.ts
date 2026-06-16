@@ -325,13 +325,13 @@ export class SessionMessageQueue {
     const processingMessage = this.deps.repository.getProcessingMessage();
 
     if (processingMessage) {
-      this.deps.repository.updateMessageCompletion(processingMessage.id, "failed", now);
+      const stopError = "Execution was stopped";
+      this.deps.repository.updateMessageCompletion(processingMessage.id, "failed", now, stopError);
       this.deps.log.info("prompt.stopped", {
         event: "prompt.stopped",
         message_id: processingMessage.id,
       });
 
-      const stopError = "Execution was stopped";
       const syntheticExecutionComplete: Extract<SandboxEvent, { type: "execution_complete" }> = {
         type: "execution_complete",
         messageId: processingMessage.id,
@@ -394,9 +394,9 @@ export class SessionMessageQueue {
       this.deps.repository.getProcessingMessage() ?? this.deps.repository.getNextPendingMessage();
     if (!stuckMessage) return;
 
-    this.deps.repository.updateMessageCompletion(stuckMessage.id, "failed", now);
-
     const { reason, error } = resolveProcessingFailure(failure);
+    this.deps.repository.updateMessageCompletion(stuckMessage.id, "failed", now, error);
+
     const syntheticEvent: Extract<SandboxEvent, { type: "execution_complete" }> = {
       type: "execution_complete",
       messageId: stuckMessage.id,

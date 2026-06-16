@@ -1007,8 +1007,7 @@ export class SandboxLifecycleManager {
       this.broadcaster.broadcast({ type: "sandbox_status", status: "failed" });
       this.broadcaster.broadcast({
         type: "sandbox_error",
-        error:
-          "Sandbox failed to connect within the allowed time. It will be retried on your next message.",
+        error: "Sandbox failed to connect within the allowed time. Resend your prompt to retry.",
       });
       return;
     }

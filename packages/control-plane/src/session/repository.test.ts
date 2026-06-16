@@ -576,7 +576,14 @@ describe("SessionRepository", () => {
       expect(mock.calls.length).toBe(1);
       expect(mock.calls[0].query).toContain("status = ?");
       expect(mock.calls[0].query).toContain("completed_at");
-      expect(mock.calls[0].params).toEqual(["completed", 3000, "msg-1"]);
+      expect(mock.calls[0].query).toContain("error_message");
+      expect(mock.calls[0].params).toEqual(["completed", 3000, null, "msg-1"]);
+    });
+
+    it("persists the error message when failing", () => {
+      repo.updateMessageCompletion("msg-2", "failed", 4000, "boom");
+
+      expect(mock.calls[0].params).toEqual(["failed", 4000, "boom", "msg-2"]);
     });
   });
 
