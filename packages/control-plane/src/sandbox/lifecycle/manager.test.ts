@@ -418,7 +418,7 @@ describe("SandboxLifecycleManager", () => {
       ).toBe(false);
     });
 
-    it("schedules connecting timeout alarm after spawn", async () => {
+    it("arms the connecting timeout alarm before and after the provider call", async () => {
       const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
       const storage = createMockStorage(createMockSession(), sandbox);
       const alarmScheduler = createMockAlarmScheduler();
@@ -438,10 +438,15 @@ describe("SandboxLifecycleManager", () => {
       await manager.spawnSandbox();
       const after = Date.now();
 
-      expect(alarmScheduler.alarms.length).toBe(1);
-      const scheduledTime = alarmScheduler.alarms[0];
-      expect(scheduledTime).toBeGreaterThanOrEqual(before + config.connectingTimeout.timeoutMs);
-      expect(scheduledTime).toBeLessThanOrEqual(after + config.connectingTimeout.timeoutMs);
+      // The watchdog is armed twice: once before the (awaited) provider call so
+      // a hung createSandbox can't leave the sandbox "spawning" forever, and
+      // again after a successful connect. Both target the connecting-timeout
+      // deadline.
+      expect(alarmScheduler.alarms.length).toBe(2);
+      for (const scheduledTime of alarmScheduler.alarms) {
+        expect(scheduledTime).toBeGreaterThanOrEqual(before + config.connectingTimeout.timeoutMs);
+        expect(scheduledTime).toBeLessThanOrEqual(after + config.connectingTimeout.timeoutMs);
+      }
     });
 
     it("passes user env vars to provider", async () => {
