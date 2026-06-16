@@ -302,7 +302,8 @@ describe("SessionMessageQueue", () => {
     expect(h.repository.updateMessageCompletion).toHaveBeenCalledWith(
       "msg-9",
       "failed",
-      expect.any(Number)
+      expect.any(Number),
+      "Execution was stopped"
     );
     expect(h.repository.upsertExecutionCompleteEvent).toHaveBeenCalledWith(
       "msg-9",

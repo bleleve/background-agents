@@ -67,10 +67,13 @@ function isPrReviewContext(context: unknown): context is GitHubCallbackContext {
  * delete it before posting the fresh verdict, and is explicit that it's a
  * fallback (risk not assessed) so it's never mistaken for the agent's analysis.
  */
-function buildFallbackVerdict(success: boolean, sessionUrl?: string): string {
+function buildFallbackVerdict(success: boolean, sessionUrl?: string, error?: string): string {
+  const reason = error?.trim();
   const line = success
     ? "Risk not assessed — the automated reviewer completed but did not emit a structured verdict. See any inline comments on this PR."
-    : "Risk unknown — the automated review did not finish.";
+    : reason
+      ? `Risk unknown — the automated review did not finish: ${reason}`
+      : "Risk unknown — the automated review did not finish.";
   const sessionLink = sessionUrl ? ` · [session](${sessionUrl})` : "";
   return `${REEF_VERDICT_MARKER}
 ## ⚪ Reef Review — risk not assessed
@@ -165,7 +168,11 @@ export async function handleCompleteCallback(
     owner,
     repo,
     prNumber,
-    buildFallbackVerdict(payload.success, `${env.WEB_APP_URL}/session/${payload.sessionId}`),
+    buildFallbackVerdict(
+      payload.success,
+      `${env.WEB_APP_URL}/session/${payload.sessionId}`,
+      payload.error
+    ),
     userAgent
   );
   if (commentId === null) {
