@@ -67,6 +67,7 @@ type ProcessingFailureReason =
   | "heartbeat_stale"
   | "inactivity_timeout"
   | "connecting_timeout"
+  | "sandbox_disconnected"
   | (string & {});
 
 type ProcessingFailure = {
@@ -79,6 +80,8 @@ const FAILURE_REASON_TO_ERROR: Record<ProcessingFailureReason, string> = {
   heartbeat_stale: "Execution interrupted: sandbox heartbeat timed out",
   inactivity_timeout: "Execution interrupted: sandbox stopped due to inactivity",
   connecting_timeout: "Execution interrupted: sandbox failed to connect",
+  sandbox_disconnected:
+    "Execution interrupted: the sandbox disconnected before completing the turn",
 };
 
 function resolveProcessingFailure(failure: ProcessingFailureReason | ProcessingFailure): {
@@ -377,31 +380,40 @@ export class SessionMessageQueue {
     failure: ProcessingFailureReason | ProcessingFailure = "execution_timeout"
   ): Promise<void> {
     const now = Date.now();
-    const processingMessage = this.deps.repository.getProcessingMessage();
-    if (!processingMessage) return;
+    // Fall back to a queued-but-undispatched message. When a sandbox never
+    // connects (e.g. connecting_timeout), the prompt that triggered the spawn
+    // is still PENDING — never promoted to processing — so a processing-only
+    // check leaves the session orphaned as "active"/"created" forever (the
+    // dominant "stuck" mode for unattended automations). This method is only
+    // invoked by watchdogs (onSandboxTerminating) and on a clean sandbox
+    // disconnect, i.e. genuine terminal failures, so failing a pending message
+    // here is safe and never races a still-progressing turn.
+    const stuckMessage =
+      this.deps.repository.getProcessingMessage() ?? this.deps.repository.getNextPendingMessage();
+    if (!stuckMessage) return;
 
-    this.deps.repository.updateMessageCompletion(processingMessage.id, "failed", now);
+    this.deps.repository.updateMessageCompletion(stuckMessage.id, "failed", now);
 
     const { reason, error } = resolveProcessingFailure(failure);
     const syntheticEvent: Extract<SandboxEvent, { type: "execution_complete" }> = {
       type: "execution_complete",
-      messageId: processingMessage.id,
+      messageId: stuckMessage.id,
       success: false,
       error,
       sandboxId: "",
       timestamp: now / 1000,
     };
-    this.deps.repository.upsertExecutionCompleteEvent(processingMessage.id, syntheticEvent, now);
+    this.deps.repository.upsertExecutionCompleteEvent(stuckMessage.id, syntheticEvent, now);
     this.deps.log.warn("prompt.fail_processing", {
       event: "prompt.fail_processing",
-      message_id: processingMessage.id,
+      message_id: stuckMessage.id,
       reason,
       error,
     });
     this.deps.broadcast({ type: "sandbox_event", event: syntheticEvent });
     this.deps.broadcast({ type: "processing_status", isProcessing: false });
     this.deps.ctx.waitUntil(
-      this.deps.callbackService.notifyComplete(processingMessage.id, false, error)
+      this.deps.callbackService.notifyComplete(stuckMessage.id, false, error)
     );
     await this.deps.reconcileSessionStatusAfterExecution(false);
   }

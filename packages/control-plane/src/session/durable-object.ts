@@ -1212,6 +1212,16 @@ export class SessionDO extends DurableObject<Env> {
         const isNormalClose = code === 1000 || code === 1001;
         if (isNormalClose) {
           this.updateSandboxStatus("stopped");
+          // A clean close (1000/1001) means the bridge shut down and will not
+          // reconnect. If a turn was still in flight, the execution_complete
+          // event never arrived — fail it now. Otherwise is_processing stays
+          // true and the UI shows "Thinking…" forever (confirmed in prod: live
+          // sessions with sandbox_status=stopped + is_processing=1).
+          if (this.getIsProcessing()) {
+            await this.messageQueue.failStuckProcessingMessage({
+              reason: "sandbox_disconnected",
+            });
+          }
         } else {
           // Abnormal close (e.g., 1006): leave status unchanged so the bridge can reconnect.
           // Schedule a heartbeat check to detect truly dead sandboxes.

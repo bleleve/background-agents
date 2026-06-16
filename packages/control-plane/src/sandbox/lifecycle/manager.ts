@@ -391,6 +391,15 @@ export class SandboxLifecycleManager {
       });
       this.broadcaster.broadcast({ type: "sandbox_status", status: "spawning" });
 
+      // Arm the connecting-timeout watchdog BEFORE the (awaited) provider call.
+      // createSandbox can hang (network/provider stall); if it never returns we
+      // would never reach the post-spawn scheduleAlarm() below, leaving the
+      // sandbox "spawning" forever. evaluateConnectingTimeout() measures from
+      // created_at (set just above) and covers the "spawning" state, so this
+      // fires at created_at + connectingTimeout even if createSandbox hangs.
+      // On a successful connect it is naturally superseded by the inactivity alarm.
+      await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+
       this.log.info("Spawning sandbox", {
         event: "sandbox.spawn",
         expected_sandbox_id: expectedSandboxId,
