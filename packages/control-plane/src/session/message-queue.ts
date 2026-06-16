@@ -370,11 +370,13 @@ export class SessionMessageQueue {
   }
 
   /**
-   * Fail a stuck processing message (defense-in-depth for execution timeout).
+   * Fail a stuck or in-flight message when the sandbox can no longer complete it.
    *
-   * Only marks the message as failed and broadcasts — does NOT send a stop command
-   * to the sandbox or call processMessageQueue(). This avoids races where a new
-   * prompt could be dispatched to a sandbox being shut down.
+   * Handles both processing messages (mid-turn when the sandbox disconnects or
+   * times out) and queued-but-undispatched messages (sandbox never connected).
+   * Only marks the message as failed and broadcasts — does NOT send a stop
+   * command to the sandbox or call processMessageQueue(). This avoids races
+   * where a new prompt could be dispatched to a sandbox being shut down.
    */
   async failStuckProcessingMessage(
     failure: ProcessingFailureReason | ProcessingFailure = "execution_timeout"
