@@ -1699,6 +1699,60 @@ class TestSubtaskStreaming:
         assert token_events[0]["content"] == "Recovered from sub-task error"
 
     @pytest.mark.asyncio
+    async def test_subtask_error_does_not_fail_parent_turn(
+        self, bridge: AgentBridge, opencode_message_id: str, monkeypatch
+    ):
+        """A child-session error is forwarded but must NOT mark the parent turn
+        failed: execution_complete should still report success=True."""
+        sent_events: list[dict] = []
+
+        async def _capture(event):
+            sent_events.append(event)
+
+        async def _noop(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(bridge, "_send_event", _capture)
+        monkeypatch.setattr(bridge, "_configure_git_identity", _noop)
+
+        http_client = bridge.http_client
+        http_client.sse_events = [
+            create_sse_event("server.connected", {}),
+            create_sse_event(
+                "message.updated",
+                {
+                    "info": {
+                        "id": "oc-msg-1",
+                        "role": "assistant",
+                        "sessionID": "oc-session-123",
+                        "parentID": opencode_message_id,
+                    }
+                },
+            ),
+            create_sse_event(
+                "session.created",
+                {"info": {"id": "child-1", "parentID": "oc-session-123"}},
+            ),
+            create_sse_event(
+                "session.error",
+                {"sessionID": "child-1", "error": {"data": {"message": "Sub-task failed"}}},
+            ),
+            create_sse_event("session.idle", {"sessionID": "oc-session-123"}),
+        ]
+
+        await bridge._handle_prompt({"messageId": "cp-msg-1", "content": "Test prompt"})
+
+        completes = [e for e in sent_events if e["type"] == "execution_complete"]
+        assert len(completes) == 1
+        assert completes[0]["success"] is True
+        assert "error" not in completes[0]
+
+        # The sub-task error is still forwarded to the client for visibility.
+        errors = [e for e in sent_events if e["type"] == "error"]
+        assert len(errors) == 1
+        assert errors[0]["isSubtask"] is True
+
+    @pytest.mark.asyncio
     async def test_child_message_buffering_race_condition(
         self, bridge: AgentBridge, opencode_message_id: str
     ):

@@ -296,6 +296,13 @@ export type SandboxEvent =
       messageId: string;
       sandboxId: string;
       timestamp: number;
+      /**
+       * True when the error originates from a child/sub-task session rather than
+       * the parent turn. Sub-task errors are surfaced for visibility but must
+       * NOT be treated as terminal — the parent stream keeps running and can
+       * still complete successfully.
+       */
+      isSubtask?: boolean;
     }
   | {
       type: "execution_complete";

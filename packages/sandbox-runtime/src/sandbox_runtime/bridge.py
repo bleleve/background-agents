@@ -797,7 +797,11 @@ class AgentBridge:
             async for event in self._stream_opencode_response_sse(
                 message_id, content, model, reasoning_effort
             ):
-                if event.get("type") == "error":
+                # A sub-task (child session) error must NOT fail the parent turn:
+                # it is forwarded to the client for visibility, but the parent
+                # stream keeps going and can still finish successfully. Only a
+                # parent-session error (no isSubtask flag) marks the turn failed.
+                if event.get("type") == "error" and not event.get("isSubtask"):
                     had_error = True
                     error_message = event.get("error")
                 if plan_mode and event.get("type") == "token":
