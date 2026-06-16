@@ -784,11 +784,17 @@ export class SessionRepository {
     );
   }
 
-  updateMessageCompletion(messageId: string, status: MessageStatus, completedAt: number): void {
+  updateMessageCompletion(
+    messageId: string,
+    status: MessageStatus,
+    completedAt: number,
+    errorMessage?: string | null
+  ): void {
     this.sql.exec(
-      `UPDATE messages SET status = ?, completed_at = ? WHERE id = ?`,
+      `UPDATE messages SET status = ?, completed_at = ?, error_message = ? WHERE id = ?`,
       status,
       completedAt,
+      errorMessage ?? null,
       messageId
     );
   }

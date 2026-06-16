@@ -391,6 +391,15 @@ export class SandboxLifecycleManager {
       });
       this.broadcaster.broadcast({ type: "sandbox_status", status: "spawning" });
 
+      // Arm the connecting-timeout watchdog BEFORE the (awaited) provider call.
+      // createSandbox can hang (network/provider stall); if it never returns we
+      // would never reach the post-spawn scheduleAlarm() below, leaving the
+      // sandbox "spawning" forever. evaluateConnectingTimeout() measures from
+      // created_at (set just above) and covers the "spawning" state, so this
+      // fires at created_at + connectingTimeout even if createSandbox hangs.
+      // On a successful connect it is naturally superseded by the inactivity alarm.
+      await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+
       this.log.info("Spawning sandbox", {
         event: "sandbox.spawn",
         expected_sandbox_id: expectedSandboxId,
@@ -404,16 +413,29 @@ export class SandboxLifecycleManager {
       ]);
       const { provider, model: modelId } = this.resolveProviderAndModel(session);
 
-      // Look up pre-built repo image (graceful fallback on failure)
+      // Look up pre-built repo image (graceful fallback on failure).
+      // Images are built on the default branch. When a session targets a
+      // non-default branch (e.g. a PR head), first try an exact branch match,
+      // then fall back to the most recent image regardless of branch so the
+      // sandbox can do a fast git-switch instead of a full cold clone.
       let repoImageId: string | null = null;
       let repoImageSha: string | null = null;
       if (this.repoImageLookup) {
         try {
-          const repoImage = await this.repoImageLookup.getLatestReady(
+          let repoImage = await this.repoImageLookup.getLatestReady(
             session.repo_owner,
             session.repo_name,
-            session.base_branch
+            session.base_branch ?? undefined
           );
+          if (!repoImage) {
+            // No branch-specific image — fall back to any ready image for this
+            // repo (typically the default-branch snapshot). The entrypoint will
+            // do a git fetch + checkout to the target branch on top of it.
+            repoImage = await this.repoImageLookup.getLatestReady(
+              session.repo_owner,
+              session.repo_name
+            );
+          }
           if (repoImage) {
             repoImageId = repoImage.provider_image_id;
             repoImageSha = repoImage.base_sha;
@@ -985,8 +1007,7 @@ export class SandboxLifecycleManager {
       this.broadcaster.broadcast({ type: "sandbox_status", status: "failed" });
       this.broadcaster.broadcast({
         type: "sandbox_error",
-        error:
-          "Sandbox failed to connect within the allowed time. It will be retried on your next message.",
+        error: "Sandbox failed to connect within the allowed time. Resend your prompt to retry.",
       });
       return;
     }

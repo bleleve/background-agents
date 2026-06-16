@@ -215,6 +215,17 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       envVars.AGENT_SLACK_NOTIFY_ENABLED = "true";
     }
 
+    if (config.agentToolFlags) {
+      for (const [toolFile, enabled] of Object.entries(config.agentToolFlags)) {
+        if (enabled) {
+          // Convert "ast-anchor.js" → "AGENT_TOOL_AST_ANCHOR_JS"; entrypoint.py
+          // reads these via AGENT_TOOLS_GATED_ON_ENV which maps filename → env var.
+          const envKey = `AGENT_TOOL_${toolFile.replace(/[^a-zA-Z0-9]/g, "_").toUpperCase()}`;
+          envVars[envKey] = "true";
+        }
+      }
+    }
+
     if (this.providerConfig.scmProvider === "gitlab") {
       envVars.VCS_HOST = "gitlab.com";
       envVars.VCS_CLONE_USERNAME = "oauth2";

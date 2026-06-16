@@ -30,6 +30,7 @@ describe("createSessionInternalRoutes", () => {
       openaiTokenRefresh: noopHandler(),
       scmCredentials: noopHandler(),
       bootProgress: noopHandler(),
+      tunnelUrls: noopHandler(),
       spawnContext: noopHandler(),
       childSummary: noopHandler(),
       cancel: noopHandler(),
@@ -39,6 +40,7 @@ describe("createSessionInternalRoutes", () => {
       listPlans: noopHandler(),
       approvePlan: noopHandler(),
       rejectPlan: noopHandler(),
+      supersede: noopHandler(),
     });
 
     const methodPathSet = new Set(routes.map((route) => `${route.method} ${route.path}`));
@@ -66,6 +68,7 @@ describe("createSessionInternalRoutes", () => {
         `POST ${SessionInternalPaths.openaiTokenRefresh}`,
         `POST ${SessionInternalPaths.scmCredentials}`,
         `POST ${SessionInternalPaths.bootProgress}`,
+        `GET ${SessionInternalPaths.tunnelUrls}`,
         `GET ${SessionInternalPaths.spawnContext}`,
         `GET ${SessionInternalPaths.childSummary}`,
         `POST ${SessionInternalPaths.cancel}`,
@@ -75,6 +78,7 @@ describe("createSessionInternalRoutes", () => {
         `GET ${SessionInternalPaths.plans}`,
         `POST ${SessionInternalPaths.planApprove}`,
         `POST ${SessionInternalPaths.planReject}`,
+        `POST ${SessionInternalPaths.supersede}`,
       ])
     );
   });

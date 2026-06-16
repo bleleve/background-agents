@@ -1,6 +1,7 @@
 """Tests for SandboxSupervisor.run_start_script() and strict startup integration."""
 
 import asyncio
+import signal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sandbox_runtime.entrypoint import SandboxSupervisor
@@ -148,17 +149,25 @@ class TestStartScriptTimeout:
         sup = _make_supervisor(tmp_path)
         _create_start_script(sup.repo_path)
         fake_proc = _fake_process()
+        fake_proc.pid = 4321
         fake_proc.communicate = AsyncMock(side_effect=TimeoutError)
-        fake_proc.stdout = MagicMock()
-        fake_proc.stdout.read = AsyncMock(return_value=b"partial output\n")
 
-        with patch(
-            "asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=fake_proc
+        # Patch os.getpgid/os.killpg so the test exercises the process-group kill
+        # path deterministically without signaling a real group. (A bare MagicMock
+        # pid coerces to 1, which previously made os.killpg target a live process
+        # group on the CI runner and hung the whole suite.)
+        with (
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=fake_proc),
+            patch("os.getpgid", return_value=4321) as mock_getpgid,
+            patch("os.killpg") as mock_killpg,
         ):
             result = await sup.run_start_script()
 
         assert result is False
-        fake_proc.kill.assert_called_once()
+        # On timeout the hook must kill the whole process group (not just bash) so
+        # background children can't keep the stdout pipe open and block the read.
+        mock_getpgid.assert_called_once_with(4321)
+        mock_killpg.assert_called_once_with(4321, signal.SIGKILL)
         fake_proc.wait.assert_awaited_once()
 
     async def test_default_timeout_120(self, tmp_path):
@@ -205,6 +214,130 @@ class TestStartScriptTimeout:
             await sup.run_start_script()
 
         assert captured_timeout["value"] == 45
+
+
+class TestHookEnvPollingVars:
+    """_hook_env() sets filesystem-polling vars for dev server reliability."""
+
+    def test_watchpack_polling_set_by_default(self, tmp_path):
+        sup = _make_supervisor(tmp_path)
+        sup.boot_mode = "fresh"
+        with patch.dict("os.environ", {}, clear=False):
+            env = sup._hook_env()
+        assert env.get("WATCHPACK_POLLING") == "true"
+
+    def test_chokidar_usepolling_set_by_default(self, tmp_path):
+        sup = _make_supervisor(tmp_path)
+        sup.boot_mode = "fresh"
+        with patch.dict("os.environ", {}, clear=False):
+            env = sup._hook_env()
+        assert env.get("CHOKIDAR_USEPOLLING") == "true"
+
+    def test_repo_can_override_watchpack_polling(self, tmp_path):
+        sup = _make_supervisor(tmp_path)
+        sup.boot_mode = "fresh"
+        with patch.dict("os.environ", {"WATCHPACK_POLLING": "false"}, clear=False):
+            env = sup._hook_env()
+        assert env["WATCHPACK_POLLING"] == "false"
+
+    def test_repo_can_override_chokidar_usepolling(self, tmp_path):
+        sup = _make_supervisor(tmp_path)
+        sup.boot_mode = "fresh"
+        with patch.dict("os.environ", {"CHOKIDAR_USEPOLLING": "false"}, clear=False):
+            env = sup._hook_env()
+        assert env["CHOKIDAR_USEPOLLING"] == "false"
+
+
+class TestPersistHookEnv:
+    """_persist_hook_env() writes a shell-sourceable env snapshot."""
+
+    def test_creates_sandbox_env_file(self, tmp_path):
+        sup = _make_supervisor(tmp_path)
+        sup.boot_mode = "fresh"
+        out = tmp_path / ".env.sandbox"
+        with (
+            patch.dict("os.environ", {"MY_VAR": "hello"}, clear=False),
+            patch("sandbox_runtime.entrypoint.SANDBOX_ENV_FILE_PATH", str(out)),
+            patch(
+                "sandbox_runtime.entrypoint.TUNNEL_ENV_FILE_PATH", str(tmp_path / ".tunnels.env")
+            ),
+        ):
+            sup._persist_hook_env()
+        assert out.exists()
+
+    def test_file_contains_export_lines(self, tmp_path):
+        sup = _make_supervisor(tmp_path)
+        sup.boot_mode = "fresh"
+        out = tmp_path / ".env.sandbox"
+        with (
+            patch.dict("os.environ", {"MY_SANDBOX_VAR": "world"}, clear=False),
+            patch("sandbox_runtime.entrypoint.SANDBOX_ENV_FILE_PATH", str(out)),
+            patch(
+                "sandbox_runtime.entrypoint.TUNNEL_ENV_FILE_PATH", str(tmp_path / ".tunnels.env")
+            ),
+        ):
+            sup._persist_hook_env()
+        content = out.read_text()
+        assert "export MY_SANDBOX_VAR=" in content
+
+    def test_includes_tunnel_urls_from_tunnels_env(self, tmp_path):
+        sup = _make_supervisor(tmp_path)
+        sup.boot_mode = "fresh"
+        tunnels = tmp_path / ".tunnels.env"
+        tunnels.write_text("TUNNEL_3000=https://ta-abc.modal.host\n")
+        out = tmp_path / ".env.sandbox"
+        with (
+            patch("sandbox_runtime.entrypoint.SANDBOX_ENV_FILE_PATH", str(out)),
+            patch("sandbox_runtime.entrypoint.TUNNEL_ENV_FILE_PATH", str(tunnels)),
+        ):
+            sup._persist_hook_env()
+        content = out.read_text()
+        assert "TUNNEL_3000=" in content
+        assert "ta-abc.modal.host" in content
+
+    def test_tunnel_file_absent_does_not_raise(self, tmp_path):
+        sup = _make_supervisor(tmp_path)
+        sup.boot_mode = "fresh"
+        out = tmp_path / ".env.sandbox"
+        with (
+            patch("sandbox_runtime.entrypoint.SANDBOX_ENV_FILE_PATH", str(out)),
+            patch("sandbox_runtime.entrypoint.TUNNEL_ENV_FILE_PATH", str(tmp_path / "missing.env")),
+        ):
+            sup._persist_hook_env()
+        assert out.exists()
+
+    def test_values_with_spaces_are_quoted(self, tmp_path):
+        sup = _make_supervisor(tmp_path)
+        sup.boot_mode = "fresh"
+        out = tmp_path / ".env.sandbox"
+        with (
+            patch.dict("os.environ", {"VAR_WITH_SPACES": "hello world"}, clear=False),
+            patch("sandbox_runtime.entrypoint.SANDBOX_ENV_FILE_PATH", str(out)),
+            patch(
+                "sandbox_runtime.entrypoint.TUNNEL_ENV_FILE_PATH", str(tmp_path / ".tunnels.env")
+            ),
+        ):
+            sup._persist_hook_env()
+        content = out.read_text()
+        # shlex.quote wraps values containing spaces in single quotes
+        assert "VAR_WITH_SPACES='hello world'" in content
+
+    def test_includes_polling_vars(self, tmp_path):
+        sup = _make_supervisor(tmp_path)
+        sup.boot_mode = "fresh"
+        out = tmp_path / ".env.sandbox"
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch("sandbox_runtime.entrypoint.SANDBOX_ENV_FILE_PATH", str(out)),
+            patch(
+                "sandbox_runtime.entrypoint.TUNNEL_ENV_FILE_PATH", str(tmp_path / ".tunnels.env")
+            ),
+        ):
+            sup._persist_hook_env()
+        content = out.read_text()
+        # shlex.quote does not add quotes around simple alphanumeric values
+        assert "export WATCHPACK_POLLING=true" in content
+        assert "export CHOKIDAR_USEPOLLING=true" in content
 
 
 class TestStartInRunStrict:

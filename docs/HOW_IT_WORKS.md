@@ -271,12 +271,40 @@ dotenv consumer can read it without parsing.
 
 1. Clears any stale file inherited from a snapshot.
 2. Waits up to `TUNNEL_WAIT_TIMEOUT_SECONDS` (default `30`) for fresh URLs.
-3. Runs `.openinspect/start.sh`.
+3. Writes `/workspace/.env.sandbox` — a shell-sourceable snapshot of the full startup environment
+   (see below).
+4. Runs `.openinspect/start.sh`.
 
 If the wait times out (for example, because the backend has not resolved tunnel URLs yet),
 `start.sh` proceeds without fresh local URLs and the supervisor logs `tunnel.env_file_wait_timeout`.
 The control plane still receives and broadcasts the URLs to clients on a separate path. The file is
 not written when `tunnelPorts` is empty or in build mode.
+
+**`/workspace/.env.sandbox` — persistent environment snapshot.** Step 3 above writes a
+shell-sourceable file that merges the full hook environment (sandbox variables, repo secrets,
+polling flags) with any tunnel URLs already present in `.tunnels.env`:
+
+```sh
+# /workspace/.env.sandbox  — written before start.sh runs
+export SANDBOX_AUTH_TOKEN='...'
+export TUNNEL_3000='https://abc123-3000.modal.host'
+export WATCHPACK_POLLING=true
+# … all other environment variables
+```
+
+This file exists so that agents can recover the startup environment when restarting a service in a
+fresh shell — without losing tunnel URLs or repo secrets:
+
+```bash
+source /workspace/.env.sandbox && npm run dev
+```
+
+**File-watching polling.** The supervisor injects `WATCHPACK_POLLING=true` and
+`CHOKIDAR_USEPOLLING=true` into the hook environment before `start.sh` runs. Modal container kernels
+have low inotify watch limits that silently prevent webpack- or Vite-based dev servers from
+detecting file changes; polling avoids this. Repos that know inotify works in their environment can
+opt out by setting either variable explicitly (e.g. in the repo's own environment configuration) —
+`_hook_env()` uses `setdefault`, so a pre-existing value is preserved.
 
 ---
 
@@ -386,8 +414,12 @@ When you ask the agent to create a PR:
 
 1. Agent pushes the branch using brokered SCM credentials from the sandbox credential helper
 2. Control plane receives the branch name
-3. Control plane creates the PR using _your_ GitHub OAuth token
+3. Control plane creates the PR using _your_ GitHub OAuth token (GitHub logins)
 4. PR appears as created by you, not a bot
+
+If you signed in another way (e.g. Google) you have no GitHub OAuth token, so the control plane
+pushes the branch with the shared GitHub App credentials and returns a manual `pull/new` URL — the
+PR is attributed to the App bot rather than to you.
 
 This maintains proper code review workflows—you can't approve your own PRs.
 
@@ -505,7 +537,7 @@ already mint a fresh fallback token on restore.
 
 You can configure environment variables (API keys, credentials) at global or per-repository scope:
 
-- **Global secrets** apply to all repositories (e.g., `ANTHROPIC_API_KEY`)
+- **Global secrets** apply to all repositories (e.g., `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`)
 - **Repository secrets** apply to a single repo and override global secrets with the same key
 - Stored encrypted (AES-256-GCM) in D1 database
 - Injected into sandboxes at startup
@@ -513,6 +545,9 @@ You can configure environment variables (API keys, credentials) at global or per
 
 > **Daytona and Vercel users**: LLM API keys (e.g., `ANTHROPIC_API_KEY` for Claude models) must be
 > added as global secrets. Modal injects these automatically via its own secrets mechanism.
+>
+> **DeepSeek (all providers)**: DeepSeek models require `DEEPSEEK_API_KEY` as a global secret with
+> any sandbox provider — unlike `ANTHROPIC_API_KEY`, Modal does not inject it automatically.
 
 See [Secrets Management](./SECRETS.md) for setup instructions.
 

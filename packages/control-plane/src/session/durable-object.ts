@@ -57,6 +57,7 @@ import type {
 } from "../types";
 import type { SessionRow, ArtifactRow, SandboxRow } from "./types";
 import { SessionRepository } from "./repository";
+import { parseTunnelUrls } from "./tunnel-urls";
 import { SessionWebSocketManagerImpl, type SessionWebSocketManager } from "./websocket-manager";
 import { SessionPullRequestService } from "./pull-request-service";
 import { RepoSecretsStore } from "../db/repo-secrets";
@@ -221,10 +222,12 @@ export class SessionDO extends DurableObject<Env> {
     updateTitle: (request) => this.sessionLifecycleHandler.updateTitle(request),
     archive: (request) => this.sessionLifecycleHandler.archive(request),
     unarchive: (request) => this.sessionLifecycleHandler.unarchive(request),
+    supersede: (request) => this.sessionLifecycleHandler.supersede(request),
     verifySandboxToken: (request) => this.sandboxHandler.verifySandboxToken(request),
     openaiTokenRefresh: () => this.sandboxHandler.openaiTokenRefresh(),
     scmCredentials: () => this.sandboxHandler.scmCredentials(),
     bootProgress: () => this.sandboxHandler.bootProgress(),
+    tunnelUrls: () => this.sandboxHandler.tunnelUrls(),
     spawnContext: () => this.childSessionsHandler.getSpawnContext(),
     childSummary: (_request, url) => this.childSessionsHandler.getChildSummary(url),
     cancel: () => this.sessionLifecycleHandler.cancel(),
@@ -610,6 +613,20 @@ export class SessionDO extends DurableObject<Env> {
               actorDisplayName,
             })
           );
+        },
+        createSystemMessage: (content: string) => {
+          let systemParticipant = this.participantService.getByUserId(SYSTEM_USER_ID);
+          if (!systemParticipant) {
+            systemParticipant = this.participantService.create(SYSTEM_USER_ID, SYSTEM_DISPLAY_NAME);
+          }
+          this.repository.createMessage({
+            id: generateId(),
+            authorId: systemParticipant.id,
+            content,
+            source: "system",
+            status: "completed",
+            createdAt: Date.now(),
+          });
         },
       });
     }
@@ -1195,6 +1212,16 @@ export class SessionDO extends DurableObject<Env> {
         const isNormalClose = code === 1000 || code === 1001;
         if (isNormalClose) {
           this.updateSandboxStatus("stopped");
+          // A clean close (1000/1001) means the bridge shut down and will not
+          // reconnect. If a turn was still in flight, the execution_complete
+          // event never arrived — fail it now. Otherwise is_processing stays
+          // true and the UI shows "Thinking…" forever (confirmed in prod: live
+          // sessions with sandbox_status=stopped + is_processing=1).
+          if (this.getIsProcessing()) {
+            await this.messageQueue.failStuckProcessingMessage({
+              reason: "sandbox_disconnected",
+            });
+          }
         } else {
           // Abnormal close (e.g., 1006): leave status unchanged so the bridge can reconnect.
           // Schedule a heartbeat check to detect truly dead sandboxes.
@@ -2070,12 +2097,11 @@ export class SessionDO extends DurableObject<Env> {
   }
 
   private safeParseTunnelUrls(raw: string): Record<string, string> | null {
-    try {
-      return JSON.parse(raw) as Record<string, string>;
-    } catch {
+    const urls = parseTunnelUrls(raw);
+    if (!urls) {
       this.log.warn("Invalid sandbox tunnel_urls JSON");
-      return null;
     }
+    return urls;
   }
 
   // Database helpers

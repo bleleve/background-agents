@@ -202,7 +202,12 @@ export class SessionSandboxEventProcessor {
 
       if (isStillProcessing) {
         const status = event.success ? "completed" : "failed";
-        this.deps.repository.updateMessageCompletion(completionMessageId, status, now);
+        this.deps.repository.updateMessageCompletion(
+          completionMessageId,
+          status,
+          now,
+          event.success ? null : (event.error ?? null)
+        );
 
         const timestamps = this.deps.repository.getMessageTimestamps(completionMessageId);
         const totalDurationMs = timestamps ? now - timestamps.created_at : undefined;

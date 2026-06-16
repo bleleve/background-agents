@@ -79,7 +79,8 @@ export class ReviewSuggestionStore {
   async record(entry: ReviewSuggestionEntry): Promise<void> {
     await this.db
       .prepare(
-        `INSERT OR IGNORE INTO review_suggestions (id, repo_owner, repo_name, pr_number, comment_id, file, line, model, prompt_version, risk_score, status, created_at, resolved_at)
+        `INSERT OR IGNORE INTO review_suggestions
+           (id, repo_owner, repo_name, pr_number, comment_id, file, line, model, prompt_version, risk_score, status, created_at, resolved_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
@@ -193,7 +194,9 @@ export class ReviewSuggestionStore {
         ? "repo_owner || '/' || repo_name"
         : by === "model"
           ? "COALESCE(NULLIF(model, ''), 'unknown')"
-          : "COALESCE(NULLIF(risk_score, ''), 'unknown')";
+          : by === "prompt_version"
+            ? "COALESCE(NULLIF(prompt_version, ''), 'unknown')"
+            : "COALESCE(NULLIF(risk_score, ''), 'unknown')";
 
     const result = await this.db
       .prepare(

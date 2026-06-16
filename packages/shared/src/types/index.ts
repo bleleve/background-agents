@@ -296,6 +296,13 @@ export type SandboxEvent =
       messageId: string;
       sandboxId: string;
       timestamp: number;
+      /**
+       * True when the error originates from a child/sub-task session rather than
+       * the parent turn. Sub-task errors are surfaced for visibility but must
+       * NOT be treated as terminal — the parent stream keeps running and can
+       * still complete successfully.
+       */
+      isSubtask?: boolean;
     }
   | {
       type: "execution_complete";
@@ -488,6 +495,7 @@ export interface InstallationRepository {
   description: string | null;
   private: boolean;
   defaultBranch: string;
+  archived: boolean;
   language?: string | null;
   topics?: string[];
 }
@@ -834,7 +842,12 @@ export interface AnalyticsBreakdownResponse {
 // repo/model/risk). `resolved` is the count of resolved review threads — a WEAK
 // proxy that conflates "applied" and "dismissed", never an acceptance/quality rate.
 
-export const REVIEW_SUGGESTION_BREAKDOWN_BY = ["repo", "model", "risk_score"] as const;
+export const REVIEW_SUGGESTION_BREAKDOWN_BY = [
+  "repo",
+  "model",
+  "risk_score",
+  "prompt_version",
+] as const;
 export type ReviewSuggestionBreakdownBy = (typeof REVIEW_SUGGESTION_BREAKDOWN_BY)[number];
 
 export interface ReviewSuggestionsSummaryResponse {

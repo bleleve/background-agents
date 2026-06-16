@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_MODEL,
+  DEFAULT_ENABLED_MODELS,
+  MODEL_OPTIONS,
   normalizeModelId,
   isValidModel,
   extractProviderAndModel,
@@ -42,6 +44,20 @@ describe("model utilities", () => {
       expect(isValidModel("openai/gpt-5.2-codex")).toBe(true);
       expect(isValidModel("openai/gpt-5.3-codex")).toBe(true);
       expect(isValidModel("openai/gpt-5.3-codex-spark")).toBe(true);
+    });
+
+    it("returns true for DeepSeek models", () => {
+      expect(isValidModel("deepseek/deepseek-v4-flash")).toBe(true);
+      expect(isValidModel("deepseek/deepseek-v4-pro")).toBe(true);
+    });
+
+    it("returns true for OpenCode Zen models", () => {
+      expect(isValidModel("opencode/kimi-k2.5")).toBe(true);
+      expect(isValidModel("opencode/kimi-k2.6")).toBe(true);
+      expect(isValidModel("opencode/minimax-m2.5")).toBe(true);
+      expect(isValidModel("opencode/qwen3.7-max")).toBe(true);
+      expect(isValidModel("opencode/glm-5")).toBe(true);
+      expect(isValidModel("opencode/glm-5.1")).toBe(true);
     });
 
     it("accepts bare GPT model names via normalization", () => {
@@ -130,6 +146,18 @@ describe("model utilities", () => {
       expect(extractProviderAndModel("openai/gpt-5.3-codex-spark")).toEqual({
         provider: "openai",
         model: "gpt-5.3-codex-spark",
+      });
+    });
+
+    it("extracts deepseek provider from DeepSeek models", () => {
+      expect(extractProviderAndModel("deepseek/deepseek-v4-flash")).toEqual({
+        provider: "deepseek",
+        model: "deepseek-v4-flash",
+      });
+
+      expect(extractProviderAndModel("deepseek/deepseek-v4-pro")).toEqual({
+        provider: "deepseek",
+        model: "deepseek-v4-pro",
       });
     });
 
@@ -280,6 +308,11 @@ describe("model utilities", () => {
       expect(supportsReasoning("openai/gpt-5.3-codex-spark")).toBe(true);
     });
 
+    it("returns false for DeepSeek models without reasoning config", () => {
+      expect(supportsReasoning("deepseek/deepseek-v4-flash")).toBe(false);
+      expect(supportsReasoning("deepseek/deepseek-v4-pro")).toBe(false);
+    });
+
     it("returns false for invalid models", () => {
       expect(supportsReasoning("gpt-4")).toBe(false);
       expect(supportsReasoning("invalid")).toBe(false);
@@ -314,6 +347,11 @@ describe("model utilities", () => {
       expect(getDefaultReasoningEffort("openai/gpt-5.2")).toBeUndefined();
       expect(getDefaultReasoningEffort("openai/gpt-5.4")).toBeUndefined();
       expect(getDefaultReasoningEffort("openai/gpt-5.5")).toBeUndefined();
+    });
+
+    it("returns undefined for DeepSeek models", () => {
+      expect(getDefaultReasoningEffort("deepseek/deepseek-v4-flash")).toBeUndefined();
+      expect(getDefaultReasoningEffort("deepseek/deepseek-v4-pro")).toBeUndefined();
     });
 
     it("returns undefined for invalid models", () => {
@@ -398,6 +436,11 @@ describe("model utilities", () => {
     it("returns undefined for invalid models", () => {
       expect(getReasoningConfig("invalid")).toBeUndefined();
     });
+
+    it("returns undefined for DeepSeek models", () => {
+      expect(getReasoningConfig("deepseek/deepseek-v4-flash")).toBeUndefined();
+      expect(getReasoningConfig("deepseek/deepseek-v4-pro")).toBeUndefined();
+    });
   });
 
   describe("isValidReasoningEffort", () => {
@@ -479,6 +522,11 @@ describe("model utilities", () => {
       expect(isValidReasoningEffort("invalid", "max")).toBe(false);
     });
 
+    it("returns false for DeepSeek models without reasoning config", () => {
+      expect(isValidReasoningEffort("deepseek/deepseek-v4-flash", "high")).toBe(false);
+      expect(isValidReasoningEffort("deepseek/deepseek-v4-pro", "high")).toBe(false);
+    });
+
     it("returns false for empty effort", () => {
       expect(isValidReasoningEffort("anthropic/claude-sonnet-4-5", "")).toBe(false);
     });
@@ -510,6 +558,11 @@ describe("model utilities", () => {
       expect(normalizeModelId("openai/gpt-5.3-codex-spark")).toBe("openai/gpt-5.3-codex-spark");
     });
 
+    it("passes through DeepSeek models unchanged", () => {
+      expect(normalizeModelId("deepseek/deepseek-v4-flash")).toBe("deepseek/deepseek-v4-flash");
+      expect(normalizeModelId("deepseek/deepseek-v4-pro")).toBe("deepseek/deepseek-v4-pro");
+    });
+
     it("adds openai/ prefix to bare GPT models", () => {
       expect(normalizeModelId("gpt-5.4")).toBe("openai/gpt-5.4");
       expect(normalizeModelId("gpt-5.5")).toBe("openai/gpt-5.5");
@@ -520,6 +573,33 @@ describe("model utilities", () => {
     it("passes through unknown models without prefix", () => {
       expect(normalizeModelId("invalid")).toBe("invalid");
       expect(normalizeModelId("")).toBe("");
+    });
+  });
+
+  describe("MODEL_OPTIONS", () => {
+    it("includes OpenCode Zen models in an opt-in category", () => {
+      const openCodeZenCategory = MODEL_OPTIONS.find((group) => group.category === "OpenCode Zen");
+
+      expect(openCodeZenCategory?.models.map((model) => model.id)).toEqual([
+        "opencode/kimi-k2.5",
+        "opencode/kimi-k2.6",
+        "opencode/minimax-m2.5",
+        "opencode/qwen3.7-max",
+        "opencode/glm-5",
+        "opencode/glm-5.1",
+      ]);
+      expect(DEFAULT_ENABLED_MODELS).not.toContain("opencode/glm-5.1");
+    });
+
+    it("includes DeepSeek models in an opt-in category", () => {
+      const deepseekCategory = MODEL_OPTIONS.find((group) => group.category === "DeepSeek");
+
+      expect(deepseekCategory?.models.map((model) => model.id)).toEqual([
+        "deepseek/deepseek-v4-flash",
+        "deepseek/deepseek-v4-pro",
+      ]);
+      expect(DEFAULT_ENABLED_MODELS).not.toContain("deepseek/deepseek-v4-flash");
+      expect(DEFAULT_ENABLED_MODELS).not.toContain("deepseek/deepseek-v4-pro");
     });
   });
 });

@@ -52,26 +52,28 @@ The control plane provides:
 
 ### Sessions
 
-| Endpoint                         | Method    | Description                                                       |
-| -------------------------------- | --------- | ----------------------------------------------------------------- |
-| `/sessions`                      | GET       | List user's sessions                                              |
-| `/sessions`                      | POST      | Create new session                                                |
-| `/sessions/:id`                  | GET       | Get session state                                                 |
-| `/sessions/:id`                  | DELETE    | Delete session                                                    |
-| `/sessions/:id/prompt`           | POST      | Enqueue prompt                                                    |
-| `/sessions/:id/stop`             | POST      | Stop execution                                                    |
-| `/sessions/:id/sandbox/relaunch` | POST      | Relaunch a stopped/failed/stale sandbox                           |
-| `/sessions/:id/ws`               | WebSocket | Real-time connection                                              |
-| `/sessions/:id/events`           | GET       | Paginated events                                                  |
-| `/sessions/:id/artifacts`        | GET       | List artifacts                                                    |
-| `/sessions/:id/participants`     | GET/POST  | Manage participants                                               |
-| `/sessions/:id/messages`         | GET       | List messages                                                     |
-| `/sessions/:id/pr`               | POST      | Create pull request                                               |
-| `/sessions/:id/pr-review`        | POST      | Submit a formal PR review (policy-checked, sandbox-authenticated) |
-| `/sessions/:id/scm-credentials`  | POST      | Broker sandbox git credentials                                    |
-| `/sessions/:id/ws-token`         | POST      | Generate WebSocket token                                          |
-| `/sessions/:id/archive`          | POST      | Archive session                                                   |
-| `/sessions/:id/unarchive`        | POST      | Unarchive session                                                 |
+| Endpoint                          | Method    | Description                                                       |
+| --------------------------------- | --------- | ----------------------------------------------------------------- |
+| `/sessions`                       | GET       | List user's sessions                                              |
+| `/sessions`                       | POST      | Create new session                                                |
+| `/sessions/:id`                   | GET       | Get session state                                                 |
+| `/sessions/:id`                   | DELETE    | Delete session                                                    |
+| `/sessions/:id/prompt`            | POST      | Enqueue prompt                                                    |
+| `/sessions/:id/stop`              | POST      | Stop execution                                                    |
+| `/sessions/:id/sandbox/relaunch`  | POST      | Relaunch a stopped/failed/stale sandbox                           |
+| `/sessions/:id/ws`                | WebSocket | Real-time connection                                              |
+| `/sessions/:id/events`            | GET       | Paginated events                                                  |
+| `/sessions/:id/artifacts`         | GET       | List artifacts                                                    |
+| `/sessions/:id/participants`      | GET/POST  | Manage participants                                               |
+| `/sessions/:id/messages`          | GET       | List messages                                                     |
+| `/sessions/:id/pr`                | POST      | Create pull request                                               |
+| `/sessions/:id/pr-review`         | POST      | Submit a formal PR review (policy-checked, sandbox-authenticated) |
+| `/sessions/:id/record-suggestion` | POST      | Record a posted inline review suggestion (sandbox-authenticated)  |
+| `/sessions/:id/scm-credentials`   | POST      | Broker sandbox git credentials                                    |
+| `/sessions/:id/slack-notify`      | POST      | Post a Slack notification from the agent (sandbox-authenticated)  |
+| `/sessions/:id/ws-token`          | POST      | Generate WebSocket token                                          |
+| `/sessions/:id/archive`           | POST      | Archive session                                                   |
+| `/sessions/:id/unarchive`         | POST      | Unarchive session                                                 |
 
 ### Plan Mode
 
@@ -126,6 +128,17 @@ Common failures are `401` for a missing or invalid sandbox token, `404` when the
 exists, and `5xx` when provider configuration or upstream token minting fails. Source-control
 providers must implement `generateCredentialHelperAuth` before helper-backed sandbox git auth works
 for that provider.
+
+### Internal Routes (github-bot → control-plane, HMAC-authenticated)
+
+These routes are called by the github-bot via its `CONTROL_PLANE` service binding using a shared
+`INTERNAL_CALLBACK_SECRET`. They are not exposed to end users.
+
+| Endpoint                              | Method | Description                                                          |
+| ------------------------------------- | ------ | -------------------------------------------------------------------- |
+| `/review-suggestions`                 | POST   | Record a bot-posted inline review suggestion (webhook fallback path) |
+| `/review-suggestions/resolve`         | POST   | Mark suggestion threads as resolved                                  |
+| `/review-suggestions/acceptance-rate` | GET    | Acceptance-rate query (legacy, unwired from analytics UI)            |
 
 ### Repositories
 
@@ -255,8 +268,9 @@ Daytona persistent resumes; Modal snapshot restores still mint a fresh fallback 
 restore.
 
 If a `create-pr` request is triggered by a participant without a user OAuth token (for example,
-Slack-created sessions), the sandbox can still push the branch with brokered GitHub App credentials
-and the control plane returns a manual GitHub `pull/new` URL instead of failing the request.
+Slack-created or Google-login sessions), the sandbox can still push the branch with brokered GitHub
+App credentials and the control plane returns a manual GitHub `pull/new` URL instead of failing the
+request.
 
 ### Why This Matters
 

@@ -302,7 +302,8 @@ describe("SessionMessageQueue", () => {
     expect(h.repository.updateMessageCompletion).toHaveBeenCalledWith(
       "msg-9",
       "failed",
-      expect.any(Number)
+      expect.any(Number),
+      "Execution was stopped"
     );
     expect(h.repository.upsertExecutionCompleteEvent).toHaveBeenCalledWith(
       "msg-9",
@@ -372,6 +373,35 @@ describe("SessionMessageQueue", () => {
       false,
       "Execution interrupted: sandbox crashed unexpectedly"
     );
+  });
+
+  it("fails a queued (pending) message when none is processing — orphan watchdog", async () => {
+    const h = buildQueue();
+    // No message in flight, but a prompt was enqueued and never dispatched
+    // because the sandbox failed to connect. Without this fallback the session
+    // would hang as "active"/"created" forever.
+    h.repository.getProcessingMessage.mockReturnValue(null);
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage({ id: "msg-pending" }));
+
+    await h.queue.failStuckProcessingMessage("connecting_timeout");
+
+    expect(h.reconcileSessionStatusAfterExecution).toHaveBeenCalledWith(false);
+    expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
+      "msg-pending",
+      false,
+      "Execution interrupted: sandbox failed to connect"
+    );
+  });
+
+  it("no-ops when neither a processing nor a pending message exists", async () => {
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue(null);
+    h.repository.getNextPendingMessage.mockReturnValue(null);
+
+    await h.queue.failStuckProcessingMessage("connecting_timeout");
+
+    expect(h.reconcileSessionStatusAfterExecution).not.toHaveBeenCalled();
+    expect(h.callbackService.notifyComplete).not.toHaveBeenCalled();
   });
 
   describe("enqueuePromptFromApi", () => {

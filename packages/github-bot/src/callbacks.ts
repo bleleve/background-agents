@@ -67,10 +67,13 @@ function isPrReviewContext(context: unknown): context is GitHubCallbackContext {
  * delete it before posting the fresh verdict, and is explicit that it's a
  * fallback (risk not assessed) so it's never mistaken for the agent's analysis.
  */
-function buildFallbackVerdict(success: boolean, sessionUrl?: string): string {
+function buildFallbackVerdict(success: boolean, sessionUrl?: string, error?: string): string {
+  const reason = error?.trim();
   const line = success
     ? "Risk not assessed — the automated reviewer completed but did not emit a structured verdict. See any inline comments on this PR."
-    : "Risk unknown — the automated review did not finish.";
+    : reason
+      ? `Risk unknown — the automated review did not finish: ${reason}`
+      : "Risk unknown — the automated review did not finish.";
   const sessionLink = sessionUrl ? ` · [session](${sessionUrl})` : "";
   return `${REEF_VERDICT_MARKER}
 ## ⚪ Reef Review — risk not assessed
@@ -122,6 +125,28 @@ export async function handleCompleteCallback(
     () => log.debug("review_label.clear_failed", meta)
   );
 
+  // When the session failed, evict the review-session KV entry so a re-trigger
+  // spawns a fresh session rather than reusing the dead one (which would cause
+  // sendPrompt to fail and the retry loop to never make progress).
+  // Also store the failed session ID under a "prev" key so that runCodeReview
+  // can supersede it (inject a system message + archive) once the new session
+  // is created.
+  if (!payload.success) {
+    const repoFullName = `${owner.toLowerCase()}/${repo.toLowerCase()}`;
+    const reviewKey = `review-session:${repoFullName}:${prNumber}`;
+    const prevKey = `review-session-prev:${repoFullName}:${prNumber}`;
+    const TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days, same as REVIEW_SESSION_TTL_SECONDS
+
+    env.GITHUB_KV.delete(reviewKey).then(
+      () => log.debug("review_session_kv.cleared", meta),
+      () => log.debug("review_session_kv.clear_failed", meta)
+    );
+    env.GITHUB_KV.put(prevKey, payload.sessionId, { expirationTtl: TTL_SECONDS }).then(
+      () => log.debug("review_session_prev_kv.stored", meta),
+      () => log.debug("review_session_prev_kv.store_failed", meta)
+    );
+  }
+
   const existing = await findIssueCommentByMarker(
     token,
     owner,
@@ -143,7 +168,11 @@ export async function handleCompleteCallback(
     owner,
     repo,
     prNumber,
-    buildFallbackVerdict(payload.success, `${env.WEB_APP_URL}/session/${payload.sessionId}`),
+    buildFallbackVerdict(
+      payload.success,
+      `${env.WEB_APP_URL}/session/${payload.sessionId}`,
+      payload.error
+    ),
     userAgent
   );
   if (commentId === null) {

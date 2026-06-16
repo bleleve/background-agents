@@ -33,6 +33,7 @@ export interface SessionInternalRouteHandlers {
   openaiTokenRefresh: SessionInternalRouteHandler;
   scmCredentials: SessionInternalRouteHandler;
   bootProgress: SessionInternalRouteHandler;
+  tunnelUrls: SessionInternalRouteHandler;
   spawnContext: SessionInternalRouteHandler;
   childSummary: SessionInternalRouteHandler;
   cancel: SessionInternalRouteHandler;
@@ -42,6 +43,7 @@ export interface SessionInternalRouteHandlers {
   listPlans: SessionInternalRouteHandler;
   approvePlan: SessionInternalRouteHandler;
   rejectPlan: SessionInternalRouteHandler;
+  supersede: SessionInternalRouteHandler;
 }
 
 /**
@@ -105,6 +107,7 @@ export function createSessionInternalRoutes(
       path: SessionInternalPaths.bootProgress,
       handler: handlers.bootProgress,
     },
+    { method: "GET", path: SessionInternalPaths.tunnelUrls, handler: handlers.tunnelUrls },
     { method: "GET", path: SessionInternalPaths.spawnContext, handler: handlers.spawnContext },
     { method: "GET", path: SessionInternalPaths.childSummary, handler: handlers.childSummary },
     { method: "POST", path: SessionInternalPaths.cancel, handler: handlers.cancel },
@@ -118,5 +121,6 @@ export function createSessionInternalRoutes(
     { method: "GET", path: SessionInternalPaths.plans, handler: handlers.listPlans },
     { method: "POST", path: SessionInternalPaths.planApprove, handler: handlers.approvePlan },
     { method: "POST", path: SessionInternalPaths.planReject, handler: handlers.rejectPlan },
+    { method: "POST", path: SessionInternalPaths.supersede, handler: handlers.supersede },
   ];
 }
