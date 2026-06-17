@@ -52,7 +52,9 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v82: fix hook timeout hang when start.sh spawns background processes
 # v83: pre-migrate OpenCode DB at build time so first session boot doesn't
 #      block on it and trip the heartbeat watchdog
-CACHE_BUSTER = "v83-prewarm-opencode-db"
+# v84: offload synchronous tool/skill/plugin install in start_opencode off the
+#      event loop so the boot-progress loop keeps pinging during a slow boot
+CACHE_BUSTER = "v84-boot-eventloop-offload"
 
 # Base image with all development tools
 base_image = (
