@@ -43,6 +43,13 @@ setup instructions.
 | `opencode/glm-5`        | GLM 5        | Z.ai 744B MoE | Not supported     | N/A            |
 | `opencode/glm-5.1`      | GLM 5.1      | Z.ai          | Not supported     | N/A            |
 
+## Cloudflare Workers AI
+
+| Model ID                                              | Display name | Description           | Reasoning efforts | Default effort |
+| ----------------------------------------------------- | ------------ | --------------------- | ----------------- | -------------- |
+| `cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code` | Kimi K2.7    | Cloudflare Workers AI | Not supported     | N/A            |
+| `cloudflare-workers-ai/@cf/zai-org/glm-5.2`           | GLM 5.2      | Cloudflare Workers AI | Not supported     | N/A            |
+
 ## DeepSeek
 
 DeepSeek models require `DEEPSEEK_API_KEY` as a global or repository secret.
