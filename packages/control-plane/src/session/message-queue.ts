@@ -75,27 +75,43 @@ type ProcessingFailure = {
   error?: string;
 };
 
-const FAILURE_REASON_TO_ERROR: Record<ProcessingFailureReason, string> = {
-  execution_timeout: "Execution timed out (stuck processing)",
-  heartbeat_stale: "Execution interrupted: sandbox heartbeat timed out",
-  inactivity_timeout: "Execution interrupted: sandbox stopped due to inactivity",
-  connecting_timeout: "Execution interrupted: sandbox failed to connect",
-  sandbox_disconnected:
-    "Execution interrupted: the sandbox disconnected before completing the turn",
+// Short human-readable cause per watchdog reason. The surrounding sentence is
+// chosen by resolveProcessingFailure based on whether the agent had actually
+// started, so a queued-but-never-dispatched prompt is not reported as
+// "Execution interrupted" / "failed to connect" when the agent in fact ran.
+const FAILURE_REASON_DETAIL: Record<ProcessingFailureReason, string> = {
+  execution_timeout: "the turn exceeded the maximum processing time",
+  heartbeat_stale: "the sandbox heartbeat timed out",
+  inactivity_timeout: "the sandbox stopped due to inactivity",
+  connecting_timeout: "the sandbox failed to connect in time",
+  sandbox_disconnected: "the sandbox disconnected",
 };
 
-function resolveProcessingFailure(failure: ProcessingFailureReason | ProcessingFailure): {
+/**
+ * Build the failure reason recorded on the message and propagated to the
+ * automation run. `agentStarted` distinguishes a mid-execution interruption
+ * (the message was processing) from a prompt that never ran (still queued
+ * because the sandbox never became ready) — without it, a session that ran
+ * for minutes could be reported as "sandbox failed to connect".
+ */
+function resolveProcessingFailure(
+  failure: ProcessingFailureReason | ProcessingFailure,
+  agentStarted: boolean
+): {
   reason: string;
   error: string;
 } {
   const reason = typeof failure === "string" ? failure : failure.reason;
   const normalizedReason = reason.trim() || "unknown";
   const explicitError = typeof failure === "string" ? undefined : failure.error?.trim();
-  const mappedError = FAILURE_REASON_TO_ERROR[normalizedReason];
+  const detail = FAILURE_REASON_DETAIL[normalizedReason] ?? normalizedReason;
+  const framed = agentStarted
+    ? `Execution interrupted while the agent was running: ${detail}`
+    : `Sandbox never became ready, so the prompt did not run: ${detail}`;
 
   return {
     reason: normalizedReason,
-    error: explicitError || mappedError || `Execution interrupted: ${normalizedReason}`,
+    error: explicitError || framed,
   };
 }
 
@@ -391,11 +407,13 @@ export class SessionMessageQueue {
     // invoked by watchdogs (onSandboxTerminating) and on a clean sandbox
     // disconnect, i.e. genuine terminal failures, so failing a pending message
     // here is safe and never races a still-progressing turn.
-    const stuckMessage =
-      this.deps.repository.getProcessingMessage() ?? this.deps.repository.getNextPendingMessage();
+    const processingMessage = this.deps.repository.getProcessingMessage();
+    const stuckMessage = processingMessage ?? this.deps.repository.getNextPendingMessage();
     if (!stuckMessage) return;
 
-    const { reason, error } = resolveProcessingFailure(failure);
+    // A processing message means the agent had started; a pending fallback
+    // means the prompt never ran (the sandbox never became ready).
+    const { reason, error } = resolveProcessingFailure(failure, processingMessage != null);
     this.deps.repository.updateMessageCompletion(stuckMessage.id, "failed", now, error);
 
     const syntheticEvent: Extract<SandboxEvent, { type: "execution_complete" }> = {
