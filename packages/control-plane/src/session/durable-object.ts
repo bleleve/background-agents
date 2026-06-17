@@ -55,6 +55,7 @@ import type {
   SessionStatus,
   SandboxStatus,
 } from "../types";
+import { isDeadSandboxStatus } from "../types";
 import type { SessionRow, ArtifactRow, SandboxRow } from "./types";
 import { SessionRepository } from "./repository";
 import { parseTunnelUrls } from "./tunnel-urls";
@@ -844,6 +845,7 @@ export class SessionDO extends DurableObject<Env> {
       updateSandboxModalObjectId: (id) => this.repository.updateSandboxModalObjectId(id),
       updateSandboxSnapshotImageId: (sandboxId, imageId) =>
         this.repository.updateSandboxSnapshotImageId(sandboxId, imageId),
+      clearSandboxSnapshotImageId: () => this.repository.clearSandboxSnapshotImageId(),
       updateSandboxLastActivity: (timestamp) =>
         this.repository.updateSandboxLastActivity(timestamp),
       updateSandboxHeartbeat: (timestamp) => this.repository.updateSandboxHeartbeat(timestamp),
@@ -1100,14 +1102,18 @@ export class SessionDO extends DurableObject<Env> {
       const sandbox = this.getSandbox();
       const expectedSandboxId = sandbox?.modal_sandbox_id;
 
-      // Reject connection if sandbox should be stopped (prevents reconnection after inactivity timeout)
-      if (sandbox?.status === "stopped" || sandbox?.status === "stale") {
+      // Reject reconnection for a dead/terminal sandbox (stopped/failed/stale).
+      // Includes "failed": a sandbox failed by the connecting-timeout watchdog
+      // whose underlying process is actually alive-but-slow must not be allowed
+      // to reconnect and silently resurrect to "ready" while the session is
+      // failed — recovery is via relaunch, not the original process.
+      if (isDeadSandboxStatus(sandbox?.status)) {
         this.log.warn("ws.connect", {
           event: "ws.connect",
           ws_type: "sandbox",
           outcome: "rejected",
-          reject_reason: "sandbox_stopped",
-          sandbox_status: sandbox.status,
+          reject_reason: "sandbox_dead",
+          sandbox_status: sandbox?.status,
           duration_ms: Date.now() - wsStartTime,
         });
         return new Response("Sandbox is stopped", { status: 410 });
@@ -1713,7 +1719,10 @@ export class SessionDO extends DurableObject<Env> {
    * broadcasts synthetic execution_complete
    * so all clients flush buffered tokens, and forwards stop to the sandbox.
    */
-  private async stopExecution(options?: { suppressStatusReconcile?: boolean }): Promise<void> {
+  private async stopExecution(options?: {
+    suppressStatusReconcile?: boolean;
+    failPending?: boolean;
+  }): Promise<void> {
     await this.messageQueue.stopExecution(options);
   }
 

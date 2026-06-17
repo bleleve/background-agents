@@ -60,7 +60,17 @@ interface MessageQueueDeps {
 
 interface StopExecutionOptions {
   suppressStatusReconcile?: boolean;
+  /** Also fail all queued-but-undispatched (pending) messages (e.g. on cancel). */
+  failPending?: boolean;
 }
+
+/** Session statuses under which the queue must not dispatch a prompt. */
+const TERMINAL_SESSION_STATUSES = new Set<SessionStatus>([
+  "completed",
+  "failed",
+  "cancelled",
+  "archived",
+]);
 
 type ProcessingFailureReason =
   | "execution_timeout"
@@ -68,6 +78,8 @@ type ProcessingFailureReason =
   | "inactivity_timeout"
   | "connecting_timeout"
   | "sandbox_disconnected"
+  | "spawn_failed"
+  | "circuit_breaker_open"
   | (string & {});
 
 type ProcessingFailure = {
@@ -85,6 +97,8 @@ const FAILURE_REASON_DETAIL: Record<ProcessingFailureReason, string> = {
   inactivity_timeout: "the sandbox stopped due to inactivity",
   connecting_timeout: "the sandbox failed to connect in time",
   sandbox_disconnected: "the sandbox disconnected",
+  spawn_failed: "the sandbox failed to start",
+  circuit_breaker_open: "sandbox spawning is temporarily disabled after repeated failures",
 };
 
 /**
@@ -232,6 +246,18 @@ export class SessionMessageQueue {
   }
 
   async processMessageQueue(): Promise<void> {
+    // Never dispatch under a terminal session. A new prompt flips the session
+    // back to "active" before enqueueing, so this only blocks stray dispatches
+    // (e.g. a late sandbox reconnect calling the queue) from running a prompt
+    // under a cancelled/completed/failed/archived session.
+    const currentStatus = this.deps.getSession()?.status;
+    if (currentStatus && TERMINAL_SESSION_STATUSES.has(currentStatus)) {
+      this.deps.log.debug("processMessageQueue: session is terminal, skipping", {
+        session_status: currentStatus,
+      });
+      return;
+    }
+
     if (this.deps.repository.getProcessingMessage()) {
       this.deps.log.debug("processMessageQueue: already processing, returning");
       return;
@@ -378,11 +404,51 @@ export class SessionMessageQueue {
       }
     }
 
+    // Fail any queued-but-undispatched prompts too. Otherwise a cancel leaves
+    // them "pending" under a terminal session — the queue never runs again to
+    // dispatch or fail them, so they linger as outstanding work forever.
+    if (options.failPending) {
+      this.failQueuedPendingMessages(now);
+    }
+
     this.deps.broadcast({ type: "processing_status", isProcessing: false });
 
     const sandboxWs = this.deps.wsManager.getSandboxSocket();
     if (sandboxWs) {
       this.deps.wsManager.send(sandboxWs, { type: "stop" });
+    }
+  }
+
+  /**
+   * Fail every queued-but-undispatched (pending) message, emitting a cancelled
+   * execution_complete per message so the UI clears each queued bubble. Used on
+   * cancel so no pending prompt is stranded under a terminal session.
+   */
+  private failQueuedPendingMessages(now: number): void {
+    const cancelError = "Execution was cancelled";
+    // updateMessageCompletion flips status off "pending", so getNextPendingMessage
+    // returns the next one each iteration and the loop terminates.
+    for (;;) {
+      const pending = this.deps.repository.getNextPendingMessage();
+      if (!pending) break;
+
+      this.deps.repository.updateMessageCompletion(pending.id, "failed", now, cancelError);
+
+      const syntheticExecutionComplete: Extract<SandboxEvent, { type: "execution_complete" }> = {
+        type: "execution_complete",
+        messageId: pending.id,
+        success: false,
+        cancelled: true,
+        error: cancelError,
+        sandboxId: "",
+        timestamp: now / 1000,
+      };
+      this.deps.repository.upsertExecutionCompleteEvent(
+        pending.id,
+        syntheticExecutionComplete,
+        now
+      );
+      this.deps.broadcast({ type: "sandbox_event", event: syntheticExecutionComplete });
     }
   }
 

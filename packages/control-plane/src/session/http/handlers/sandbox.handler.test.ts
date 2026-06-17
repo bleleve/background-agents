@@ -277,10 +277,9 @@ describe("createSandboxHandler", () => {
 
     expect(response.status).toBe(410);
     expect(await response.json()).toEqual({ valid: false, error: "Sandbox stopped" });
-    expect(log.warn).toHaveBeenCalledWith(
-      "Sandbox token verification failed: sandbox is stopped/stale",
-      { status: "stopped" }
-    );
+    expect(log.warn).toHaveBeenCalledWith("Sandbox token verification failed: sandbox is dead", {
+      status: "stopped",
+    });
   });
 
   it("returns 410 when sandbox is stale", async () => {
@@ -297,10 +296,9 @@ describe("createSandboxHandler", () => {
 
     expect(response.status).toBe(410);
     expect(await response.json()).toEqual({ valid: false, error: "Sandbox stopped" });
-    expect(log.warn).toHaveBeenCalledWith(
-      "Sandbox token verification failed: sandbox is stopped/stale",
-      { status: "stale" }
-    );
+    expect(log.warn).toHaveBeenCalledWith("Sandbox token verification failed: sandbox is dead", {
+      status: "stale",
+    });
   });
 
   it("returns 401 when sandbox token is invalid", async () => {
