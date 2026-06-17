@@ -121,6 +121,19 @@ Vercel sandboxes are explicitly stopped by Open-Inspect when they should no long
 Existing generated base snapshots are not automatically deleted. Treat them like deploy artifacts:
 keep the current snapshot, and delete old snapshots manually if you need to reclaim quota.
 
+## Sandbox Lifetime and Prompt Timeout
+
+Vercel hard-caps a sandbox's lifetime at **45 minutes** (`VERCEL_MAX_SANDBOX_TIMEOUT_MS`).
+Open-Inspect clamps the requested sandbox timeout to this cap and logs a warning when it does so.
+
+Because that cap is shorter than the in-sandbox bridge's default per-prompt limit
+(`PROMPT_MAX_DURATION`, 90 min), the provider injects a `BRIDGE_PROMPT_MAX_DURATION` env var into
+every Vercel sandbox, set to `floor(clamped_lifetime_seconds) − 120`. The bridge reads it (it can
+only **shorten**, never extend, its built-in limit) and self-stops a long prompt with a clean
+`execution_complete` ~2 minutes before Vercel would hard-kill the sandbox — turning an opaque
+provider kill into an actionable timeout. Other providers leave this env var unset, so the bridge
+keeps its 90-minute default.
+
 ## CPU and Memory
 
 Open-Inspect maps sandbox resource settings to Vercel's `resources.vcpus` setting when creating or
