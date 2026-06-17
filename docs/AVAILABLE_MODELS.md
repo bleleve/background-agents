@@ -45,10 +45,10 @@ setup instructions.
 
 ## Cloudflare Workers AI
 
-| Model ID                                        | Display name | Description          | Reasoning efforts | Default effort |
-| ----------------------------------------------- | ------------ | -------------------- | ----------------- | -------------- |
+| Model ID                                              | Display name | Description           | Reasoning efforts | Default effort |
+| ----------------------------------------------------- | ------------ | --------------------- | ----------------- | -------------- |
 | `cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code` | Kimi K2.7    | Cloudflare Workers AI | Not supported     | N/A            |
-| `cloudflare-workers-ai/@cf/zai-org/glm-5.2`    | GLM 5.2      | Cloudflare Workers AI | Not supported     | N/A            |
+| `cloudflare-workers-ai/@cf/zai-org/glm-5.2`           | GLM 5.2      | Cloudflare Workers AI | Not supported     | N/A            |
 
 ## DeepSeek
 
