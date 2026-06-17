@@ -107,7 +107,7 @@ export interface Env {
 
   // Sandbox lifecycle configuration
   SANDBOX_INACTIVITY_TIMEOUT_MS?: string; // Inactivity timeout in ms (default: 900000 = 15 min)
-  EXECUTION_TIMEOUT_MS?: string; // Max processing time before auto-fail (default: 5400000 = 90 min)
+  EXECUTION_TIMEOUT_MS?: string; // Max processing time before auto-fail (default: 5700000 = 95 min; must exceed the bridge's 90-min PROMPT_MAX_DURATION)
 
   // Default models surfaced to the web UI via GET /model-preferences so the
   // dropdown's initial selection matches the deployment instead of the shared

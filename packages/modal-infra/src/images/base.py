@@ -54,7 +54,9 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 #      block on it and trip the heartbeat watchdog
 # v84: offload synchronous tool/skill/plugin install in start_opencode off the
 #      event loop so the boot-progress loop keeps pinging during a slow boot
-CACHE_BUSTER = "v84-boot-eventloop-offload"
+# v85: bridge PROMPT_MAX_DURATION resolvable from env (providers with a shorter
+#      sandbox lifetime, e.g. Vercel, can lower it so the bridge self-stops first)
+CACHE_BUSTER = "v85-bridge-prompt-max-duration-env"
 
 # Base image with all development tools
 base_image = (
