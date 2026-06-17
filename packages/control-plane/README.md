@@ -67,6 +67,7 @@ The control plane provides:
 | `/sessions/:id/participants`      | GET/POST  | Manage participants                                               |
 | `/sessions/:id/messages`          | GET       | List messages                                                     |
 | `/sessions/:id/pr`                | POST      | Create pull request                                               |
+| `/sessions/:id/pr-state`          | POST      | Sync PR artifact state (e.g. on PR close/reopen)                  |
 | `/sessions/:id/pr-review`         | POST      | Submit a formal PR review (policy-checked, sandbox-authenticated) |
 | `/sessions/:id/record-suggestion` | POST      | Record a posted inline review suggestion (sandbox-authenticated)  |
 | `/sessions/:id/scm-credentials`   | POST      | Broker sandbox git credentials                                    |
