@@ -553,13 +553,22 @@ function SessionContent({
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isRelaunching, setIsRelaunching] = useState(false);
 
-  // A dead sandbox (stopped/failed/stale) can be brought back without sending a
-  // prompt. Hidden while a turn is processing or once the sandbox is live again;
-  // the resulting sandbox_status broadcasts drive the indicator from there.
+  // The composer relaunch button is reserved for a FAILED session: clicking it
+  // relaunches AND resumes the interrupted turn (the control plane re-enqueues
+  // the failed message against the stored OpenCode session). stopped/stale are
+  // recovered via the sidebar "Restart sandbox" button instead — a plain spawn
+  // with no resume — so they are intentionally excluded here. Hidden while a
+  // turn is processing; sandbox_status broadcasts drive the indicator from there.
   const sandboxStatus = sessionState?.sandboxStatus;
-  const canRelaunchSandbox =
-    !isProcessing &&
-    (sandboxStatus === "stopped" || sandboxStatus === "failed" || sandboxStatus === "stale");
+  const canRelaunchSandbox = !isProcessing && sandboxStatus === "failed";
+
+  // Warm-on-type applies only to a stopped/idle sandbox (NOT failed): typing a
+  // real follow-up pre-warms it so it's ready by submit, mirroring the
+  // new-session prompt's warm-on-type. A failed session must be recovered
+  // through the explicit relaunch button (which resumes), never silently on a
+  // keystroke, so failed is excluded from warming.
+  const canWarmSandbox =
+    !isProcessing && (sandboxStatus === "stopped" || sandboxStatus === "stale");
 
   const handleRelaunchSandbox = useCallback(async () => {
     setIsRelaunching(true);
@@ -578,20 +587,14 @@ function SessionContent({
     }
   }, [sessionId]);
 
-  // Warm a stopped/idle sandbox once a follow-up shows real intent, so it's
-  // ready by submit — mirrors the new-session prompt's warm-on-type. The guard
-  // ref keeps it to one relaunch per down-cycle: canRelaunchSandbox can briefly
-  // stay true between the relaunch POST resolving and the sandbox_status
-  // broadcast arriving, so we must dedupe rather than rely on status alone.
+  // The guard ref keeps warming to one relaunch per down-cycle: canWarmSandbox
+  // can briefly stay true between the relaunch POST resolving and the
+  // sandbox_status broadcast arriving, so we must dedupe rather than rely on
+  // status alone.
   const warmRequestedRef = useRef(false);
   useEffect(() => {
-    // Sandbox is live (or coming up) again — allow the next stop→type cycle to warm.
-    if (
-      sandboxStatus &&
-      sandboxStatus !== "stopped" &&
-      sandboxStatus !== "failed" &&
-      sandboxStatus !== "stale"
-    ) {
+    // Sandbox left the stopped/stale idle state — allow the next idle→type cycle to warm.
+    if (sandboxStatus && sandboxStatus !== "stopped" && sandboxStatus !== "stale") {
       warmRequestedRef.current = false;
     }
   }, [sandboxStatus]);
@@ -600,7 +603,7 @@ function SessionContent({
     handleInputChange(e);
     if (
       shouldWarmForPrompt(e.target.value) &&
-      canRelaunchSandbox &&
+      canWarmSandbox &&
       !isRelaunching &&
       !warmRequestedRef.current
     ) {
@@ -1000,8 +1003,8 @@ function SessionContent({
                     onClick={handleRelaunchSandbox}
                     disabled={isRelaunching}
                     className="p-2 text-warning hover:bg-warning-muted disabled:opacity-30 disabled:cursor-not-allowed transition"
-                    title="Relaunch sandbox"
-                    aria-label="Relaunch sandbox"
+                    title="Relaunch and resume"
+                    aria-label="Relaunch the sandbox and resume the failed turn"
                   >
                     <RefreshIcon className={`w-5 h-5${isRelaunching ? " animate-spin" : ""}`} />
                   </button>

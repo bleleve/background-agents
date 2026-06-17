@@ -10,7 +10,9 @@ import {
   MediaSection,
   CodeServerSection,
   TunnelUrlsSection,
+  SandboxRestartSection,
 } from "./sidebar";
+import { RESTARTABLE_SANDBOX_STATUSES } from "./sidebar/sandbox-statuses";
 import { ChildSessionsSection } from "./sidebar/child-sessions-section";
 import { TerminalIcon, LinkIcon } from "@/components/ui/icons";
 import { buildAuthenticatedUrl } from "@/lib/urls";
@@ -142,6 +144,14 @@ export function SessionRightSidebarContent({
             urls={sessionState.tunnelUrls}
             sandboxStatus={sessionState.sandboxStatus}
           />
+        </div>
+      )}
+
+      {/* Restart sandbox — only for a dead-idle (stopped/stale) sandbox, where
+          the links above are absent. failed is handled by the composer button. */}
+      {RESTARTABLE_SANDBOX_STATUSES.has(sessionState.sandboxStatus) && (
+        <div className="px-4 py-4 border-b border-border-muted">
+          <SandboxRestartSection sessionId={sessionId} sandboxStatus={sessionState.sandboxStatus} />
         </div>
       )}
 
