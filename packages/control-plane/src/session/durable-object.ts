@@ -375,8 +375,8 @@ export class SessionDO extends DurableObject<Env> {
         setSessionStatus: async (status) => {
           await this.transitionSessionStatus(status);
         },
-        reconcileSessionStatusAfterExecution: async (success) => {
-          await this.reconcileSessionStatusAfterExecution(success);
+        reconcileSessionStatusAfterExecution: async (success, cancelled) => {
+          await this.reconcileSessionStatusAfterExecution(success, cancelled);
         },
         scheduleExecutionTimeout: async (startedAtMs: number) => {
           const deadline = startedAtMs + this.executionTimeoutMs;
@@ -727,8 +727,8 @@ export class SessionDO extends DurableObject<Env> {
         applySessionTitleUpdate: (title, options) => this.applySessionTitleUpdate(title, options),
         getIsProcessing: () => this.getIsProcessing(),
         triggerSnapshot: (reason) => this.triggerSnapshot(reason),
-        reconcileSessionStatusAfterExecution: async (success) => {
-          await this.reconcileSessionStatusAfterExecution(success);
+        reconcileSessionStatusAfterExecution: async (success, cancelled) => {
+          await this.reconcileSessionStatusAfterExecution(success, cancelled);
         },
         updateLastActivity: (timestamp) => this.updateLastActivity(timestamp),
         scheduleInactivityCheck: () => this.scheduleInactivityCheck(),
@@ -1997,10 +1997,21 @@ export class SessionDO extends DurableObject<Env> {
     );
   }
 
-  private async reconcileSessionStatusAfterExecution(success: boolean): Promise<void> {
+  private async reconcileSessionStatusAfterExecution(
+    success: boolean,
+    cancelled = false
+  ): Promise<void> {
     const pendingOrProcessing = this.repository.getPendingOrProcessingCount();
+    // A deliberate stop is not an error: surface it as "cancelled" (neutral)
+    // rather than "failed" (error) so a stopped session isn't shown as broken.
     const nextStatus: SessionStatus =
-      pendingOrProcessing > 0 ? "active" : success ? "completed" : "failed";
+      pendingOrProcessing > 0
+        ? "active"
+        : success
+          ? "completed"
+          : cancelled
+            ? "cancelled"
+            : "failed";
     await this.transitionSessionStatus(nextStatus);
   }
 

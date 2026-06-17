@@ -54,7 +54,7 @@ interface MessageQueueDeps {
   spawnSandbox: () => Promise<void>;
   broadcast: (message: ServerMessage) => void;
   setSessionStatus: (status: SessionStatus) => Promise<void>;
-  reconcileSessionStatusAfterExecution: (success: boolean) => Promise<void>;
+  reconcileSessionStatusAfterExecution: (success: boolean, cancelled?: boolean) => Promise<void>;
   scheduleExecutionTimeout?: (startedAtMs: number) => Promise<void>;
 }
 
@@ -357,7 +357,8 @@ export class SessionMessageQueue {
       );
 
       if (!options.suppressStatusReconcile) {
-        await this.deps.reconcileSessionStatusAfterExecution(false);
+        // A stop is a deliberate cancellation, not a failure.
+        await this.deps.reconcileSessionStatusAfterExecution(false, true);
       }
     }
 

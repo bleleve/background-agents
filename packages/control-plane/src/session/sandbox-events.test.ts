@@ -322,7 +322,7 @@ describe("SessionSandboxEventProcessor", () => {
     );
     expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_event", event });
     expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });
-    expect(h.reconcileSessionStatusAfterExecution).toHaveBeenCalledWith(true);
+    expect(h.reconcileSessionStatusAfterExecution).toHaveBeenCalledWith(true, false);
     expect(h.triggerSnapshot).toHaveBeenCalledWith("execution_complete");
     expect(h.scheduleInactivityCheck).toHaveBeenCalledTimes(1);
     expect(h.processMessageQueue).toHaveBeenCalledTimes(1);
