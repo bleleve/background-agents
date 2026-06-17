@@ -1947,6 +1947,11 @@ class AgentBridge:
                 {
                     "type": "push_error",
                     "error": "No repository found",
+                    # branchName is required by the control-plane push resolver:
+                    # it keys the awaiting promise by branch and drops events
+                    # without it, so a missing branchName here would leave the
+                    # push promise unsettled until its 360s timeout.
+                    "branchName": branch_name,
                     "timestamp": time.time(),
                 }
             )

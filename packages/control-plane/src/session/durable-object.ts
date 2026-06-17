@@ -96,6 +96,7 @@ import {
   createPullRequestHandler,
   type PullRequestHandler,
 } from "./http/handlers/pull-request.handler";
+import { createPrStateHandler, type PrStateHandler } from "./http/handlers/pr-state.handler";
 import {
   createParticipantsHandler,
   type ParticipantsHandler,
@@ -196,6 +197,8 @@ export class SessionDO extends DurableObject<Env> {
   private _sessionLifecycleHandler: SessionLifecycleHandler | null = null;
   // Pull request handler (lazily initialized)
   private _pullRequestHandler: PullRequestHandler | null = null;
+  // PR state handler (lazily initialized)
+  private _prStateHandler: PrStateHandler | null = null;
   // Participants handler (lazily initialized)
   private _participantsHandler: ParticipantsHandler | null = null;
   // Alarm handler (lazily initialized)
@@ -218,6 +221,7 @@ export class SessionDO extends DurableObject<Env> {
     listArtifacts: (_request, url) => this.messagesHandler.listArtifacts(url),
     listMessages: (_request, url) => this.messagesHandler.listMessages(url),
     createPr: (request) => this.pullRequestHandler.createPr(request),
+    updatePrState: (request) => this.prStateHandler.updatePrState(request),
     wsToken: (request) => this.wsTokenHandler.generateWsToken(request),
     updateTitle: (request) => this.sessionLifecycleHandler.updateTitle(request),
     archive: (request) => this.sessionLifecycleHandler.archive(request),
@@ -371,8 +375,8 @@ export class SessionDO extends DurableObject<Env> {
         setSessionStatus: async (status) => {
           await this.transitionSessionStatus(status);
         },
-        reconcileSessionStatusAfterExecution: async (success) => {
-          await this.reconcileSessionStatusAfterExecution(success);
+        reconcileSessionStatusAfterExecution: async (success, cancelled) => {
+          await this.reconcileSessionStatusAfterExecution(success, cancelled);
         },
         scheduleExecutionTimeout: async (startedAtMs: number) => {
           const deadline = startedAtMs + this.executionTimeoutMs;
@@ -675,6 +679,17 @@ export class SessionDO extends DurableObject<Env> {
     return this._pullRequestHandler;
   }
 
+  private get prStateHandler(): PrStateHandler {
+    if (!this._prStateHandler) {
+      this._prStateHandler = createPrStateHandler({
+        repository: this.repository,
+        broadcast: (message) => this.broadcast(message),
+        parseArtifactMetadata: (artifact) => this.parseArtifactMetadata(artifact),
+      });
+    }
+    return this._prStateHandler;
+  }
+
   private get participantsHandler(): ParticipantsHandler {
     if (!this._participantsHandler) {
       this._participantsHandler = createParticipantsHandler({
@@ -712,8 +727,8 @@ export class SessionDO extends DurableObject<Env> {
         applySessionTitleUpdate: (title, options) => this.applySessionTitleUpdate(title, options),
         getIsProcessing: () => this.getIsProcessing(),
         triggerSnapshot: (reason) => this.triggerSnapshot(reason),
-        reconcileSessionStatusAfterExecution: async (success) => {
-          await this.reconcileSessionStatusAfterExecution(success);
+        reconcileSessionStatusAfterExecution: async (success, cancelled) => {
+          await this.reconcileSessionStatusAfterExecution(success, cancelled);
         },
         updateLastActivity: (timestamp) => this.updateLastActivity(timestamp),
         scheduleInactivityCheck: () => this.scheduleInactivityCheck(),
@@ -829,6 +844,7 @@ export class SessionDO extends DurableObject<Env> {
       updateSandboxModalObjectId: (id) => this.repository.updateSandboxModalObjectId(id),
       updateSandboxSnapshotImageId: (sandboxId, imageId) =>
         this.repository.updateSandboxSnapshotImageId(sandboxId, imageId),
+      clearSandboxSnapshotImageId: () => this.repository.clearSandboxSnapshotImageId(),
       updateSandboxLastActivity: (timestamp) =>
         this.repository.updateSandboxLastActivity(timestamp),
       updateSandboxHeartbeat: (timestamp) => this.repository.updateSandboxHeartbeat(timestamp),
@@ -1698,7 +1714,10 @@ export class SessionDO extends DurableObject<Env> {
    * broadcasts synthetic execution_complete
    * so all clients flush buffered tokens, and forwards stop to the sandbox.
    */
-  private async stopExecution(options?: { suppressStatusReconcile?: boolean }): Promise<void> {
+  private async stopExecution(options?: {
+    suppressStatusReconcile?: boolean;
+    failPending?: boolean;
+  }): Promise<void> {
     await this.messageQueue.stopExecution(options);
   }
 
@@ -1982,10 +2001,21 @@ export class SessionDO extends DurableObject<Env> {
     );
   }
 
-  private async reconcileSessionStatusAfterExecution(success: boolean): Promise<void> {
+  private async reconcileSessionStatusAfterExecution(
+    success: boolean,
+    cancelled = false
+  ): Promise<void> {
     const pendingOrProcessing = this.repository.getPendingOrProcessingCount();
+    // A deliberate stop is not an error: surface it as "cancelled" (neutral)
+    // rather than "failed" (error) so a stopped session isn't shown as broken.
     const nextStatus: SessionStatus =
-      pendingOrProcessing > 0 ? "active" : success ? "completed" : "failed";
+      pendingOrProcessing > 0
+        ? "active"
+        : success
+          ? "completed"
+          : cancelled
+            ? "cancelled"
+            : "failed";
     await this.transitionSessionStatus(nextStatus);
   }
 

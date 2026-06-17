@@ -191,3 +191,22 @@ export interface PullRequestReviewPayload {
   repository: { owner: { login: string }; name: string; private: boolean };
   sender: { login: string; id: number };
 }
+
+export interface PullRequestStateChangedPayload {
+  action: "closed" | "reopened";
+  pull_request: {
+    number: number;
+    title: string;
+    body: string | null;
+    html_url: string;
+    state: string;
+    merged?: boolean;
+    draft?: boolean;
+    user: { login: string };
+    head: { ref: string; sha: string; repo?: { full_name: string } };
+    base: { ref: string };
+    labels?: Array<{ name: string }>;
+  };
+  repository: { owner: { login: string }; name: string; private: boolean };
+  sender?: { login: string; id: number; avatar_url: string };
+}

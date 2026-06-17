@@ -624,7 +624,10 @@ describe("createSessionLifecycleHandler", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "cancelled" });
-    expect(stopExecution).toHaveBeenCalledWith({ suppressStatusReconcile: true });
+    expect(stopExecution).toHaveBeenCalledWith({
+      suppressStatusReconcile: true,
+      failPending: true,
+    });
     expect(transitionSessionStatus).toHaveBeenCalledWith("cancelled");
     expect(sendToSandbox).toHaveBeenCalledWith(ws, { type: "shutdown" });
     expect(updateSandboxStatus).toHaveBeenCalledWith("stopped");

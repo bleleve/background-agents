@@ -106,6 +106,33 @@ async function handleCreatePR(
   });
 }
 
+const VALID_PR_STATES = new Set(["open", "closed", "merged", "draft"]);
+
+async function handleUpdatePrState(
+  request: Request,
+  _env: Env,
+  match: RegExpMatchArray,
+  ctx: SessionRouteContext
+): Promise<Response> {
+  const sessionId = getSessionId(match);
+  if (sessionId instanceof Response) return sessionId;
+
+  const body = await parseJsonBody<unknown>(request);
+  if (body instanceof Response) return body;
+  if (!isObjectBody(body)) return error("JSON body must be an object");
+
+  const state = body.state;
+  if (typeof state !== "string" || !VALID_PR_STATES.has(state)) {
+    return error("state must be one of open, closed, merged, draft");
+  }
+
+  return ctx.sessionRuntime.fetch(sessionId, SessionInternalPaths.updatePrState, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state }),
+  });
+}
+
 async function handleUpdateSessionTitle(
   request: Request,
   _env: Env,
@@ -249,6 +276,11 @@ export const sessionRuntimeProxyRoutes: Route[] = [
     method: "POST",
     pattern: parsePattern("/sessions/:id/pr"),
     handler: handleCreatePR,
+  }),
+  sessionRoute({
+    method: "POST",
+    pattern: parsePattern("/sessions/:id/pr-state"),
+    handler: handleUpdatePrState,
   }),
   simpleProxyRoute({
     method: "POST",

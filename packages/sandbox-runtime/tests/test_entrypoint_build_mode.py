@@ -44,6 +44,16 @@ def _make_supervisor(env_vars: dict):
 class TestImageBuildMode:
     """IMAGE_BUILD_MODE=true: setup only, don't run start/OpenCode/bridge."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_prewarm_opencode_db(self):
+        """Build-mode run() pre-migrates the OpenCode DB by launching
+        `opencode serve`; stub it so tests don't spawn opencode (which would
+        poll for minutes against a non-existent server)."""
+        from sandbox_runtime.entrypoint import SandboxSupervisor
+
+        with patch.object(SandboxSupervisor, "_prewarm_opencode_db", AsyncMock()):
+            yield
+
     @pytest.mark.asyncio
     async def test_exits_after_setup(self, build_env):
         """Should return from run() after git sync + setup, before OpenCode."""

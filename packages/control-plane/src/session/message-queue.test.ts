@@ -313,7 +313,8 @@ describe("SessionMessageQueue", () => {
     expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });
     expect(h.wsManager.send).toHaveBeenCalledWith(sandboxWs, { type: "stop" });
     expect(h.waitUntil).toHaveBeenCalledTimes(1);
-    expect(h.reconcileSessionStatusAfterExecution).toHaveBeenCalledWith(false);
+    // A stop is a cancellation, not a failure.
+    expect(h.reconcileSessionStatusAfterExecution).toHaveBeenCalledWith(false, true);
   });
 
   it("suppresses session status reconcile when stopExecution is called with suppress flag", async () => {
@@ -323,6 +324,32 @@ describe("SessionMessageQueue", () => {
     await h.queue.stopExecution({ suppressStatusReconcile: true });
 
     expect(h.reconcileSessionStatusAfterExecution).not.toHaveBeenCalled();
+  });
+
+  it("fails all queued pending messages with a cancelled completion when failPending is set", async () => {
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue(null);
+    // Two queued prompts, then the queue drains.
+    h.repository.getNextPendingMessage
+      .mockReturnValueOnce(createMessage({ id: "p1" }))
+      .mockReturnValueOnce(createMessage({ id: "p2" }))
+      .mockReturnValue(null);
+
+    await h.queue.stopExecution({ suppressStatusReconcile: true, failPending: true });
+
+    for (const id of ["p1", "p2"]) {
+      expect(h.repository.updateMessageCompletion).toHaveBeenCalledWith(
+        id,
+        "failed",
+        expect.any(Number),
+        "Execution was cancelled"
+      );
+      expect(h.repository.upsertExecutionCompleteEvent).toHaveBeenCalledWith(
+        id,
+        expect.objectContaining({ type: "execution_complete", success: false, cancelled: true }),
+        expect.any(Number)
+      );
+    }
   });
 
   it("reconciles session status when failing a stuck processing message", async () => {
@@ -335,7 +362,7 @@ describe("SessionMessageQueue", () => {
     expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
       "msg-timeout",
       false,
-      "Execution interrupted: sandbox stopped due to inactivity"
+      "Execution interrupted while the agent was running: the sandbox stopped due to inactivity"
     );
     // A timeout is a genuine failure, not a deliberate stop — it must NOT be
     // flagged cancelled (the flow renders it red, not neutral).
@@ -355,7 +382,7 @@ describe("SessionMessageQueue", () => {
     expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
       "msg-generic",
       false,
-      "Execution interrupted: sandbox_crashed"
+      "Execution interrupted while the agent was running: sandbox_crashed"
     );
   });
 
@@ -389,7 +416,22 @@ describe("SessionMessageQueue", () => {
     expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
       "msg-pending",
       false,
-      "Execution interrupted: sandbox failed to connect"
+      "Sandbox never became ready, so the prompt did not run: the sandbox failed to connect in time"
+    );
+  });
+
+  it("distinguishes a mid-execution interruption from a prompt that never ran", async () => {
+    // Same connecting_timeout reason, but a processing message means the agent
+    // had already started — so it must NOT be reported as "never ran".
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue({ id: "msg-running" });
+
+    await h.queue.failStuckProcessingMessage("connecting_timeout");
+
+    expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
+      "msg-running",
+      false,
+      "Execution interrupted while the agent was running: the sandbox failed to connect in time"
     );
   });
 

@@ -26,7 +26,7 @@ interface SessionSandboxEventProcessorDeps {
   ) => SessionTitleUpdateResult;
   getIsProcessing: () => boolean;
   triggerSnapshot: (reason: string) => Promise<void>;
-  reconcileSessionStatusAfterExecution: (success: boolean) => Promise<void>;
+  reconcileSessionStatusAfterExecution: (success: boolean, cancelled?: boolean) => Promise<void>;
   updateLastActivity: (timestamp: number) => void;
   scheduleInactivityCheck: () => Promise<void>;
   processMessageQueue: () => Promise<void>;
@@ -237,7 +237,10 @@ export class SessionSandboxEventProcessor {
           this.deps.callbackService.notifyComplete(completionMessageId, event.success, event.error)
         );
 
-        await this.deps.reconcileSessionStatusAfterExecution(event.success);
+        await this.deps.reconcileSessionStatusAfterExecution(
+          event.success,
+          event.cancelled === true
+        );
       } else {
         this.deps.log.info("prompt.complete", {
           event: "prompt.complete",

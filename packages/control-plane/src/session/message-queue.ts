@@ -54,13 +54,23 @@ interface MessageQueueDeps {
   spawnSandbox: () => Promise<void>;
   broadcast: (message: ServerMessage) => void;
   setSessionStatus: (status: SessionStatus) => Promise<void>;
-  reconcileSessionStatusAfterExecution: (success: boolean) => Promise<void>;
+  reconcileSessionStatusAfterExecution: (success: boolean, cancelled?: boolean) => Promise<void>;
   scheduleExecutionTimeout?: (startedAtMs: number) => Promise<void>;
 }
 
 interface StopExecutionOptions {
   suppressStatusReconcile?: boolean;
+  /** Also fail all queued-but-undispatched (pending) messages (e.g. on cancel). */
+  failPending?: boolean;
 }
+
+/** Session statuses under which the queue must not dispatch a prompt. */
+const TERMINAL_SESSION_STATUSES = new Set<SessionStatus>([
+  "completed",
+  "failed",
+  "cancelled",
+  "archived",
+]);
 
 type ProcessingFailureReason =
   | "execution_timeout"
@@ -68,6 +78,7 @@ type ProcessingFailureReason =
   | "inactivity_timeout"
   | "connecting_timeout"
   | "sandbox_disconnected"
+  | "circuit_breaker_open"
   | (string & {});
 
 type ProcessingFailure = {
@@ -75,27 +86,44 @@ type ProcessingFailure = {
   error?: string;
 };
 
-const FAILURE_REASON_TO_ERROR: Record<ProcessingFailureReason, string> = {
-  execution_timeout: "Execution timed out (stuck processing)",
-  heartbeat_stale: "Execution interrupted: sandbox heartbeat timed out",
-  inactivity_timeout: "Execution interrupted: sandbox stopped due to inactivity",
-  connecting_timeout: "Execution interrupted: sandbox failed to connect",
-  sandbox_disconnected:
-    "Execution interrupted: the sandbox disconnected before completing the turn",
+// Short human-readable cause per watchdog reason. The surrounding sentence is
+// chosen by resolveProcessingFailure based on whether the agent had actually
+// started, so a queued-but-never-dispatched prompt is not reported as
+// "Execution interrupted" / "failed to connect" when the agent in fact ran.
+const FAILURE_REASON_DETAIL: Record<ProcessingFailureReason, string> = {
+  execution_timeout: "the turn exceeded the maximum processing time",
+  heartbeat_stale: "the sandbox heartbeat timed out",
+  inactivity_timeout: "the sandbox stopped due to inactivity",
+  connecting_timeout: "the sandbox failed to connect in time",
+  sandbox_disconnected: "the sandbox disconnected",
+  circuit_breaker_open: "sandbox spawning is temporarily disabled after repeated failures",
 };
 
-function resolveProcessingFailure(failure: ProcessingFailureReason | ProcessingFailure): {
+/**
+ * Build the failure reason recorded on the message and propagated to the
+ * automation run. `agentStarted` distinguishes a mid-execution interruption
+ * (the message was processing) from a prompt that never ran (still queued
+ * because the sandbox never became ready) — without it, a session that ran
+ * for minutes could be reported as "sandbox failed to connect".
+ */
+function resolveProcessingFailure(
+  failure: ProcessingFailureReason | ProcessingFailure,
+  agentStarted: boolean
+): {
   reason: string;
   error: string;
 } {
   const reason = typeof failure === "string" ? failure : failure.reason;
   const normalizedReason = reason.trim() || "unknown";
   const explicitError = typeof failure === "string" ? undefined : failure.error?.trim();
-  const mappedError = FAILURE_REASON_TO_ERROR[normalizedReason];
+  const detail = FAILURE_REASON_DETAIL[normalizedReason] ?? normalizedReason;
+  const framed = agentStarted
+    ? `Execution interrupted while the agent was running: ${detail}`
+    : `Sandbox never became ready, so the prompt did not run: ${detail}`;
 
   return {
     reason: normalizedReason,
-    error: explicitError || mappedError || `Execution interrupted: ${normalizedReason}`,
+    error: explicitError || framed,
   };
 }
 
@@ -216,6 +244,18 @@ export class SessionMessageQueue {
   }
 
   async processMessageQueue(): Promise<void> {
+    // Never dispatch under a terminal session. A new prompt flips the session
+    // back to "active" before enqueueing, so this only blocks stray dispatches
+    // (e.g. a late sandbox reconnect calling the queue) from running a prompt
+    // under a cancelled/completed/failed/archived session.
+    const currentStatus = this.deps.getSession()?.status;
+    if (currentStatus && TERMINAL_SESSION_STATUSES.has(currentStatus)) {
+      this.deps.log.debug("processMessageQueue: session is terminal, skipping", {
+        session_status: currentStatus,
+      });
+      return;
+    }
+
     if (this.deps.repository.getProcessingMessage()) {
       this.deps.log.debug("processMessageQueue: already processing, returning");
       return;
@@ -357,8 +397,16 @@ export class SessionMessageQueue {
       );
 
       if (!options.suppressStatusReconcile) {
-        await this.deps.reconcileSessionStatusAfterExecution(false);
+        // A stop is a deliberate cancellation, not a failure.
+        await this.deps.reconcileSessionStatusAfterExecution(false, true);
       }
+    }
+
+    // Fail any queued-but-undispatched prompts too. Otherwise a cancel leaves
+    // them "pending" under a terminal session — the queue never runs again to
+    // dispatch or fail them, so they linger as outstanding work forever.
+    if (options.failPending) {
+      this.failQueuedPendingMessages(now);
     }
 
     this.deps.broadcast({ type: "processing_status", isProcessing: false });
@@ -366,6 +414,39 @@ export class SessionMessageQueue {
     const sandboxWs = this.deps.wsManager.getSandboxSocket();
     if (sandboxWs) {
       this.deps.wsManager.send(sandboxWs, { type: "stop" });
+    }
+  }
+
+  /**
+   * Fail every queued-but-undispatched (pending) message, emitting a cancelled
+   * execution_complete per message so the UI clears each queued bubble. Used on
+   * cancel so no pending prompt is stranded under a terminal session.
+   */
+  private failQueuedPendingMessages(now: number): void {
+    const cancelError = "Execution was cancelled";
+    // updateMessageCompletion flips status off "pending", so getNextPendingMessage
+    // returns the next one each iteration and the loop terminates.
+    for (;;) {
+      const pending = this.deps.repository.getNextPendingMessage();
+      if (!pending) break;
+
+      this.deps.repository.updateMessageCompletion(pending.id, "failed", now, cancelError);
+
+      const syntheticExecutionComplete: Extract<SandboxEvent, { type: "execution_complete" }> = {
+        type: "execution_complete",
+        messageId: pending.id,
+        success: false,
+        cancelled: true,
+        error: cancelError,
+        sandboxId: "",
+        timestamp: now / 1000,
+      };
+      this.deps.repository.upsertExecutionCompleteEvent(
+        pending.id,
+        syntheticExecutionComplete,
+        now
+      );
+      this.deps.broadcast({ type: "sandbox_event", event: syntheticExecutionComplete });
     }
   }
 
@@ -390,11 +471,13 @@ export class SessionMessageQueue {
     // invoked by watchdogs (onSandboxTerminating) and on a clean sandbox
     // disconnect, i.e. genuine terminal failures, so failing a pending message
     // here is safe and never races a still-progressing turn.
-    const stuckMessage =
-      this.deps.repository.getProcessingMessage() ?? this.deps.repository.getNextPendingMessage();
+    const processingMessage = this.deps.repository.getProcessingMessage();
+    const stuckMessage = processingMessage ?? this.deps.repository.getNextPendingMessage();
     if (!stuckMessage) return;
 
-    const { reason, error } = resolveProcessingFailure(failure);
+    // A processing message means the agent had started; a pending fallback
+    // means the prompt never ran (the sandbox never became ready).
+    const { reason, error } = resolveProcessingFailure(failure, processingMessage != null);
     this.deps.repository.updateMessageCompletion(stuckMessage.id, "failed", now, error);
 
     const syntheticEvent: Extract<SandboxEvent, { type: "execution_complete" }> = {
