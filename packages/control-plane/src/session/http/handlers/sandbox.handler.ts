@@ -154,6 +154,11 @@ export function createSandboxHandler(deps: SandboxHandlerDeps): SandboxHandler {
         return Response.json({ valid: false, error: "No sandbox" }, { status: 404 });
       }
 
+      // Reject stopped/stale — NOT "failed" (intentional). A current sandbox
+      // marked "failed" by a premature connecting-timeout is the same id+token
+      // that legitimately revives; a stale sandbox from a previous lifecycle
+      // already fails token verification because the auth token rotates on every
+      // spawn. See the WS-accept gate in durable-object.ts for the rationale.
       if (sandbox.status === "stopped" || sandbox.status === "stale") {
         deps.getLog().warn("Sandbox token verification failed: sandbox is stopped/stale", {
           status: sandbox.status,
