@@ -135,6 +135,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
   const reconcileSessionStatusAfterExecution = vi.fn(async (_success: boolean) => {});
   const updateLastActivity = vi.fn();
   const waitUntil = vi.fn();
+  const getSession = vi.fn(() => createSession());
 
   const queue = new SessionMessageQueue({
     env: {} as Env,
@@ -153,7 +154,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
     scmProvider: "github",
     getClientInfo: options?.getClientInfo ?? (() => createClientInfo()),
     validateReasoningEffort: vi.fn(() => null),
-    getSession: vi.fn(() => createSession()),
+    getSession,
     updateLastActivity,
     spawnSandbox,
     broadcast,
@@ -172,6 +173,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
     setSessionStatus,
     reconcileSessionStatusAfterExecution,
     waitUntil,
+    getSession,
   };
 }
 
@@ -311,6 +313,40 @@ describe("SessionMessageQueue", () => {
     expect(command.resumeContext).toEqual({
       currentPlan: { version: 3, content: "## Plan\n- step 1", createdAt: 42 },
     });
+  });
+
+  it("carries the stored opencodeSessionId on the prompt command so the sandbox can resume", async () => {
+    const h = buildQueue();
+    const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage());
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+    h.getSession.mockReturnValue(createSession({ opencode_session_id: "oc-42" }));
+
+    await h.queue.processMessageQueue();
+
+    const promptCall = h.wsManager.send.mock.calls.find(
+      (call: unknown[]) => (call[1] as { type?: string } | undefined)?.type === "prompt"
+    ) as unknown[] | undefined;
+    expect(promptCall).toBeDefined();
+    const command = promptCall![1] as { opencodeSessionId?: string };
+    expect(command.opencodeSessionId).toBe("oc-42");
+  });
+
+  it("omits opencodeSessionId when the session has none stored", async () => {
+    const h = buildQueue();
+    const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage());
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+    h.getSession.mockReturnValue(createSession({ opencode_session_id: null }));
+
+    await h.queue.processMessageQueue();
+
+    const promptCall = h.wsManager.send.mock.calls.find(
+      (call: unknown[]) => (call[1] as { type?: string } | undefined)?.type === "prompt"
+    ) as unknown[] | undefined;
+    expect(promptCall).toBeDefined();
+    const command = promptCall![1] as { opencodeSessionId?: string };
+    expect(command.opencodeSessionId).toBeUndefined();
   });
 
   it("marks processing message failed and broadcasts synthetic completion on stop", async () => {

@@ -310,6 +310,19 @@ export class SessionRepository {
     );
   }
 
+  /**
+   * Persist the OpenCode session id the sandbox reports on connect, so it can be
+   * replayed on the next prompt and the agent resumes its prior context after a
+   * relaunch/restore instead of starting a fresh OpenCode session.
+   */
+  updateOpencodeSessionId(opencodeSessionId: string, updatedAt: number): void {
+    this.sql.exec(
+      `UPDATE session SET opencode_session_id = ?, updated_at = ? WHERE id = (SELECT id FROM session LIMIT 1)`,
+      opencodeSessionId,
+      updatedAt
+    );
+  }
+
   updateSessionTitle(sessionId: string, title: string, updatedAt: number): void {
     this.sql.exec(
       `UPDATE session SET title = ?, updated_at = ? WHERE id = ?`,
@@ -791,13 +804,17 @@ export class SessionRepository {
   }
 
   /**
-   * Revert a message back to 'pending' (clearing started_at). Used to roll back
-   * the optimistic 'processing' commit when dispatch to the sandbox failed, so
-   * the message can be re-dispatched instead of being stuck 'processing'.
+   * Revert a message back to 'pending', clearing the started/completed
+   * timestamps and any error so it can be re-dispatched cleanly. Two callers:
+   *   - rolling back the optimistic 'processing' commit when dispatch to the
+   *     sandbox failed (the message had no completed_at/error_message yet); and
+   *   - resuming a 'failed' turn on sandbox relaunch (the message carried a
+   *     completed_at + error_message that must be cleared so it re-runs as a
+   *     fresh pending turn rather than a stale failure).
    */
   revertMessageToPending(messageId: string): void {
     this.sql.exec(
-      `UPDATE messages SET status = 'pending', started_at = NULL WHERE id = ?`,
+      `UPDATE messages SET status = 'pending', started_at = NULL, completed_at = NULL, error_message = NULL WHERE id = ?`,
       messageId
     );
   }
