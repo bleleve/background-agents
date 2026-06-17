@@ -2298,9 +2298,9 @@ export class SessionDO extends DurableObject<Env> {
     return false;
   }
 
-  private updateSandboxStatus(status: string): void {
-    this.repository.updateSandboxStatus(status as SandboxStatus);
-    this.syncSandboxStatusIndex(status as SandboxStatus);
+  private updateSandboxStatus(status: SandboxStatus): void {
+    this.repository.updateSandboxStatus(status);
+    this.syncSandboxStatusIndex(status);
   }
 
   // HTTP handlers
