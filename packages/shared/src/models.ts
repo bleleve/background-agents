@@ -33,6 +33,7 @@ export const VALID_MODELS = [
   "deepseek/deepseek-v4-flash",
   "deepseek/deepseek-v4-pro",
   "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code",
+  "cloudflare-workers-ai/@cf/zai-org/glm-5.2",
 ] as const;
 
 export type ValidModel = (typeof VALID_MODELS)[number];
@@ -255,6 +256,11 @@ export const MODEL_OPTIONS: ModelCategory[] = [
       {
         id: "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code",
         name: "Kimi K2.7",
+        description: "Cloudflare Workers AI",
+      },
+      {
+        id: "cloudflare-workers-ai/@cf/zai-org/glm-5.2",
+        name: "GLM 5.2",
         description: "Cloudflare Workers AI",
       },
     ],
