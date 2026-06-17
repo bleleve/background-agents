@@ -404,6 +404,13 @@ async function handleCompletionCallback(
             elements: [
               {
                 type: "button",
+                text: { type: "plain_text", text: "Retry" },
+                action_id: "relaunch_sandbox",
+                value: sessionId,
+                style: "primary",
+              },
+              {
+                type: "button",
                 text: { type: "plain_text", text: "View Session" },
                 url: `${env.WEB_APP_URL}/session/${sessionId}`,
                 action_id: "view_session",
