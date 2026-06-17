@@ -25,6 +25,8 @@ interface SessionRightSidebarProps {
   participants: ParticipantPresence[];
   events: SandboxEvent[];
   artifacts: Artifact[];
+  /** Whether the agent is actively processing (drives the Tasks in-progress animation). */
+  isProcessing: boolean;
   terminalOpen?: boolean;
   onToggleTerminal?: () => void;
   onOpenMedia: (artifactId: string) => void;
@@ -38,6 +40,7 @@ export function SessionRightSidebarContent({
   participants,
   events,
   artifacts,
+  isProcessing,
   terminalOpen,
   onToggleTerminal,
   onOpenMedia,
@@ -145,7 +148,7 @@ export function SessionRightSidebarContent({
       {/* Tasks */}
       {tasks.length > 0 && (
         <CollapsibleSection title="Tasks" defaultOpen={true}>
-          <TasksSection tasks={tasks} />
+          <TasksSection tasks={tasks} active={isProcessing} />
         </CollapsibleSection>
       )}
 
@@ -188,6 +191,7 @@ export function SessionRightSidebar({
   participants,
   events,
   artifacts,
+  isProcessing,
   terminalOpen,
   onToggleTerminal,
   onOpenMedia,
@@ -200,6 +204,7 @@ export function SessionRightSidebar({
         participants={participants}
         events={events}
         artifacts={artifacts}
+        isProcessing={isProcessing}
         terminalOpen={terminalOpen}
         onToggleTerminal={onToggleTerminal}
         onOpenMedia={onOpenMedia}

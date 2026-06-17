@@ -94,6 +94,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
     getProcessingMessage: vi.fn(() => null as { id: string } | null),
     getNextPendingMessage: vi.fn(() => null as MessageRow | null),
     updateMessageToProcessing: vi.fn(),
+    revertMessageToPending: vi.fn(),
     getParticipantById: vi.fn(() => createParticipant()),
     updateParticipantCoalesce: vi.fn(),
     updateParticipantRole: vi.fn(),
@@ -116,6 +117,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
   const wsManager = {
     getSandboxSocket: vi.fn(() => null as WebSocket | null),
     send: vi.fn(() => true),
+    clearSandboxSocket: vi.fn(),
   };
 
   const participantService = {
@@ -245,6 +247,26 @@ describe("SessionMessageQueue", () => {
       expect.objectContaining({ type: "prompt", messageId: "msg-42" })
     );
     expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: true });
+  });
+
+  it("rolls the message back to pending and respawns when the prompt send fails", async () => {
+    const h = buildQueue();
+    const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage({ id: "msg-x" }));
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+    h.wsManager.send.mockReturnValue(false); // delivery fails
+
+    await h.queue.processMessageQueue();
+
+    // Optimistic processing commit is rolled back, not left stuck.
+    expect(h.repository.updateMessageToProcessing).toHaveBeenCalledWith(
+      "msg-x",
+      expect.any(Number)
+    );
+    expect(h.repository.revertMessageToPending).toHaveBeenCalledWith("msg-x");
+    expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });
+    expect(h.wsManager.clearSandboxSocket).toHaveBeenCalled();
+    expect(h.spawnSandbox).toHaveBeenCalled();
   });
 
   it("omits resumeContext when no plan is saved", async () => {

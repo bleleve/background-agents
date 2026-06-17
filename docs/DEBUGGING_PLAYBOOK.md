@@ -106,13 +106,13 @@ Wide events use `outcome` to indicate result:
 
 #### Session Durable Object (`component: "session-do"`)
 
-| Event             | Level      | Key Fields                                                                                                     | Description                    |
-| ----------------- | ---------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `do.request`      | info       | `http_method`, `http_path`, `http_status`, `duration_ms`, `outcome`                                            | One per DO internal route call |
-| `ws.connect`      | info, warn | `ws_type` (sandbox\|client), `outcome`, `reject_reason`, `sandbox_id`, `participant_id`, `duration_ms`         | WebSocket lifecycle            |
-| `prompt.enqueue`  | info       | `message_id`, `source`, `author_id`, `user_id`, `model`, `content_length`, `has_attachments`, `queue_position` | Message queued                 |
-| `prompt.dispatch` | info       | `message_id`, `outcome`, `reason`, `model`, `has_sandbox_ws`, `queue_wait_ms`                                  | Message sent to sandbox        |
-| `prompt.complete` | info, warn | `message_id`, `outcome`, `total_duration_ms`, `processing_duration_ms`, `queue_duration_ms`                    | Prompt run finished            |
+| Event             | Level      | Key Fields                                                                                                                                                 | Description                    |
+| ----------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `do.request`      | info       | `http_method`, `http_path`, `http_status`, `duration_ms`, `outcome`                                                                                        | One per DO internal route call |
+| `ws.connect`      | info, warn | `ws_type` (sandbox\|client), `outcome`, `reject_reason`, `sandbox_id`, `participant_id`, `duration_ms`                                                     | WebSocket lifecycle            |
+| `prompt.enqueue`  | info       | `message_id`, `source`, `author_id`, `user_id`, `model`, `content_length`, `has_attachments`, `queue_position`                                             | Message queued                 |
+| `prompt.dispatch` | info       | `message_id`, `outcome` (`sent`\|`send_failed`\|`deferred`), `reason` (when `deferred`), `model`, `has_sandbox_ws`, `sandbox_ready_state`, `queue_wait_ms` | Message sent to sandbox        |
+| `prompt.complete` | info, warn | `message_id`, `outcome`, `total_duration_ms`, `processing_duration_ms`, `queue_duration_ms`                                                                | Prompt run finished            |
 
 #### Lifecycle Manager (`component: "lifecycle-manager"`)
 
@@ -263,7 +263,8 @@ service="control-plane" msg="prompt.complete" message_id="<MSG_ID>"
 
 Key fields to check:
 
-- `prompt.dispatch` → `outcome` and `reason` (was a sandbox connected?)
+- `prompt.dispatch` → `outcome` (`sent`/`send_failed`/`deferred`), `has_sandbox_ws`,
+  `sandbox_ready_state` (was a sandbox connected and was the socket open?)
 - `prompt.run` → `outcome` and `duration_ms` (did it succeed? how long?)
 - `prompt.complete` → `total_duration_ms` (end-to-end time)
 
