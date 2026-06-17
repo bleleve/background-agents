@@ -336,7 +336,7 @@ describe("SessionMessageQueue", () => {
     expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
       "msg-timeout",
       false,
-      "Execution interrupted: sandbox stopped due to inactivity"
+      "Execution interrupted while the agent was running: the sandbox stopped due to inactivity"
     );
     // A timeout is a genuine failure, not a deliberate stop — it must NOT be
     // flagged cancelled (the flow renders it red, not neutral).
@@ -356,7 +356,7 @@ describe("SessionMessageQueue", () => {
     expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
       "msg-generic",
       false,
-      "Execution interrupted: sandbox_crashed"
+      "Execution interrupted while the agent was running: sandbox_crashed"
     );
   });
 
@@ -390,7 +390,22 @@ describe("SessionMessageQueue", () => {
     expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
       "msg-pending",
       false,
-      "Execution interrupted: sandbox failed to connect"
+      "Sandbox never became ready, so the prompt did not run: the sandbox failed to connect in time"
+    );
+  });
+
+  it("distinguishes a mid-execution interruption from a prompt that never ran", async () => {
+    // Same connecting_timeout reason, but a processing message means the agent
+    // had already started — so it must NOT be reported as "never ran".
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue({ id: "msg-running" });
+
+    await h.queue.failStuckProcessingMessage("connecting_timeout");
+
+    expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
+      "msg-running",
+      false,
+      "Execution interrupted while the agent was running: the sandbox failed to connect in time"
     );
   });
 
