@@ -2556,5 +2556,38 @@ describe("SandboxLifecycleManager", () => {
       expect(storage.calls).toContain("incrementCircuitBreakerFailure");
       expect(storage.calls).toContain("updateSandboxStatus:failed");
     });
+
+    it("#1: a failed snapshot restore reconciles the queued prompt via onSandboxTerminating", async () => {
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+      const provider = createMockProvider({
+        restoreFromSnapshot: vi.fn(async () => ({ success: false, error: "snapshot image gone" })),
+      });
+      const { manager } = makeManager(
+        createMockSandbox({ status: "stopped", snapshot_image_id: "img-abc123" }),
+        { provider, onSandboxTerminating }
+      );
+      await manager.spawnSandbox();
+      expect(onSandboxTerminating).toHaveBeenCalledWith("spawn_failed");
+    });
+
+    it("#1: a failed resume reconciles the queued prompt via onSandboxTerminating", async () => {
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+      const provider = createMockProvider({
+        capabilities: { supportsPersistentResume: true },
+        resumeSandbox: vi.fn(async () => ({
+          success: false,
+          shouldSpawnFresh: false,
+          error: "resume boom",
+        })),
+      });
+      const { manager, storage } = makeManager(
+        createMockSandbox({ status: "stopped", modal_object_id: "obj-1", snapshot_image_id: null }),
+        { provider, onSandboxTerminating }
+      );
+      await manager.spawnSandbox();
+      expect(provider.resumeSandbox).toHaveBeenCalled();
+      expect(storage.calls).toContain("updateSandboxStatus:failed");
+      expect(onSandboxTerminating).toHaveBeenCalledWith("spawn_failed");
+    });
   });
 });

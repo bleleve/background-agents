@@ -755,6 +755,11 @@ export class SandboxLifecycleManager {
           type: "sandbox_error",
           error: result.error || "Failed to restore from snapshot",
         });
+        // Reconcile the prompt that triggered this restore. Like doSpawn, a
+        // failed restore is terminal and the pre-armed connecting alarm is
+        // dropped by handleAlarm's terminal early-return, so without this the
+        // queued/processing message hangs forever.
+        await this.callbacks.onSandboxTerminating?.("spawn_failed");
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to restore sandbox";
@@ -773,6 +778,7 @@ export class SandboxLifecycleManager {
         type: "sandbox_error",
         error: errorMessage,
       });
+      await this.callbacks.onSandboxTerminating?.("spawn_failed");
     } finally {
       this.isSpawningSandbox = false;
     }
@@ -868,6 +874,9 @@ export class SandboxLifecycleManager {
       this.log.error("Sandbox resume failed", {
         error: error instanceof Error ? error : String(error),
       });
+      // Reconcile the queued/processing prompt that triggered this resume —
+      // same terminal-failure orphan as doSpawn/restoreFromSnapshot.
+      await this.callbacks.onSandboxTerminating?.("spawn_failed");
     } finally {
       this.isSpawningSandbox = false;
     }
