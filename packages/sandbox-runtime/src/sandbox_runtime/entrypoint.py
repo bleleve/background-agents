@@ -1242,6 +1242,13 @@ class SandboxSupervisor:
             ready = False
             async with httpx.AsyncClient() as client:
                 while time.time() < deadline:
+                    # If opencode exited before serving (crash, port conflict,
+                    # missing binary), stop immediately instead of polling for
+                    # the full timeout — the migration just won't be baked this
+                    # build (deferred to first boot, the prior behaviour).
+                    if proc.returncode is not None:
+                        self.log.warn("opencode.prewarm_exited_early", returncode=proc.returncode)
+                        break
                     try:
                         resp = await client.get(health_url, timeout=2.0)
                         if resp.status_code == 200:
