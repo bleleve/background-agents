@@ -1725,7 +1725,23 @@ describe("POST /interactions — relaunch_sandbox", () => {
     slackFetch.mockRestore();
   });
 
-  it("shows a non-alarming message when the sandbox is not relaunchable (skipped)", async () => {
+  it("confirms a plain relaunch (no resume) without the resuming copy", async () => {
+    const slackFetch = mockSlackFetch([]);
+    const env = relaunchEnv({ status: "relaunching", sandboxStatus: "spawning", resumed: false });
+    const ctx = makeCtx();
+
+    await app.fetch(relaunchRequest("session-1"), env, ctx);
+    await flushAll(ctx);
+
+    const updates = slackApiBodies(slackFetch, "chat.update");
+    expect(updates).toHaveLength(1);
+    expect(String(updates[0].text)).toContain("Relaunching the sandbox");
+    expect(String(updates[0].text)).not.toContain("resuming your last request");
+
+    slackFetch.mockRestore();
+  });
+
+  it("guides the user to reply when the sandbox is still alive (skipped)", async () => {
     const slackFetch = mockSlackFetch([]);
     const env = relaunchEnv({ status: "skipped", sandboxStatus: "ready" });
     const ctx = makeCtx();
@@ -1735,7 +1751,43 @@ describe("POST /interactions — relaunch_sandbox", () => {
 
     const updates = slackApiBodies(slackFetch, "chat.update");
     expect(updates).toHaveLength(1);
-    expect(String(updates[0].text)).toContain("Nothing to relaunch");
+    expect(String(updates[0].text)).toContain("still active");
+
+    slackFetch.mockRestore();
+  });
+
+  it("reports an HTTP error (e.g. 404 missing session) without claiming success", async () => {
+    const slackFetch = mockSlackFetch([]);
+    const env = relaunchEnv({ error: "Session not found" }, 404);
+    const ctx = makeCtx();
+
+    await app.fetch(relaunchRequest("session-1"), env, ctx);
+    await flushAll(ctx);
+
+    const updates = slackApiBodies(slackFetch, "chat.update");
+    expect(updates).toHaveLength(1);
+    expect(String(updates[0].text)).toContain("HTTP 404");
+
+    slackFetch.mockRestore();
+  });
+
+  it("reports a transport error when the control-plane call throws", async () => {
+    const slackFetch = mockSlackFetch([]);
+    const env = makeEnv();
+    env.INTERNAL_CALLBACK_SECRET = "callback-secret";
+    (env.CONTROL_PLANE.fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => {
+        throw new Error("network down");
+      }
+    );
+    const ctx = makeCtx();
+
+    await app.fetch(relaunchRequest("session-1"), env, ctx);
+    await flushAll(ctx);
+
+    const updates = slackApiBodies(slackFetch, "chat.update");
+    expect(updates).toHaveLength(1);
+    expect(String(updates[0].text)).toContain("network error");
 
     slackFetch.mockRestore();
   });

@@ -333,7 +333,9 @@ export async function handleRetryCommand(
     type: status === "skipped" ? "thought" : "response",
     body:
       status === "skipped"
-        ? "Nothing to relaunch — the sandbox isn't stopped, failed, or stale."
+        ? // Not stopped/failed/stale — the sandbox is still alive (the turn
+          // failed in-band), so there's nothing to relaunch. Re-prompting works.
+          "The sandbox is still active — reply with your next message to continue."
         : resumed
           ? "Relaunching the sandbox and resuming your last request."
           : "Relaunching the sandbox.",

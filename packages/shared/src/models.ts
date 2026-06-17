@@ -112,9 +112,10 @@ export function parsePlanCommand(body: string): PlanCommand | null {
 
 /**
  * A lone `retry` (or `relaunch`) reply: relaunch the session's sandbox and, if
- * the last turn failed, resume it. Lives here so the Linear and GitHub bots
- * share one command syntax. Exact-match only — a body like `retry the build`
- * is a normal prompt, not a command.
+ * the last turn failed, resume it. Lives in shared so comment-driven bots stay
+ * in sync; currently consumed by linear-bot (github-bot may adopt the same
+ * syntax). Exact-match only — a body like `retry the build` is a normal prompt,
+ * not a command.
  */
 export type RetryCommand = { command: "retry" };
 

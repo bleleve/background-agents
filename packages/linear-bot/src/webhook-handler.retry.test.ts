@@ -75,7 +75,7 @@ describe("handleRetryCommand", () => {
     await handleRetryCommand(env, CLIENT, "sess-1", "agent-1");
 
     expect(lastActivity().type).toBe("thought");
-    expect(lastActivity().body).toContain("Nothing to relaunch");
+    expect(lastActivity().body).toContain("still active");
   });
 
   it("emits an error activity when the session no longer exists (404)", async () => {

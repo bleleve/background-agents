@@ -2339,10 +2339,14 @@ async function handleSlackInteraction(
       });
 
       if (channel && messageTs) {
+        // "skipped" means the sandbox isn't stopped/failed/stale — it's still
+        // alive (the turn failed in-band rather than the box dying), so there's
+        // nothing to relaunch. Point the user at the action that does work:
+        // replying in-thread re-prompts the live sandbox.
         const text = !res.ok
           ? `:warning: Couldn't relaunch the sandbox (HTTP ${res.status}).`
           : status === "skipped"
-            ? ":information_source: Nothing to relaunch — the sandbox isn't stopped, failed, or stale."
+            ? ":information_source: The sandbox is still active — reply in this thread to continue."
             : resumed
               ? ":arrows_counterclockwise: Relaunching the sandbox and resuming your last request…"
               : ":arrows_counterclockwise: Relaunching the sandbox…";
