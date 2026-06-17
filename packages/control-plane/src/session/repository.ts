@@ -973,6 +973,10 @@ export class SessionRepository {
     );
   }
 
+  updateArtifactMetadata(artifactId: string, metadata: string): void {
+    this.sql.exec(`UPDATE artifacts SET metadata = ? WHERE id = ?`, metadata, artifactId);
+  }
+
   listArtifacts(): ArtifactRow[] {
     const result = this.sql.exec(`SELECT * FROM artifacts ORDER BY created_at DESC`);
     return this.rows<ArtifactRow>(result);

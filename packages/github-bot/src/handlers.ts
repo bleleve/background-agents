@@ -11,6 +11,7 @@ import type {
   Env,
   PullRequestOpenedPayload,
   PullRequestLabeledPayload,
+  PullRequestStateChangedPayload,
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
@@ -962,6 +963,85 @@ export async function handlePullRequestOpened(
  * re-run the full code review. The label is removed again when the review
  * completes (see handleCompleteCallback), so re-adding it re-triggers.
  */
+export async function handlePullRequestStateChanged(
+  env: Env,
+  log: Logger,
+  payload: PullRequestStateChangedPayload,
+  traceId: string
+): Promise<HandlerResult> {
+  const { pull_request: pr, repository: repo } = payload;
+  const owner = repo.owner.login;
+  const repoName = repo.name;
+  const repoFullName = `${owner}/${repoName}`.toLowerCase();
+
+  const state: PullRequestStateChangedPayload["pull_request"]["state"] = pr.merged
+    ? "merged"
+    : pr.state === "closed"
+      ? "closed"
+      : pr.draft
+        ? "draft"
+        : "open";
+
+  const sessionIds = new Set<string>();
+
+  const reviewSessionId = await lookupReviewSession(env, repoFullName, pr.number);
+  if (reviewSessionId) sessionIds.add(reviewSessionId);
+
+  const planSessionId = await lookupPrSession(env, repoFullName, pr.number);
+  if (planSessionId) sessionIds.add(planSessionId);
+
+  const branchSessionId = extractSessionIdFromBranch(pr.head.ref);
+  if (branchSessionId) sessionIds.add(branchSessionId);
+
+  if (sessionIds.size === 0) {
+    return { outcome: "skipped", skip_reason: "no_session_for_pr" };
+  }
+
+  const headers = await getAuthHeaders(env, traceId);
+  const results = await Promise.allSettled(
+    Array.from(sessionIds).map(async (sessionId) => {
+      const response = await env.CONTROL_PLANE.fetch(
+        `https://internal/sessions/${encodeURIComponent(sessionId)}/pr-state`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ state }),
+        }
+      );
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`${response.status} ${text}`);
+      }
+      return sessionId;
+    })
+  );
+
+  const succeeded = results
+    .filter((result): result is PromiseFulfilledResult<string> => result.status === "fulfilled")
+    .map((result) => result.value);
+  const failed = results.filter((result) => result.status === "rejected");
+
+  if (failed.length > 0) {
+    log.warn("pr_state.update_failed", {
+      trace_id: traceId,
+      repo: repoFullName,
+      pull_number: pr.number,
+      errors: failed.map((result) => String((result as PromiseRejectedResult).reason)),
+    });
+  }
+
+  if (succeeded.length === 0) {
+    return { outcome: "skipped", skip_reason: "pr_state_update_failed" };
+  }
+
+  return {
+    outcome: "processed",
+    session_id: succeeded[0],
+    message_id: "",
+    handler_action: "pr_state_update",
+  };
+}
+
 export async function handlePullRequestLabeled(
   env: Env,
   log: Logger,

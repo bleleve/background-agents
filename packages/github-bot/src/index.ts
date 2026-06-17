@@ -10,6 +10,7 @@ import type {
   Env,
   PullRequestOpenedPayload,
   PullRequestLabeledPayload,
+  PullRequestStateChangedPayload,
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
@@ -23,6 +24,7 @@ import { verifyWebhookSignature } from "./verify";
 import {
   handlePullRequestOpened,
   handlePullRequestLabeled,
+  handlePullRequestStateChanged,
   handleReviewRequested,
   handleIssueComment,
   handleReviewComment,
@@ -336,6 +338,14 @@ function dispatchHandler(
       }
       if (p.action === "labeled") {
         return handlePullRequestLabeled(env, log, payload as PullRequestLabeledPayload, traceId);
+      }
+      if (p.action === "closed" || p.action === "reopened") {
+        return handlePullRequestStateChanged(
+          env,
+          log,
+          payload as PullRequestStateChangedPayload,
+          traceId
+        );
       }
       return Promise.resolve({
         outcome: "skipped",
