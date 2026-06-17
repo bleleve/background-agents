@@ -874,6 +874,7 @@ function SessionContent({
                     })
                   )}
                   {isProcessing && <ThinkingIndicator />}
+                  {!isProcessing && <SandboxStatusIndicator status={sandboxStatus} />}
 
                   <div ref={messagesEndRef} />
                 </div>
@@ -1122,6 +1123,28 @@ function ThinkingIndicator() {
     <div className="bg-card p-4 flex items-center gap-2">
       <span className="inline-block w-2 h-2 bg-accent rounded-full animate-pulse" />
       <span className="text-sm text-muted-foreground">Thinking...</span>
+    </div>
+  );
+}
+
+// Transient sandbox boot states. Deliberately one generic label rather than a
+// per-state message: the user just needs to know the sandbox is coming up, not
+// which micro-phase it's in. Ready/running/snapshotting and terminal states
+// (stopped/failed/stale) render nothing here.
+const SANDBOX_BOOT_STATUSES = new Set(["pending", "spawning", "connecting", "warming", "syncing"]);
+
+/**
+ * Shows that the sandbox is starting while it boots, so the message area isn't
+ * blank between sending a prompt and the agent starting. Mirrors
+ * ThinkingIndicator but in blue, and hands off to "Thinking..." once the agent
+ * starts (isProcessing).
+ */
+function SandboxStatusIndicator({ status }: { status?: string }) {
+  if (!status || !SANDBOX_BOOT_STATUSES.has(status)) return null;
+  return (
+    <div className="bg-card p-4 flex items-center gap-2">
+      <span className="inline-block w-2 h-2 bg-info rounded-full animate-pulse" />
+      <span className="text-sm text-muted-foreground">Starting sandbox...</span>
     </div>
   );
 }
