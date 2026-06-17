@@ -628,6 +628,35 @@ describe("SandboxLifecycleManager", () => {
       expect(storage.calls).toContain("updateSandboxModalObjectId:new-modal-obj-after-restore");
     });
 
+    it("clears the snapshot pointer after a successful restore (lineage hygiene)", async () => {
+      // A successful restore starts a new lineage; the consumed snapshot pointer
+      // must be dropped so a crash-before-new-snapshot falls back to a fresh
+      // spawn instead of re-restoring the same stale image.
+      const sandbox = createMockSandbox({ status: "stopped", snapshot_image_id: "img-abc123" });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      const provider = createMockProvider({
+        restoreFromSnapshot: vi.fn(async (config: RestoreConfig) => ({
+          success: true,
+          sandboxId: config.sandboxId,
+          providerObjectId: "obj-after-restore",
+        })),
+      });
+
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.spawnSandbox();
+
+      expect(storage.calls).toContain("clearSandboxSnapshotImageId");
+    });
+
     it("broadcasts sandbox_dashboard_url after restore when builder is configured", async () => {
       const sandbox = createMockSandbox({
         status: "stopped",
@@ -2493,6 +2522,26 @@ describe("SandboxLifecycleManager", () => {
       await manager.spawnSandbox();
       expect(onSandboxTerminating).toHaveBeenCalledWith("circuit_breaker_open");
     });
+
+    it("orphan sweep: handleAlarm on a failed sandbox fails the stuck prompt via spawn_failed", async () => {
+      // An immediate spawn failure left status=failed; the pre-armed alarm lands
+      // in the terminal early-return and must sweep the orphaned prompt.
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+      const { manager } = makeManager(createMockSandbox({ status: "failed" }), {
+        onSandboxTerminating,
+      });
+      await manager.handleAlarm();
+      expect(onSandboxTerminating).toHaveBeenCalledWith("spawn_failed");
+    });
+
+    for (const status of ["stopped", "stale"] as const) {
+      it(`orphan sweep does not fire for ${status} (already reconciled by its watchdog)`, async () => {
+        const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+        const { manager } = makeManager(createMockSandbox({ status }), { onSandboxTerminating });
+        await manager.handleAlarm();
+        expect(onSandboxTerminating).not.toHaveBeenCalled();
+      });
+    }
 
     it("#3: connecting timeout increments the breaker and clears the in-memory spawn flag", async () => {
       const now = Date.now();

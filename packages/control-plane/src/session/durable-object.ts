@@ -983,7 +983,12 @@ export class SessionDO extends DurableObject<Env> {
       idGenerator,
       config,
       {
-        onSandboxTerminating: (reason) => this.messageQueue.failStuckProcessingMessage(reason),
+        onSandboxTerminating: (reason) =>
+          this.messageQueue.failStuckProcessingMessage(reason, {
+            // Recoverable spawn-path failures end the stuck turn but keep the
+            // session retryable; genuine mid-work terminations reconcile it.
+            keepSessionActive: reason === "circuit_breaker_open" || reason === "spawn_failed",
+          }),
       },
       repoImageLookup
     );

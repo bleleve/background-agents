@@ -352,6 +352,25 @@ describe("SessionMessageQueue", () => {
     }
   });
 
+  it("keeps the session active (no reconcile) when failing a stuck message with keepSessionActive", async () => {
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue(null);
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage({ id: "msg-orphan" }));
+
+    await h.queue.failStuckProcessingMessage("spawn_failed", { keepSessionActive: true });
+
+    // The stuck turn is ended (message failed + completion callback) ...
+    expect(h.repository.updateMessageCompletion).toHaveBeenCalledWith(
+      "msg-orphan",
+      "failed",
+      expect.any(Number),
+      "Sandbox never became ready, so the prompt did not run: the sandbox failed to start"
+    );
+    expect(h.callbackService.notifyComplete).toHaveBeenCalled();
+    // ... but the session is left retryable, not reconciled to failed.
+    expect(h.reconcileSessionStatusAfterExecution).not.toHaveBeenCalled();
+  });
+
   it("reconciles session status when failing a stuck processing message", async () => {
     const h = buildQueue();
     h.repository.getProcessingMessage.mockReturnValue({ id: "msg-timeout" });

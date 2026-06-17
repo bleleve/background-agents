@@ -234,11 +234,19 @@ export interface SlackAgentNotifyLookup {
  */
 export interface LifecycleCallbacks {
   /** Called when the sandbox is being terminated (heartbeat stale, inactivity
-   * timeout, connecting timeout) or when the circuit breaker is open so no spawn
-   * is even attempted. Lets the DO fail the in-flight or queued-but-undispatched
-   * message instead of leaving it stuck "pending" forever. */
+   * timeout, connecting timeout), when the circuit breaker is open so no spawn
+   * is even attempted (`circuit_breaker_open`), or as a one-shot sweep for a
+   * prompt orphaned by an immediate spawn failure (`spawn_failed`). Lets the DO
+   * fail the in-flight or queued-but-undispatched message instead of leaving it
+   * stuck "pending" forever. The DO keeps the session retryable for the
+   * recoverable reasons (circuit_breaker_open, spawn_failed). */
   onSandboxTerminating?: (
-    reason: "connecting_timeout" | "heartbeat_stale" | "inactivity_timeout" | "circuit_breaker_open"
+    reason:
+      | "connecting_timeout"
+      | "heartbeat_stale"
+      | "inactivity_timeout"
+      | "circuit_breaker_open"
+      | "spawn_failed"
   ) => Promise<void>;
 }
 
@@ -700,6 +708,14 @@ export class SandboxLifecycleManager {
         if (result.providerObjectId) {
           this.storeAndBroadcastProviderObjectId(result.providerObjectId);
         }
+        // A successful restore starts a new sandbox lineage (like a fresh
+        // spawn), so drop the consumed snapshot pointer. Otherwise, if the
+        // restored sandbox crashes before taking its own snapshot,
+        // evaluateSpawnDecision would re-restore the same now-stale image
+        // instead of falling back to a fresh spawn. triggerSnapshot() will
+        // repopulate snapshot_image_id once the new sandbox snapshots. Mirrors
+        // the clear in doSpawn().
+        this.storage.clearSandboxSnapshotImageId();
         if (result.codeServerUrl && result.codeServerPassword) {
           await this.storeAndBroadcastCodeServer(result.codeServerUrl, result.codeServerPassword);
         }
@@ -1018,6 +1034,16 @@ export class SandboxLifecycleManager {
 
     // Skip if sandbox is already in terminal state
     if (sandbox.status === "stopped" || sandbox.status === "failed" || sandbox.status === "stale") {
+      // Orphan sweep: an immediate spawn/restore/resume failure sets status to
+      // "failed" synchronously, so the pre-armed connecting-timeout alarm lands
+      // here and would otherwise be dropped — leaving the queued prompt that
+      // triggered the spawn stuck "pending" forever. Fail it once (the DO keeps
+      // the session retryable for this reason). No-op if no message is stuck, so
+      // it's safe and idempotent; "stopped"/"stale" were already reconciled by
+      // their watchdogs, so this only does work for the immediate-failure case.
+      if (sandbox.status === "failed") {
+        await this.callbacks.onSandboxTerminating?.("spawn_failed");
+      }
       this.log.debug("Alarm: sandbox in terminal state, skipping", {
         sandbox_status: sandbox.status,
       });
