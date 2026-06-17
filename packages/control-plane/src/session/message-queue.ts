@@ -79,7 +79,24 @@ type ProcessingFailureReason =
   | "connecting_timeout"
   | "sandbox_disconnected"
   | "circuit_breaker_open"
+  | "spawn_failed"
   | (string & {});
+
+/**
+ * How failing a stuck message should reconcile the SESSION.
+ *
+ * - default (terminal): a genuine mid-work termination — reconcile the session
+ *   (→ `failed` when nothing else is queued/processing).
+ * - keepSessionActive: a recoverable spawn-path failure (immediate spawn /
+ *   restore / resume failure, or circuit breaker open). End the stuck TURN
+ *   (fail the message, fire the completion callback) but leave the session
+ *   `active`/retryable — a fresh prompt or relaunch can still succeed, and a
+ *   `failed` sandbox can still revive on reconnect without a contradictory
+ *   `ready`-sandbox / `failed`-session split.
+ */
+interface FailStuckOptions {
+  keepSessionActive?: boolean;
+}
 
 type ProcessingFailure = {
   reason: ProcessingFailureReason;
@@ -97,6 +114,7 @@ const FAILURE_REASON_DETAIL: Record<ProcessingFailureReason, string> = {
   connecting_timeout: "the sandbox failed to connect in time",
   sandbox_disconnected: "the sandbox disconnected",
   circuit_breaker_open: "sandbox spawning is temporarily disabled after repeated failures",
+  spawn_failed: "the sandbox failed to start",
 };
 
 /**
@@ -460,7 +478,8 @@ export class SessionMessageQueue {
    * where a new prompt could be dispatched to a sandbox being shut down.
    */
   async failStuckProcessingMessage(
-    failure: ProcessingFailureReason | ProcessingFailure = "execution_timeout"
+    failure: ProcessingFailureReason | ProcessingFailure = "execution_timeout",
+    options: FailStuckOptions = {}
   ): Promise<void> {
     const now = Date.now();
     // Fall back to a queued-but-undispatched message. When a sandbox never
@@ -500,7 +519,12 @@ export class SessionMessageQueue {
     this.deps.ctx.waitUntil(
       this.deps.callbackService.notifyComplete(stuckMessage.id, false, error)
     );
-    await this.deps.reconcileSessionStatusAfterExecution(false);
+    // keepSessionActive: end the stuck TURN but leave the session retryable —
+    // used for recoverable spawn-path failures so a fresh prompt or relaunch can
+    // still succeed (the session is not a genuine mid-work termination).
+    if (!options.keepSessionActive) {
+      await this.deps.reconcileSessionStatusAfterExecution(false);
+    }
   }
 
   writeUserMessageEvent(
