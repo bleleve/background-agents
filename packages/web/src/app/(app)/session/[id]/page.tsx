@@ -900,6 +900,7 @@ function SessionContent({
           participants={participants}
           events={events}
           artifacts={artifacts}
+          isProcessing={isProcessing}
           terminalOpen={terminalOpen}
           onToggleTerminal={toggleTerminal}
           onOpenMedia={setSelectedMediaArtifactId}
@@ -917,6 +918,7 @@ function SessionContent({
           participants={participants}
           events={events}
           artifacts={artifacts}
+          isProcessing={isProcessing}
           terminalOpen={terminalOpen}
           onToggleTerminal={toggleTerminal}
           onOpenMedia={setSelectedMediaArtifactId}
