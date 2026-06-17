@@ -1,7 +1,6 @@
 import type { Logger } from "../../../logger";
 import type { SessionArtifact } from "@open-inspect/shared";
 import type { ParticipantRole, SandboxEvent, ServerMessage } from "../../../types";
-import { isDeadSandboxStatus } from "../../../types";
 import type { OpenAITokenRefreshResult } from "../../openai-token-refresh-service";
 import type { ScmCredentialsResult } from "../../scm-credentials-service";
 import type { SessionRepository } from "../../repository";
@@ -155,8 +154,8 @@ export function createSandboxHandler(deps: SandboxHandlerDeps): SandboxHandler {
         return Response.json({ valid: false, error: "No sandbox" }, { status: 404 });
       }
 
-      if (isDeadSandboxStatus(sandbox.status)) {
-        deps.getLog().warn("Sandbox token verification failed: sandbox is dead", {
+      if (sandbox.status === "stopped" || sandbox.status === "stale") {
+        deps.getLog().warn("Sandbox token verification failed: sandbox is stopped/stale", {
           status: sandbox.status,
         });
         return Response.json({ valid: false, error: "Sandbox stopped" }, { status: 410 });

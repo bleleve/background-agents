@@ -8,7 +8,6 @@ import type {
   MessageSource,
   MessageStatus,
   ParticipantRole,
-  SandboxStatus,
   SessionStatus,
 } from "@open-inspect/shared";
 
@@ -33,24 +32,6 @@ export type {
   SessionState,
   SessionStatus,
 } from "@open-inspect/shared";
-
-/**
- * Sandbox statuses that mean the sandbox is dead/terminal: it must not be
- * allowed to reconnect or re-authenticate, and the only sanctioned recovery is
- * a relaunch (fresh spawn or snapshot restore), never the original (possibly
- * still-alive on Modal) process. Centralized so the relaunch gate, the WS
- * reconnect gate, and the token-verification gate cannot drift apart.
- */
-export const DEAD_SANDBOX_STATUSES = [
-  "stopped",
-  "failed",
-  "stale",
-] as const satisfies readonly SandboxStatus[];
-
-/** Whether a sandbox status is dead/terminal (see DEAD_SANDBOX_STATUSES). */
-export function isDeadSandboxStatus(status: string | null | undefined): boolean {
-  return status != null && (DEAD_SANDBOX_STATUSES as readonly string[]).includes(status);
-}
 
 // Environment bindings
 export interface Env {

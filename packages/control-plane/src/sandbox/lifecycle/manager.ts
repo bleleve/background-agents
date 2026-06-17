@@ -233,17 +233,9 @@ export interface SlackAgentNotifyLookup {
  * Lightweight callback interface — the manager doesn't know what the callbacks do.
  */
 export interface LifecycleCallbacks {
-  /** Called when the sandbox is being terminated (heartbeat stale, inactivity
-   * timeout) or when a spawn fails terminally before any sandbox connected
-   * (spawn_failed, circuit_breaker_open). Lets the DO fail the in-flight or
-   * queued-but-undispatched message so the session doesn't hang forever. */
+  /** Called when the sandbox is being terminated (heartbeat stale, inactivity timeout). */
   onSandboxTerminating?: (
-    reason:
-      | "connecting_timeout"
-      | "heartbeat_stale"
-      | "inactivity_timeout"
-      | "spawn_failed"
-      | "circuit_breaker_open"
+    reason: "connecting_timeout" | "heartbeat_stale" | "inactivity_timeout"
   ) => Promise<void>;
 }
 
@@ -316,10 +308,6 @@ export class SandboxLifecycleManager {
         type: "sandbox_error",
         error: `Sandbox spawning temporarily disabled after ${circuitBreakerState.failureCount} failures. Try again in ${Math.ceil((cbDecision.waitTimeMs || 0) / 1000)} seconds.`,
       });
-      // Reconcile the queued-but-undispatched prompt: nothing else fails it on
-      // this path (no watchdog fires, sandbox status is unchanged), so the
-      // message would otherwise sit "pending" under an "active" session forever.
-      await this.callbacks.onSandboxTerminating?.("circuit_breaker_open");
       return;
     }
 
@@ -565,12 +553,6 @@ export class SandboxLifecycleManager {
         type: "sandbox_error",
         error: errorMessage,
       });
-      // Reconcile the prompt that triggered this spawn. The connecting-timeout
-      // alarm armed above will be dropped by handleAlarm's terminal early-return
-      // (status is now "failed"), so without this the queued/processing message
-      // would hang forever. failStuckProcessingMessage falls back to the pending
-      // message and reconciles the session.
-      await this.callbacks.onSandboxTerminating?.("spawn_failed");
     } finally {
       this.isSpawningSandbox = false;
     }
@@ -755,11 +737,6 @@ export class SandboxLifecycleManager {
           type: "sandbox_error",
           error: result.error || "Failed to restore from snapshot",
         });
-        // Reconcile the prompt that triggered this restore. Like doSpawn, a
-        // failed restore is terminal and the pre-armed connecting alarm is
-        // dropped by handleAlarm's terminal early-return, so without this the
-        // queued/processing message hangs forever.
-        await this.callbacks.onSandboxTerminating?.("spawn_failed");
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to restore sandbox";
@@ -778,7 +755,6 @@ export class SandboxLifecycleManager {
         type: "sandbox_error",
         error: errorMessage,
       });
-      await this.callbacks.onSandboxTerminating?.("spawn_failed");
     } finally {
       this.isSpawningSandbox = false;
     }
@@ -874,9 +850,6 @@ export class SandboxLifecycleManager {
       this.log.error("Sandbox resume failed", {
         error: error instanceof Error ? error : String(error),
       });
-      // Reconcile the queued/processing prompt that triggered this resume —
-      // same terminal-failure orphan as doSpawn/restoreFromSnapshot.
-      await this.callbacks.onSandboxTerminating?.("spawn_failed");
     } finally {
       this.isSpawningSandbox = false;
     }

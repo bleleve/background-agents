@@ -78,8 +78,6 @@ type ProcessingFailureReason =
   | "inactivity_timeout"
   | "connecting_timeout"
   | "sandbox_disconnected"
-  | "spawn_failed"
-  | "circuit_breaker_open"
   | (string & {});
 
 type ProcessingFailure = {
@@ -97,8 +95,6 @@ const FAILURE_REASON_DETAIL: Record<ProcessingFailureReason, string> = {
   inactivity_timeout: "the sandbox stopped due to inactivity",
   connecting_timeout: "the sandbox failed to connect in time",
   sandbox_disconnected: "the sandbox disconnected",
-  spawn_failed: "the sandbox failed to start",
-  circuit_breaker_open: "sandbox spawning is temporarily disabled after repeated failures",
 };
 
 /**

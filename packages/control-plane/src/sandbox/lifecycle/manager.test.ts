@@ -2512,37 +2512,6 @@ describe("SandboxLifecycleManager", () => {
       expect(onSandboxTerminating).not.toHaveBeenCalledWith("heartbeat_stale");
     });
 
-    it("#1: a terminal spawn failure reconciles the queued prompt via onSandboxTerminating", async () => {
-      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
-      const provider = createMockProvider({
-        createSandbox: vi.fn(async () => {
-          throw new SandboxProviderError("Auth failed", "permanent");
-        }),
-      });
-      const { manager, storage } = makeManager(
-        createMockSandbox({ status: "pending", modal_object_id: null, snapshot_image_id: null }),
-        { provider, onSandboxTerminating }
-      );
-      await manager.spawnSandbox();
-      expect(storage.calls).toContain("updateSandboxStatus:failed");
-      expect(onSandboxTerminating).toHaveBeenCalledWith("spawn_failed");
-    });
-
-    it("#1: an open circuit breaker reconciles the queued prompt via onSandboxTerminating", async () => {
-      const now = Date.now();
-      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
-      const { manager } = makeManager(
-        createMockSandbox({
-          status: "failed",
-          spawn_failure_count: 3,
-          last_spawn_failure: now - 1000,
-        }),
-        { onSandboxTerminating }
-      );
-      await manager.spawnSandbox();
-      expect(onSandboxTerminating).toHaveBeenCalledWith("circuit_breaker_open");
-    });
-
     it("#4: a failed snapshot restore counts toward the circuit breaker", async () => {
       const provider = createMockProvider({
         restoreFromSnapshot: vi.fn(async () => ({ success: false, error: "snapshot image gone" })),
@@ -2555,39 +2524,6 @@ describe("SandboxLifecycleManager", () => {
       expect(provider.restoreFromSnapshot).toHaveBeenCalled();
       expect(storage.calls).toContain("incrementCircuitBreakerFailure");
       expect(storage.calls).toContain("updateSandboxStatus:failed");
-    });
-
-    it("#1: a failed snapshot restore reconciles the queued prompt via onSandboxTerminating", async () => {
-      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
-      const provider = createMockProvider({
-        restoreFromSnapshot: vi.fn(async () => ({ success: false, error: "snapshot image gone" })),
-      });
-      const { manager } = makeManager(
-        createMockSandbox({ status: "stopped", snapshot_image_id: "img-abc123" }),
-        { provider, onSandboxTerminating }
-      );
-      await manager.spawnSandbox();
-      expect(onSandboxTerminating).toHaveBeenCalledWith("spawn_failed");
-    });
-
-    it("#1: a failed resume reconciles the queued prompt via onSandboxTerminating", async () => {
-      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
-      const provider = createMockProvider({
-        capabilities: { supportsPersistentResume: true },
-        resumeSandbox: vi.fn(async () => ({
-          success: false,
-          shouldSpawnFresh: false,
-          error: "resume boom",
-        })),
-      });
-      const { manager, storage } = makeManager(
-        createMockSandbox({ status: "stopped", modal_object_id: "obj-1", snapshot_image_id: null }),
-        { provider, onSandboxTerminating }
-      );
-      await manager.spawnSandbox();
-      expect(provider.resumeSandbox).toHaveBeenCalled();
-      expect(storage.calls).toContain("updateSandboxStatus:failed");
-      expect(onSandboxTerminating).toHaveBeenCalledWith("spawn_failed");
     });
   });
 });
