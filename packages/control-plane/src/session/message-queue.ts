@@ -376,6 +376,19 @@ export class SessionMessageQueue {
       queue_wait_ms: now - message.created_at,
       has_attachments: !!message.attachments,
     });
+
+    if (!sent) {
+      // The prompt was never delivered (socket not open), but we optimistically
+      // committed it to 'processing'. Nothing will ever produce an
+      // execution_complete for it, so roll the optimistic commit back: revert the
+      // message to 'pending', clear is_processing, drop the dead sandbox socket,
+      // and re-spawn so a fresh sandbox can pick the prompt back up. Without this
+      // the turn would sit "processing" until a watchdog eventually fires.
+      this.deps.repository.revertMessageToPending(message.id);
+      this.deps.broadcast({ type: "processing_status", isProcessing: false });
+      this.deps.wsManager.clearSandboxSocket();
+      await this.deps.spawnSandbox();
+    }
   }
 
   async stopExecution(options: StopExecutionOptions = {}): Promise<void> {

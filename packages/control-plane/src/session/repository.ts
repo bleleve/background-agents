@@ -790,6 +790,18 @@ export class SessionRepository {
     );
   }
 
+  /**
+   * Revert a message back to 'pending' (clearing started_at). Used to roll back
+   * the optimistic 'processing' commit when dispatch to the sandbox failed, so
+   * the message can be re-dispatched instead of being stuck 'processing'.
+   */
+  revertMessageToPending(messageId: string): void {
+    this.sql.exec(
+      `UPDATE messages SET status = 'pending', started_at = NULL WHERE id = ?`,
+      messageId
+    );
+  }
+
   updateMessageCompletion(
     messageId: string,
     status: MessageStatus,
