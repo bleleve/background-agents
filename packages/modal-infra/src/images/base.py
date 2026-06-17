@@ -50,7 +50,9 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
 # v82: fix hook timeout hang when start.sh spawns background processes
-CACHE_BUSTER = "v82-fix-hook-timeout-hang"
+# v83: pre-migrate OpenCode DB at build time so first session boot doesn't
+#      block on it and trip the heartbeat watchdog
+CACHE_BUSTER = "v83-prewarm-opencode-db"
 
 # Base image with all development tools
 base_image = (
