@@ -36,6 +36,11 @@ interface SessionSandboxEventProcessorDeps {
 const CRITICAL_EVENT_TYPES: ReadonlySet<string> = new Set([
   "execution_complete",
   "error",
+  // NOTE: `snapshot_ready` is part of a dormant handshake — the bridge emits it
+  // from _handle_snapshot, but the control plane never sends the `snapshot` WS
+  // command that would trigger it and never handles snapshot_ready. The live
+  // snapshot path is the HTTP api_snapshot / provider.takeSnapshot flow. Kept
+  // here only so a stray event wouldn't be dropped silently.
   "snapshot_ready",
   "push_complete",
   "push_error",
@@ -88,6 +93,10 @@ export class SessionSandboxEventProcessor {
     const processingMessage = this.deps.repository.getProcessingMessage();
     const messageId = eventMessageId ?? processingMessage?.id ?? null;
 
+    // NOTE: the current bridge does NOT emit `artifact` over the WebSocket —
+    // media artifacts are created via the HTTP createMediaArtifact route
+    // (sandbox.handler.ts), which broadcasts its own `artifact` event. This WS
+    // branch is retained for the typed contract but is currently unreachable.
     if (event.type === "artifact") {
       this.deps.updateLastActivity(now);
 
@@ -178,6 +187,10 @@ export class SessionSandboxEventProcessor {
       return;
     }
 
+    // NOTE: the current bridge does NOT emit a standalone `tool_result` over the
+    // WebSocket — tool results ride inside the `tool_call` event's output/status
+    // (see bridge.py). This branch is retained for the typed contract but is
+    // currently unreachable.
     if (event.type === "tool_result") {
       this.deps.updateLastActivity(now);
       this.deps.repository.createEvent({
@@ -273,6 +286,11 @@ export class SessionSandboxEventProcessor {
       this.deps.updateLastActivity(now);
     }
 
+    // NOTE: the current bridge never emits `git_sync` — git-sync status is not
+    // reported back over this channel, so this handler is currently dead and
+    // `git_sync_status` stays at its 'pending' default for the life of a
+    // session. Retained for the typed contract; revive the bridge emitter (or
+    // drop GitSyncStatus) if git-sync visibility is wanted.
     if (event.type === "git_sync") {
       this.deps.repository.updateSandboxGitSyncStatus(event.status);
 

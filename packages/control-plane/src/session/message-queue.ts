@@ -355,6 +355,10 @@ export class SessionMessageQueue {
         scmName: author?.scm_name ?? null,
         scmEmail: author?.scm_email ?? null,
       },
+      // NOTE: attachments are forwarded on the prompt frame for the contract,
+      // but the current bridge's _handle_prompt does not read cmd.attachments —
+      // they are not yet surfaced to the agent (only persisted for the UI). Wire
+      // the bridge to read them before relying on agent-visible attachments.
       attachments: message.attachments ? JSON.parse(message.attachments) : undefined,
       resumeContext,
       planMode: isPlanningTurn,
