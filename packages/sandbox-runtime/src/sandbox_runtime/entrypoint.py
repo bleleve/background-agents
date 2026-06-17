@@ -1093,13 +1093,20 @@ class SandboxSupervisor:
         if self.repo_path.exists() and (self.repo_path / ".git").exists():
             workdir = self.repo_path
 
-        self._install_tools(workdir)
-        self._install_skills(workdir)
-        self._install_agents()
-        self._install_bin_scripts()
+        # Tool/skill/agent/plugin installation does synchronous, potentially
+        # heavy filesystem work — most notably _install_tools' shutil.copytree
+        # of the OpenCode node_modules. Run it off the event loop: while
+        # start_opencode() runs, the concurrent _boot_progress_loop must keep
+        # pinging the control plane. A multi-second blocking copy here would
+        # otherwise freeze the loop, stall the pings, and let the 90s heartbeat
+        # watchdog mark a healthy-but-slow boot as stale.
+        await asyncio.to_thread(self._install_tools, workdir)
+        await asyncio.to_thread(self._install_skills, workdir)
+        await asyncio.to_thread(self._install_agents)
+        await asyncio.to_thread(self._install_bin_scripts)
 
         opencode_dir = workdir / ".opencode"
-        self._deploy_opencode_plugins(opencode_dir)
+        await asyncio.to_thread(self._deploy_opencode_plugins, opencode_dir)
 
         env = {
             **os.environ,
