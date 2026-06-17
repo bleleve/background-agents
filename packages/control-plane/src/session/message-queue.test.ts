@@ -313,7 +313,8 @@ describe("SessionMessageQueue", () => {
     expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });
     expect(h.wsManager.send).toHaveBeenCalledWith(sandboxWs, { type: "stop" });
     expect(h.waitUntil).toHaveBeenCalledTimes(1);
-    expect(h.reconcileSessionStatusAfterExecution).toHaveBeenCalledWith(false);
+    // A stop is a cancellation, not a failure.
+    expect(h.reconcileSessionStatusAfterExecution).toHaveBeenCalledWith(false, true);
   });
 
   it("suppresses session status reconcile when stopExecution is called with suppress flag", async () => {
