@@ -844,6 +844,7 @@ export class SessionDO extends DurableObject<Env> {
       updateSandboxModalObjectId: (id) => this.repository.updateSandboxModalObjectId(id),
       updateSandboxSnapshotImageId: (sandboxId, imageId) =>
         this.repository.updateSandboxSnapshotImageId(sandboxId, imageId),
+      clearSandboxSnapshotImageId: () => this.repository.clearSandboxSnapshotImageId(),
       updateSandboxLastActivity: (timestamp) =>
         this.repository.updateSandboxLastActivity(timestamp),
       updateSandboxHeartbeat: (timestamp) => this.repository.updateSandboxHeartbeat(timestamp),
@@ -1713,7 +1714,10 @@ export class SessionDO extends DurableObject<Env> {
    * broadcasts synthetic execution_complete
    * so all clients flush buffered tokens, and forwards stop to the sandbox.
    */
-  private async stopExecution(options?: { suppressStatusReconcile?: boolean }): Promise<void> {
+  private async stopExecution(options?: {
+    suppressStatusReconcile?: boolean;
+    failPending?: boolean;
+  }): Promise<void> {
     await this.messageQueue.stopExecution(options);
   }
 

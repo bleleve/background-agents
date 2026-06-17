@@ -279,7 +279,9 @@ describe("createSandboxHandler", () => {
     expect(await response.json()).toEqual({ valid: false, error: "Sandbox stopped" });
     expect(log.warn).toHaveBeenCalledWith(
       "Sandbox token verification failed: sandbox is stopped/stale",
-      { status: "stopped" }
+      {
+        status: "stopped",
+      }
     );
   });
 
@@ -299,7 +301,9 @@ describe("createSandboxHandler", () => {
     expect(await response.json()).toEqual({ valid: false, error: "Sandbox stopped" });
     expect(log.warn).toHaveBeenCalledWith(
       "Sandbox token verification failed: sandbox is stopped/stale",
-      { status: "stale" }
+      {
+        status: "stale",
+      }
     );
   });
 

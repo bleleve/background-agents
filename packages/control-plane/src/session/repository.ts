@@ -483,6 +483,12 @@ export class SessionRepository {
     this.sql.exec(`UPDATE sandbox SET snapshot_image_id = ? WHERE id = ?`, imageId, sandboxId);
   }
 
+  clearSandboxSnapshotImageId(): void {
+    this.sql.exec(
+      `UPDATE sandbox SET snapshot_image_id = NULL WHERE id = (SELECT id FROM sandbox LIMIT 1)`
+    );
+  }
+
   updateSandboxHeartbeat(timestamp: number): void {
     this.sql.exec(
       `UPDATE sandbox SET last_heartbeat = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,

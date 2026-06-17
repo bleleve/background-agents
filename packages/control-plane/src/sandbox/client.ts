@@ -19,11 +19,12 @@ const MODAL_APP_NAME = "open-inspect";
 // Modal's default environment name; unrelated to the git branch named "main".
 const DEFAULT_MODAL_ENVIRONMENT = "main";
 
-// Hard client-side ceiling for the createSandbox HTTP call. Without it a hung
-// Modal request never returns, so doSpawn() never reaches the line that arms
-// the connecting-timeout watchdog and the sandbox stays "spawning" forever.
-// Mirrors the AbortController pattern used by the Daytona REST client.
-const MODAL_CREATE_SANDBOX_TIMEOUT_MS = 120_000;
+// Hard client-side ceiling for the createSandbox / restoreSandbox HTTP calls.
+// Without it a hung Modal request never returns, so the spawn/restore await
+// never settles, the finally that resets the in-memory spawning flag never
+// runs, and the sandbox stays "spawning" forever. Mirrors the AbortController
+// pattern used by the Daytona REST client.
+const MODAL_SANDBOX_REQUEST_TIMEOUT_MS = 120_000;
 
 /**
  * Build the Modal endpoint workspace slug from the raw workspace and environment web suffix.
@@ -256,7 +257,7 @@ export class ModalClient {
     let outcome: "success" | "error" = "error";
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), MODAL_CREATE_SANDBOX_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), MODAL_SANDBOX_REQUEST_TIMEOUT_MS);
 
     try {
       const headers = await this.getPostHeaders(correlation);
@@ -325,7 +326,7 @@ export class ModalClient {
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         throw new ModalApiError(
-          `Modal createSandbox timed out after ${MODAL_CREATE_SANDBOX_TIMEOUT_MS}ms`,
+          `Modal createSandbox timed out after ${MODAL_SANDBOX_REQUEST_TIMEOUT_MS}ms`,
           504
         );
       }
@@ -359,11 +360,15 @@ export class ModalClient {
     let httpStatus: number | undefined;
     let outcome: "success" | "error" = "error";
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), MODAL_SANDBOX_REQUEST_TIMEOUT_MS);
+
     try {
       const headers = await this.getPostHeaders(correlation);
       const response = await fetch(this.restoreSandboxUrl, {
         method: "POST",
         headers,
+        signal: controller.signal,
         body: JSON.stringify({
           snapshot_image_id: request.snapshotImageId,
           session_config: buildSessionConfig(request),
@@ -410,7 +415,16 @@ export class ModalClient {
         ttydUrl: result.data?.ttyd_url,
         tunnelUrls: result.data?.tunnel_urls,
       };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new ModalApiError(
+          `Modal restoreSandbox timed out after ${MODAL_SANDBOX_REQUEST_TIMEOUT_MS}ms`,
+          504
+        );
+      }
+      throw error;
     } finally {
+      clearTimeout(timeoutId);
       log.info("modal.request", {
         event: "modal.request",
         endpoint,

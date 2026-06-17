@@ -326,6 +326,32 @@ describe("SessionMessageQueue", () => {
     expect(h.reconcileSessionStatusAfterExecution).not.toHaveBeenCalled();
   });
 
+  it("fails all queued pending messages with a cancelled completion when failPending is set", async () => {
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue(null);
+    // Two queued prompts, then the queue drains.
+    h.repository.getNextPendingMessage
+      .mockReturnValueOnce(createMessage({ id: "p1" }))
+      .mockReturnValueOnce(createMessage({ id: "p2" }))
+      .mockReturnValue(null);
+
+    await h.queue.stopExecution({ suppressStatusReconcile: true, failPending: true });
+
+    for (const id of ["p1", "p2"]) {
+      expect(h.repository.updateMessageCompletion).toHaveBeenCalledWith(
+        id,
+        "failed",
+        expect.any(Number),
+        "Execution was cancelled"
+      );
+      expect(h.repository.upsertExecutionCompleteEvent).toHaveBeenCalledWith(
+        id,
+        expect.objectContaining({ type: "execution_complete", success: false, cancelled: true }),
+        expect.any(Number)
+      );
+    }
+  });
+
   it("reconciles session status when failing a stuck processing message", async () => {
     const h = buildQueue();
     h.repository.getProcessingMessage.mockReturnValue({ id: "msg-timeout" });
