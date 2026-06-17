@@ -757,6 +757,13 @@ export class SandboxLifecycleManager {
         // no backoff. The breaker (checked before restore dispatch) closes that
         // loop after the failure threshold.
         this.storage.incrementCircuitBreakerFailure(Date.now());
+        // A permanent restore failure means the snapshot image is unusable
+        // (GC'd / not found). Drop the pointer so evaluateSpawnDecision falls
+        // through to a fresh spawn next time instead of re-restoring the same
+        // dead image. Transient failures keep the snapshot for a later retry.
+        if (result.errorType !== "transient") {
+          this.storage.clearSandboxSnapshotImageId();
+        }
         this.storage.updateSandboxStatus("failed");
         this.broadcaster.broadcast({
           type: "sandbox_error",
@@ -771,9 +778,11 @@ export class SandboxLifecycleManager {
         snapshot_image_id: snapshotImageId,
       });
       // Transient provider errors don't count toward the breaker (mirrors
-      // doSpawn); permanent/unknown errors do, so a dead snapshot can't loop.
+      // doSpawn); permanent/unknown errors do, and also drop the snapshot
+      // pointer so a dead image can't loop.
       if (!(error instanceof SandboxProviderError) || error.errorType === "permanent") {
         this.storage.incrementCircuitBreakerFailure(Date.now());
+        this.storage.clearSandboxSnapshotImageId();
       }
       this.storage.updateSandboxStatus("failed");
       this.broadcaster.broadcast({
@@ -1073,7 +1082,13 @@ export class SandboxLifecycleManager {
       // finally never ran, so without this every later spawn attempt would skip
       // with "spawn already in progress" for the lifetime of this DO instance.
       this.isSpawningSandbox = false;
-      this.storage.updateSandboxStatus("failed");
+      // For provider-managed-stop providers (e.g. Daytona) the provider object
+      // remains resumable after stopProviderSandbox, so mark it "stopped" — the
+      // resume gate (stopped/stale) then recovers it in place on the next
+      // prompt instead of stranding the work into a cold fresh spawn. Snapshot/
+      // non-persistent providers (Modal/Vercel) stay "failed".
+      const terminalStatus: SandboxStatus = this.usesProviderManagedStop() ? "stopped" : "failed";
+      this.storage.updateSandboxStatus(terminalStatus);
       this.clearSandboxAccessState();
       if (this.canStopProviderSandbox()) {
         try {
@@ -1084,7 +1099,7 @@ export class SandboxLifecycleManager {
           });
         }
       }
-      this.broadcaster.broadcast({ type: "sandbox_status", status: "failed" });
+      this.broadcaster.broadcast({ type: "sandbox_status", status: terminalStatus });
       this.broadcaster.broadcast({
         type: "sandbox_error",
         error: "Sandbox failed to connect within the allowed time. Resend your prompt to retry.",

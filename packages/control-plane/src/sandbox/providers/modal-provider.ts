@@ -167,9 +167,15 @@ export class ModalSandboxProvider implements SandboxProvider {
         };
       }
 
+      // A structured restore failure (HTTP 200 with success=false) almost always
+      // means the snapshot image itself is unusable (GC'd / not found), so the
+      // caller should drop the pointer and fall back to a fresh spawn rather
+      // than retry the same image. Transient HTTP-level failures throw a
+      // ModalApiError instead and are classified in the catch below.
       return {
         success: false,
         error: result.error || "Unknown restore error",
+        errorType: "permanent",
       };
     } catch (error) {
       if (error instanceof ModalApiError) {

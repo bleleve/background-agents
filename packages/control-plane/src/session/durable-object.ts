@@ -1106,7 +1106,14 @@ export class SessionDO extends DurableObject<Env> {
       const sandbox = this.getSandbox();
       const expectedSandboxId = sandbox?.modal_sandbox_id;
 
-      // Reject connection if sandbox should be stopped (prevents reconnection after inactivity timeout)
+      // Reject reconnection only for stopped/stale — NOT "failed". A sandbox
+      // failed by the connecting-timeout watchdog (a slow-but-healthy boot) is
+      // intentionally allowed to revive when its bridge finally connects; the
+      // session is left retryable (not stuck-failed) by the recovery-aware
+      // reconcile, so there is no contradictory ready-sandbox/failed-session
+      // split. Stale sandboxes from a previous lifecycle are already rejected by
+      // the sandbox-ID check below (modal_sandbox_id rotates per spawn) and by
+      // auth-token rotation, so this gate does not need to block "failed".
       if (sandbox?.status === "stopped" || sandbox?.status === "stale") {
         this.log.warn("ws.connect", {
           event: "ws.connect",
