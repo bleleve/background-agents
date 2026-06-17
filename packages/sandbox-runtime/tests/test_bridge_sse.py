@@ -1336,7 +1336,7 @@ class TestPromptMaxDuration:
         )
         bridge.opencode_session_id = "oc-session-123"
         bridge.sse_inactivity_timeout = 2.0
-        bridge.PROMPT_MAX_DURATION = 0.25
+        bridge.prompt_max_duration = 0.25
 
         sse_response = DelayedMockSSEResponse(
             [

@@ -191,6 +191,18 @@ class AgentBridge:
             max_value=self.SSE_INACTIVITY_TIMEOUT_MAX,
         )
 
+        # Per-prompt hard cap. Resolvable from the environment so a provider with
+        # a shorter sandbox lifetime than PROMPT_MAX_DURATION (e.g. Vercel's
+        # 45-min cap) can lower it — the bridge then self-stops a long prompt
+        # before the provider hard-kills the sandbox. max_value is the built-in
+        # default, so the env can only SHORTEN it, never extend it.
+        self.prompt_max_duration = self._resolve_timeout_seconds(
+            name="BRIDGE_PROMPT_MAX_DURATION",
+            default=self.PROMPT_MAX_DURATION,
+            min_value=60.0,
+            max_value=self.PROMPT_MAX_DURATION,
+        )
+
         self.ws: ClientConnection | None = None
         self.shutdown_event = asyncio.Event()
         self.git_sync_complete = asyncio.Event()
@@ -1744,11 +1756,11 @@ class AgentBridge:
                                             message_id=message_id,
                                         )
 
-                        if loop.time() > prompt_start + self.PROMPT_MAX_DURATION:
+                        if loop.time() > prompt_start + self.prompt_max_duration:
                             elapsed = time.time() - start_time
                             self.log.error(
                                 "bridge.prompt_max_duration_timeout",
-                                timeout_ms=int(self.PROMPT_MAX_DURATION * 1000),
+                                timeout_ms=int(self.prompt_max_duration * 1000),
                                 elapsed_ms=int(elapsed * 1000),
                                 message_id=message_id,
                             )
@@ -1762,7 +1774,7 @@ class AgentBridge:
                             ):
                                 yield final_event
                             raise RuntimeError(
-                                f"Prompt exceeded max duration of {self.PROMPT_MAX_DURATION:.0f}s."
+                                f"Prompt exceeded max duration of {self.prompt_max_duration:.0f}s."
                             )
 
         except TimeoutError:
