@@ -2479,6 +2479,21 @@ describe("SandboxLifecycleManager", () => {
       expect(storage.calls).toContain("clearSandboxSnapshotImageId");
     });
 
+    it("reconciles the queued prompt via onSandboxTerminating when the breaker is open", async () => {
+      const now = Date.now();
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+      const { manager } = makeManager(
+        createMockSandbox({
+          status: "failed",
+          spawn_failure_count: 3,
+          last_spawn_failure: now - 1000,
+        }),
+        { onSandboxTerminating }
+      );
+      await manager.spawnSandbox();
+      expect(onSandboxTerminating).toHaveBeenCalledWith("circuit_breaker_open");
+    });
+
     it("#3: connecting timeout increments the breaker and clears the in-memory spawn flag", async () => {
       const now = Date.now();
       const { manager, storage } = makeManager(

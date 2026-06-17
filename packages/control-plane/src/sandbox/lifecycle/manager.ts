@@ -233,9 +233,12 @@ export interface SlackAgentNotifyLookup {
  * Lightweight callback interface — the manager doesn't know what the callbacks do.
  */
 export interface LifecycleCallbacks {
-  /** Called when the sandbox is being terminated (heartbeat stale, inactivity timeout). */
+  /** Called when the sandbox is being terminated (heartbeat stale, inactivity
+   * timeout, connecting timeout) or when the circuit breaker is open so no spawn
+   * is even attempted. Lets the DO fail the in-flight or queued-but-undispatched
+   * message instead of leaving it stuck "pending" forever. */
   onSandboxTerminating?: (
-    reason: "connecting_timeout" | "heartbeat_stale" | "inactivity_timeout"
+    reason: "connecting_timeout" | "heartbeat_stale" | "inactivity_timeout" | "circuit_breaker_open"
   ) => Promise<void>;
 }
 
@@ -308,6 +311,12 @@ export class SandboxLifecycleManager {
         type: "sandbox_error",
         error: `Sandbox spawning temporarily disabled after ${circuitBreakerState.failureCount} failures. Try again in ${Math.ceil((cbDecision.waitTimeMs || 0) / 1000)} seconds.`,
       });
+      // With the breaker now resetting on bridge connect (not spawn initiation),
+      // it can actually open. When it does, no spawn is attempted and no
+      // watchdog is armed, so reconcile the queued-but-undispatched prompt here
+      // — otherwise it would sit "pending" until the breaker window passes and
+      // a new prompt arrives.
+      await this.callbacks.onSandboxTerminating?.("circuit_breaker_open");
       return;
     }
 
