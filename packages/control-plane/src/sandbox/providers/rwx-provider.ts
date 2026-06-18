@@ -35,9 +35,11 @@ export interface RwxProviderConfig {
   /** Secret used for HMAC derivation of code-server passwords */
   codeServerPasswordSecret: string;
   /**
-   * RWX organization slug. When set, the provider constructs the VS Code
-   * endpoint URL as https://{session_id}--{orgSlug}.r1.rwx.run and returns
-   * it in CreateSandboxResult so the control plane can broadcast it to the UI.
+   * RWX organization slug. When set, the provider constructs the app endpoint
+   * URL as https://{session_id}--{orgSlug}.r1.rwx.run/ and returns it in
+   * CreateSandboxResult as tunnelUrls (port 8080) so the UI shows a Preview
+   * link. When codeServerEnabled is also true, the same URL is also set as
+   * codeServerUrl.
    */
   orgSlug?: string;
 }
@@ -90,9 +92,14 @@ export class RwxSandboxProvider implements SandboxProvider {
         createdAt: Date.now(),
       };
 
-      if (config.codeServerEnabled && this.providerConfig.orgSlug) {
-        result.codeServerUrl = this.buildAppEndpointUrl(config.sessionId);
-        result.codeServerPassword = await this.deriveCodeServerPassword(config.sandboxId);
+      if (this.providerConfig.orgSlug) {
+        const appEndpointUrl = this.buildAppEndpointUrl(config.sessionId);
+        result.tunnelUrls = { "8080": appEndpointUrl };
+
+        if (config.codeServerEnabled) {
+          result.codeServerUrl = appEndpointUrl;
+          result.codeServerPassword = await this.deriveCodeServerPassword(config.sandboxId);
+        }
       }
 
       return result;
@@ -153,7 +160,7 @@ export class RwxSandboxProvider implements SandboxProvider {
   // -----------------------------------------------------------------------
 
   private buildAppEndpointUrl(sessionId: string): string {
-    return `https://${sessionId}--${this.providerConfig.orgSlug}.r1.rwx.run`;
+    return `https://${sessionId}--${this.providerConfig.orgSlug}.r1.rwx.run/`;
   }
 
   // -----------------------------------------------------------------------
