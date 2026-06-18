@@ -114,7 +114,6 @@ export class RwxSandboxProvider implements SandboxProvider {
 
     Object.assign(params, {
       slug: config.sessionId,
-      PYTHONUNBUFFERED: "1",
       SANDBOX_ID: config.sandboxId,
       CONTROL_PLANE_URL: config.controlPlaneUrl,
       SANDBOX_AUTH_TOKEN: config.sandboxAuthToken,
