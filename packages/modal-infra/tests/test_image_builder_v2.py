@@ -431,6 +431,7 @@ class TestBuildRepoImage:
             await build_repo_image.local(
                 repo_owner="acme",
                 repo_name="repo",
+                default_branch="main",
                 callback_url="https://cp.test/repo-images/build-complete",
                 build_id="img-1",
             )
@@ -463,6 +464,7 @@ class TestBuildRepoImage:
             await build_repo_image.local(
                 repo_owner="acme",
                 repo_name="repo",
+                default_branch="main",
                 callback_url="https://cp.test/repo-images/build-complete",
                 build_id="img-1",
             )
@@ -512,6 +514,7 @@ class TestBuildRepoImage:
             await build_repo_image.local(
                 repo_owner="acme",
                 repo_name="repo",
+                default_branch="main",
                 callback_url="https://cp.test/repo-images/build-complete",
                 build_id="img-1",
                 user_env_vars={"PIN": "123", "API_TOKEN": "abcd1234"},
