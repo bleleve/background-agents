@@ -30,6 +30,7 @@ async function findTestFiles(repoRoot) {
     const entries = await readdir(rwxDir, { withFileTypes: true });
     return entries
       .filter((e) => e.isFile() && e.name.includes("test"))
+      .sort((a, b) => a.name.localeCompare(b.name))
       .map((e) => join(".rwx", e.name));
   } catch {
     return [];
