@@ -53,6 +53,30 @@ describe("POST /internal/archive", () => {
     expect(state.status).toBe("archived");
   });
 
+  it("archive reconciles a boot-status sandbox down to stopped", async () => {
+    const { stub } = await initSession({ userId: "user-1" });
+
+    // A freshly initialized session leaves the sandbox in a boot status
+    // (pending/spawning). Archiving is a terminal transition, so the box —
+    // which will never serve a turn — must be reconciled to "stopped" rather
+    // than left pinned as a phantom boot.
+    const beforeRes = await stub.fetch("http://internal/internal/state");
+    const before = await beforeRes.json<{ sandbox: { status: string } | null }>();
+    expect(["pending", "spawning"]).toContain(before.sandbox!.status);
+
+    const res = await stub.fetch("http://internal/internal/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: "user-1" }),
+    });
+    expect(res.status).toBe(200);
+
+    const stateRes = await stub.fetch("http://internal/internal/state");
+    const state = await stateRes.json<{ status: string; sandbox: { status: string } | null }>();
+    expect(state.status).toBe("archived");
+    expect(state.sandbox!.status).toBe("stopped");
+  });
+
   it("archive rejects non-participant", async () => {
     const { stub } = await initSession({ userId: "user-1" });
 

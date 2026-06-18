@@ -15,6 +15,7 @@ import {
 import {
   RELAUNCHABLE_SANDBOX_STATUSES,
   RESUMABLE_SESSION_STATUSES,
+  resolveDisplaySandboxStatus,
 } from "./sidebar/sandbox-statuses";
 import { resolvePreviewDisplay } from "./sidebar/preview-display";
 import { ChildSessionsSection } from "./sidebar/child-sessions-section";
@@ -97,11 +98,15 @@ export function SessionRightSidebarContent({
 
   // Decide what the Preview row shows: the live URLs, or — while the sandbox
   // boots — the last-known URLs (greyed) with a "Starting…" label, so the row
-  // persists across the gap before the URL is (re)published.
+  // persists across the gap before the URL is (re)published. A terminal session
+  // never boots, so a stale boot status is collapsed first to avoid a phantom
+  // "Starting…" preview.
   const { previewUrls, starting: showStartingLabel } = resolvePreviewDisplay({
     liveTunnelUrls,
     lastTunnelUrls: lastTunnelUrlsRef.current,
-    sandboxStatus: sessionState.sandboxStatus,
+    sandboxStatus:
+      resolveDisplaySandboxStatus(sessionState.sandboxStatus, sessionState.status) ??
+      sessionState.sandboxStatus,
   });
 
   return (

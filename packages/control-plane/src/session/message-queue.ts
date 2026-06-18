@@ -1,3 +1,4 @@
+import { TERMINAL_SESSION_STATUSES as SHARED_TERMINAL_SESSION_STATUSES } from "@open-inspect/shared";
 import { generateId } from "../auth/crypto";
 import { SessionIndexStore } from "../db/session-index";
 import type { Logger } from "../logger";
@@ -65,12 +66,7 @@ interface StopExecutionOptions {
 }
 
 /** Session statuses under which the queue must not dispatch a prompt. */
-const TERMINAL_SESSION_STATUSES = new Set<SessionStatus>([
-  "completed",
-  "failed",
-  "cancelled",
-  "archived",
-]);
+const TERMINAL_SESSION_STATUSES = new Set<SessionStatus>(SHARED_TERMINAL_SESSION_STATUSES);
 
 type ProcessingFailureReason =
   | "execution_timeout"

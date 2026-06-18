@@ -9,6 +9,7 @@
  * then executes the appropriate side effects (API calls, broadcasts, etc.)
  */
 
+import { SANDBOX_BOOT_STATUSES } from "@open-inspect/shared";
 import type { SandboxStatus } from "../../types";
 
 // ==================== Circuit Breaker ====================
@@ -551,6 +552,27 @@ export function evaluateConnectingTimeout(
     isTimedOut: elapsedMs >= config.timeoutMs,
     elapsedMs,
   };
+}
+
+// ==================== Terminal-session reconcile ====================
+
+/**
+ * Reconcile the sandbox status when its session becomes terminal
+ * (completed/failed/cancelled/archived).
+ *
+ * A sandbox pinned at a transient boot status (e.g. a "spawning" left behind by
+ * an interrupted spawn that no watchdog reconciled) is meaningless once the
+ * session is terminal: no turn will ever run on it. Left as-is it makes the UI
+ * show a phantom "Starting sandbox…" forever and hides the relaunch affordance
+ * (the relaunch gate only acts on stopped/failed/stale). Map it to "stopped" so
+ * the box reads as cleanly down.
+ *
+ * Pure function: returns the reconciled status, or null when no change is needed
+ * (the sandbox is live, already terminal, or snapshotting — none of which are
+ * misleading on a terminal session).
+ */
+export function reconcileTerminalSandboxStatus(status: SandboxStatus): SandboxStatus | null {
+  return SANDBOX_BOOT_STATUSES.includes(status) ? "stopped" : null;
 }
 
 // ==================== Warm Decision ====================

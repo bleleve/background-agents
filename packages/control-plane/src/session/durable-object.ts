@@ -11,7 +11,12 @@ import { DurableObject } from "cloudflare:workers";
 import { initSchema } from "./schema";
 import { reEnqueueInterruptedTurnForRelaunch, decideRelaunchAction } from "./relaunch";
 import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
-import { resolveAppName, timingSafeEqual, RESUMABLE_SESSION_STATUSES } from "@open-inspect/shared";
+import {
+  resolveAppName,
+  timingSafeEqual,
+  RESUMABLE_SESSION_STATUSES,
+  TERMINAL_SESSION_STATUSES,
+} from "@open-inspect/shared";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl, createModalClient } from "../sandbox/client";
 import { createDaytonaRestClient } from "../sandbox/daytona-rest-client";
@@ -38,7 +43,10 @@ import { RepoImageStore } from "../db/repo-images";
 import { McpServerStore } from "../db/mcp-servers";
 import { IntegrationSettingsStore, resolveSlackSettings } from "../db/integration-settings";
 import { SessionIndexStore } from "../db/session-index";
-import { DEFAULT_EXECUTION_TIMEOUT_MS } from "../sandbox/lifecycle/decisions";
+import {
+  DEFAULT_EXECUTION_TIMEOUT_MS,
+  reconcileTerminalSandboxStatus,
+} from "../sandbox/lifecycle/decisions";
 import {
   createSourceControlProviderFromEnv,
   resolveScmProviderFromEnv,
@@ -148,9 +156,6 @@ const WS_AUTH_TIMEOUT_MS = 30000; // 30 seconds
  * the client to fetch a fresh token on reconnect.
  */
 const WS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-/** Statuses that indicate a session is finished — metrics are synced to D1 on these transitions. */
-const TERMINAL_STATUSES: SessionStatus[] = ["completed", "failed", "cancelled"];
 
 /**
  * Stable identity for system-generated prompts (e.g. the implementation
@@ -1918,7 +1923,7 @@ export class SessionDO extends DurableObject<Env> {
     const publicSessionId = this.getPublicSessionId(session);
     if (session.status === status) {
       this.syncSessionIndexStatus(publicSessionId, status, session.updated_at);
-      if (TERMINAL_STATUSES.includes(status)) {
+      if (TERMINAL_SESSION_STATUSES.includes(status)) {
         this.syncSessionMetrics(publicSessionId);
       }
       return false;
@@ -1927,7 +1932,7 @@ export class SessionDO extends DurableObject<Env> {
     const updatedAt = Math.max(Date.now(), session.updated_at + 1);
     this.repository.updateSessionStatus(session.id, status, updatedAt);
 
-    if (TERMINAL_STATUSES.includes(status)) {
+    if (TERMINAL_SESSION_STATUSES.includes(status)) {
       // The sidebar reads status from D1; persist terminal transitions durably
       // (awaited) so the write can't be dropped and leave the index stale.
       try {
@@ -1946,14 +1951,40 @@ export class SessionDO extends DurableObject<Env> {
 
     this.broadcast({ type: "session_status", status });
 
-    if (TERMINAL_STATUSES.includes(status)) {
+    if (TERMINAL_SESSION_STATUSES.includes(status)) {
       this.syncSessionMetrics(publicSessionId);
+      this.reconcileStuckSandboxForTerminalSession();
     }
 
     // Notify parent session (if this is a child) so its UI can refresh
     this.notifyParentOfStatusChange(session, publicSessionId, status);
 
     return true;
+  }
+
+  /**
+   * On a terminal session transition, reconcile a sandbox still pinned at a
+   * transient boot status (e.g. a "spawning" left behind by an interrupted spawn
+   * that no watchdog ever cleaned up) down to "stopped". Without this the box
+   * reads as perpetually "Starting sandbox…" in the UI even though nothing is
+   * booting, and the relaunch gate stays a no-op. Idempotent: a no-op for a
+   * live/already-down/snapshotting sandbox, so re-asserting a terminal status
+   * costs nothing.
+   */
+  private reconcileStuckSandboxForTerminalSession(): void {
+    const sandbox = this.getSandbox();
+    if (!sandbox) return;
+    const reconciled = reconcileTerminalSandboxStatus(sandbox.status as SandboxStatus);
+    if (!reconciled) return;
+
+    this.repository.updateSandboxStatus(reconciled);
+    this.syncSandboxStatusIndex(reconciled);
+    this.broadcast({ type: "sandbox_status", status: reconciled });
+    this.log.info("sandbox.reconcile_terminal", {
+      event: "sandbox.reconcile_terminal",
+      from_status: sandbox.status,
+      to_status: reconciled,
+    });
   }
 
   private applySessionTitleUpdate(
@@ -2079,7 +2110,7 @@ export class SessionDO extends DurableObject<Env> {
     // e.g. when the detail page connects — re-mirrors it. Limited to terminal
     // statuses, the only ones that can diverge and stick (live sessions keep
     // getting fresh writes). The monotonic guard makes this a no-op when in sync.
-    if (session && TERMINAL_STATUSES.includes(session.status)) {
+    if (session && TERMINAL_SESSION_STATUSES.includes(session.status)) {
       this.syncSessionIndexStatus(
         this.getPublicSessionId(session),
         session.status,

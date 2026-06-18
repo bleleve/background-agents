@@ -50,6 +50,33 @@ export const LIVE_SANDBOX_STATUSES: readonly SandboxStatus[] = ["ready", "runnin
  * so the same re-enqueue path applies. Canonical across control-plane and web.
  */
 export const RESUMABLE_SESSION_STATUSES: readonly SessionStatus[] = ["failed", "cancelled"];
+
+/**
+ * Transient sandbox states a box passes through while coming up — it is booting,
+ * not yet serving prompts. The UI renders these as "Starting…" (boot spinner,
+ * preview placeholder, warming dot). Canonical so the control-plane reconcile and
+ * every web display path agree on what counts as "still starting".
+ */
+export const SANDBOX_BOOT_STATUSES: readonly SandboxStatus[] = [
+  "pending",
+  "spawning",
+  "connecting",
+  "warming",
+  "syncing",
+];
+
+/**
+ * Session states that are final — no further turn will ever run. Once a session
+ * is terminal its sandbox is meaningless: a boot status left pinned on it (e.g.
+ * an unreconciled "spawning") is stale and must not be presented as a live boot.
+ * Canonical across control-plane and web.
+ */
+export const TERMINAL_SESSION_STATUSES: readonly SessionStatus[] = [
+  "completed",
+  "failed",
+  "cancelled",
+  "archived",
+];
 export type GitSyncStatus = "pending" | "in_progress" | "completed" | "failed";
 export type MessageStatus = "pending" | "processing" | "completed" | "failed";
 export type MessageSource =
