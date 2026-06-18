@@ -17,7 +17,7 @@ import { join } from "node:path";
 const execFileAsync = promisify(execFile);
 
 const NO_RWX_GUIDANCE = [
-  "No RWX test suite in this repository: `.rwx` is missing or it contains no files with \"test\" in the name.",
+  'No RWX test suite in this repository: `.rwx` is missing or it contains no files with "test" in the name.',
   "",
   "Run tests using the commands documented at the repo root — typically **CLAUDE.md** or **AGENTS.md** (e.g. `npm test`, `pytest`, or the project’s stated test/lint commands).",
   "",
