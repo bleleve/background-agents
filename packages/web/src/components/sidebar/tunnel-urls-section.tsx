@@ -13,11 +13,20 @@ interface TunnelUrlsSectionProps {
 export function TunnelUrlsSection({ urls, sandboxStatus }: TunnelUrlsSectionProps) {
   const isActive = ACTIVE_SANDBOX_STATUSES.has(sandboxStatus);
   const entries = Object.entries(urls);
+  // "Preview" is the user-facing name for the running app's tunnel. When more
+  // than one port is exposed, keep the port as a muted suffix to disambiguate.
+  const showPort = entries.length > 1;
 
   return (
     <div className="space-y-1.5">
       {entries.map(([port, url]) => {
         const safeUrl = getSafeExternalUrl(url);
+        const label = (
+          <>
+            Preview
+            {showPort && <span className="text-muted-foreground/70"> · {port}</span>}
+          </>
+        );
         return (
           <div key={port} className="flex items-center gap-2 text-sm">
             <GlobeIcon
@@ -30,10 +39,10 @@ export function TunnelUrlsSection({ urls, sandboxStatus }: TunnelUrlsSectionProp
                 rel="noopener noreferrer"
                 className="text-accent hover:underline truncate"
               >
-                Port {port}
+                {label}
               </a>
             ) : (
-              <span className="text-muted-foreground truncate">Port {port}</span>
+              <span className="text-muted-foreground truncate">{label}</span>
             )}
           </div>
         );

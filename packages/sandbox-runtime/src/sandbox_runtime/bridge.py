@@ -801,8 +801,7 @@ class AgentBridge:
                 )
             )
 
-            if not self.opencode_session_id:
-                await self._create_opencode_session()
+            await self._ensure_opencode_session(cmd.get("opencodeSessionId"))
 
             had_error = False
             error_message = None
@@ -902,6 +901,70 @@ class AgentBridge:
             http_status=resp.status_code,
             bytes=len(content),
         )
+
+    async def _ensure_opencode_session(self, requested_session_id: str | None = None) -> None:
+        """Ensure an OpenCode session is active before dispatching a prompt.
+
+        Precedence:
+          1. A session id already loaded (from disk on a restore) is
+             authoritative — _load_session_id validated it on connect, so keep it.
+          2. Else, if the control plane asked us to resume a specific session
+             (``opencodeSessionId`` on the prompt), adopt it after validating it
+             exists locally; on any failure fall back to creating a fresh one.
+          3. Else create a fresh session.
+
+        This is what makes a relaunched/restored sandbox continue the prior turn:
+        the control plane replays the stored id, and a restore that carried the
+        session forward adopts it instead of starting over. A first-turn failure
+        has no snapshot, so the dead id fails validation and we create fresh.
+        """
+        if self.opencode_session_id:
+            return
+
+        if requested_session_id and await self._adopt_opencode_session(requested_session_id):
+            return
+
+        await self._create_opencode_session()
+
+    async def _adopt_opencode_session(self, session_id: str) -> bool:
+        """Adopt a control-plane-supplied OpenCode session id after validating it.
+
+        Returns True when the session exists locally and was adopted; False when
+        it is missing/unreachable so the caller can fall back to creating a fresh
+        session (e.g. a first-turn relaunch where this sandbox never held it).
+        """
+        if not self.http_client:
+            return False
+
+        try:
+            resp = await self.http_client.get(
+                f"{self.opencode_base_url}/session/{session_id}",
+                timeout=self.OPENCODE_REQUEST_TIMEOUT,
+            )
+            if resp.status_code != 200:
+                self.log.info(
+                    "opencode.session.adopt_invalid",
+                    opencode_session_id=session_id,
+                    status_code=resp.status_code,
+                )
+                return False
+        except Exception as e:
+            self.log.warn(
+                "opencode.session.adopt_error",
+                opencode_session_id=session_id,
+                exc=e,
+            )
+            return False
+
+        self.opencode_session_id = session_id
+        self._has_sent_prompt_in_session = await self._session_has_user_prompt()
+        await self._save_session_id()
+        self.log.info(
+            "opencode.session.ensure",
+            opencode_session_id=session_id,
+            action="adopted",
+        )
+        return True
 
     async def _create_opencode_session(self) -> None:
         """Create a new OpenCode session."""

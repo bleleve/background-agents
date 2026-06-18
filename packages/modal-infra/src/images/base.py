@@ -56,7 +56,9 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 #      event loop so the boot-progress loop keeps pinging during a slow boot
 # v85: bridge PROMPT_MAX_DURATION resolvable from env (providers with a shorter
 #      sandbox lifetime, e.g. Vercel, can lower it so the bridge self-stops first)
-CACHE_BUSTER = "v85-bridge-prompt-max-duration-env"
+# v86: bridge adopts a control-plane-supplied opencodeSessionId on prompt so a
+#      relaunched/restored sandbox resumes the prior OpenCode session
+CACHE_BUSTER = "v86-bridge-resume-opencode-session"
 
 # Base image with all development tools
 base_image = (

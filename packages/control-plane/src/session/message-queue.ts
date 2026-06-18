@@ -362,6 +362,9 @@ export class SessionMessageQueue {
       attachments: message.attachments ? JSON.parse(message.attachments) : undefined,
       resumeContext,
       planMode: isPlanningTurn,
+      // Replay the stored OpenCode session so a relaunched/restored sandbox
+      // resumes prior context instead of starting fresh (bridge adopts it).
+      opencodeSessionId: session?.opencode_session_id ?? undefined,
     };
 
     const sent = this.deps.wsManager.send(sandboxWs, command);

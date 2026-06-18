@@ -81,6 +81,22 @@ export class SessionSandboxEventProcessor {
           ports: Object.keys(urls),
         });
       }
+
+      // Persist the OpenCode session id so a later relaunch/restore can replay it
+      // and the agent resumes its prior context (see processMessageQueue /
+      // bridge _ensure_opencode_session). Guard against null/empty: a fresh
+      // sandbox reports no session id until it creates one, and we must not
+      // clobber a previously stored id with null.
+      const reportedOpencodeSessionId = event.opencodeSessionId;
+      if (
+        reportedOpencodeSessionId &&
+        reportedOpencodeSessionId !== this.deps.repository.getSession()?.opencode_session_id
+      ) {
+        this.deps.repository.updateOpencodeSessionId(reportedOpencodeSessionId, now);
+        this.deps.log.info("Stored OpenCode session id from sandbox ready event", {
+          opencode_session_id: reportedOpencodeSessionId,
+        });
+      }
       return;
     }
 

@@ -18,6 +18,8 @@ function createProcessor() {
     ),
     updateSandboxGitSyncStatus: vi.fn(),
     updateSessionCurrentSha: vi.fn(),
+    getSession: vi.fn(() => null as { opencode_session_id: string | null } | null),
+    updateOpencodeSessionId: vi.fn(),
   };
 
   const callbackService = {
@@ -128,6 +130,51 @@ describe("SessionSandboxEventProcessor", () => {
 
     expect(h.repository.updateSandboxTunnelUrls).not.toHaveBeenCalled();
     expect(h.broadcast).not.toHaveBeenCalled();
+  });
+
+  it("stores a newly-reported OpenCode session id from a ready event", async () => {
+    const h = createProcessor();
+    h.repository.getSession.mockReturnValue({ opencode_session_id: null });
+    const event: SandboxEvent = {
+      type: "ready",
+      sandboxId: "sb-1",
+      opencodeSessionId: "oc-new",
+      timestamp: 1000,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.repository.updateOpencodeSessionId).toHaveBeenCalledWith("oc-new", expect.any(Number));
+  });
+
+  it("does not rewrite the OpenCode session id when it is unchanged", async () => {
+    const h = createProcessor();
+    h.repository.getSession.mockReturnValue({ opencode_session_id: "oc-same" });
+    const event: SandboxEvent = {
+      type: "ready",
+      sandboxId: "sb-1",
+      opencodeSessionId: "oc-same",
+      timestamp: 1000,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.repository.updateOpencodeSessionId).not.toHaveBeenCalled();
+  });
+
+  it("does not clobber a stored OpenCode session id when the ready event reports none", async () => {
+    const h = createProcessor();
+    h.repository.getSession.mockReturnValue({ opencode_session_id: "oc-kept" });
+    const event: SandboxEvent = {
+      type: "ready",
+      sandboxId: "sb-1",
+      // A fresh sandbox reports no session id until it creates one.
+      timestamp: 1000,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.repository.updateOpencodeSessionId).not.toHaveBeenCalled();
   });
 
   it("applies session_title without storing a timeline event", async () => {
