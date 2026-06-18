@@ -307,6 +307,8 @@ jobs:
           TF_VAR_vercel_base_snapshot_id: ${{ secrets.VERCEL_BASE_SNAPSHOT_ID }}
           TF_VAR_vercel_sandbox_runtime: "${{ secrets.VERCEL_SANDBOX_RUNTIME || 'node24' }}"
           TF_VAR_vercel_snapshot_expiration_ms: "${{ secrets.VERCEL_SNAPSHOT_EXPIRATION_MS || '0' }}"
+          TF_VAR_rwx_access_token: ${{ secrets.RWX_ACCESS_TOKEN }}
+          TF_VAR_rwx_org_slug: "${{ vars.RWX_ORG_SLUG || 'fountain' }}"
 
       - name: Post Plan Results
         uses: actions/github-script@v8
@@ -463,6 +465,8 @@ jobs:
           TF_VAR_vercel_base_snapshot_id: ${{ secrets.VERCEL_BASE_SNAPSHOT_ID }}
           TF_VAR_vercel_sandbox_runtime: "${{ secrets.VERCEL_SANDBOX_RUNTIME || 'node24' }}"
           TF_VAR_vercel_snapshot_expiration_ms: "${{ secrets.VERCEL_SNAPSHOT_EXPIRATION_MS || '0' }}"
+          TF_VAR_rwx_access_token: ${{ secrets.RWX_ACCESS_TOKEN }}
+          TF_VAR_rwx_org_slug: "${{ vars.RWX_ORG_SLUG || 'fountain' }}"
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
 
