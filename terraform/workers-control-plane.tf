@@ -145,6 +145,9 @@ module "control_plane_worker" {
     # token can authorize chat.postMessage from agent tool calls.
     length(var.slack_bot_token) > 0 ? [
       { name = "SLACK_BOT_TOKEN", value = var.slack_bot_token },
+    ] : [],
+    length(var.rwx_access_token) > 0 ? [
+      { name = "RWX_ACCESS_TOKEN", value = var.rwx_access_token },
     ] : []
   )
 

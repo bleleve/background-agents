@@ -414,6 +414,13 @@ variable "nextauth_secret" {
   sensitive   = true
 }
 
+variable "rwx_access_token" {
+  description = "RWX access token for RWX CI/CD integration"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # =============================================================================
 # Configuration
 # =============================================================================
