@@ -237,6 +237,11 @@ tasks:
       sudo mkdir -p /workspace
       sudo chmod 777 /workspace
 
+      # Pre-create /run/oi so the git credential helper can write its cache.
+      # /run is root-owned (755); the non-root sandbox user can't mkdir there.
+      sudo mkdir -p /run/oi
+      sudo chown "$(id -un)" /run/oi
+
       # Pre-install the git credential helper with sudo. The supervisor's
       # Phase 0 writes this at boot but can't write to /usr/local/bin as
       # a non-root user. Doing it here avoids the non-fatal warning and
