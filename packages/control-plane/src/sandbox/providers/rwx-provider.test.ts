@@ -326,7 +326,21 @@ describe("RwxSandboxProvider", () => {
     });
   });
 
-  describe("app endpoint URL / codeServerUrl", () => {
+  describe("app endpoint URL / codeServerUrl / tunnelUrls", () => {
+    it("sets tunnelUrls with port 8080 when orgSlug is set", async () => {
+      const client = createMockClient();
+      const provider = new RwxSandboxProvider(client, {
+        ...defaultProviderConfig,
+        orgSlug: "fountain",
+      });
+
+      const result = await provider.createSandbox(baseCreateConfig);
+
+      expect(result.tunnelUrls).toEqual({
+        "8080": "https://session-123--fountain.r1.rwx.run/",
+      });
+    });
+
     it("returns codeServerUrl and codeServerPassword in result when code-server is enabled and orgSlug is set", async () => {
       const client = createMockClient();
       const provider = new RwxSandboxProvider(client, {
@@ -336,7 +350,7 @@ describe("RwxSandboxProvider", () => {
 
       const result = await provider.createSandbox({ ...baseCreateConfig, codeServerEnabled: true });
 
-      expect(result.codeServerUrl).toBe("https://session-123--fountain.r1.rwx.run");
+      expect(result.codeServerUrl).toBe("https://session-123--fountain.r1.rwx.run/");
       const expectedDigest = await computeHmacHex("code-server:sandbox-456", "test-secret-key");
       expect(result.codeServerPassword).toBe(expectedDigest.slice(0, 32));
     });
@@ -351,7 +365,7 @@ describe("RwxSandboxProvider", () => {
       expect(result.codeServerPassword).toBeUndefined();
     });
 
-    it("omits codeServerUrl from result when orgSlug is not configured", async () => {
+    it("omits tunnelUrls and codeServerUrl when orgSlug is not configured", async () => {
       const client = createMockClient();
       const provider = new RwxSandboxProvider(client, {
         scmProvider: "github",
@@ -361,6 +375,7 @@ describe("RwxSandboxProvider", () => {
 
       const result = await provider.createSandbox({ ...baseCreateConfig, codeServerEnabled: true });
 
+      expect(result.tunnelUrls).toBeUndefined();
       expect(result.codeServerUrl).toBeUndefined();
       expect(result.codeServerPassword).toBeUndefined();
     });
@@ -376,7 +391,7 @@ describe("RwxSandboxProvider", () => {
         codeServerEnabled: true,
       });
 
-      expect(result.codeServerUrl).toBe("https://my-session--myorg.r1.rwx.run");
+      expect(result.codeServerUrl).toBe("https://my-session--myorg.r1.rwx.run/");
     });
   });
 });
