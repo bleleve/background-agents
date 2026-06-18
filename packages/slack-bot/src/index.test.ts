@@ -1655,3 +1655,154 @@ describe("POST /interactions", () => {
     ]);
   });
 });
+
+describe("POST /interactions — relaunch_sandbox", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearLocalCache();
+    mockVerifySlackSignature.mockResolvedValue(true);
+  });
+
+  function relaunchEnv(response: Record<string, unknown>, httpStatus = 200): Env {
+    const env = makeEnv();
+    env.INTERNAL_CALLBACK_SECRET = "callback-secret";
+    (env.CONTROL_PLANE.fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async () =>
+        new Response(JSON.stringify(response), {
+          status: httpStatus,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+    return env;
+  }
+
+  function relaunchRequest(value: string | undefined) {
+    const payload = {
+      type: "block_actions",
+      user: { id: "U123" },
+      channel: { id: "C123" },
+      message: { ts: "111.222" },
+      actions: [{ action_id: "relaunch_sandbox", value }],
+    };
+    return new Request("http://localhost/interactions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "x-slack-signature": "v0=test",
+        "x-slack-request-timestamp": `${Math.floor(Date.now() / 1000)}`,
+      },
+      body: new URLSearchParams({ payload: JSON.stringify(payload) }),
+    });
+  }
+
+  async function flushAll(ctx: ReturnType<typeof makeCtx>) {
+    for (const [task] of ctx.waitUntil.mock.calls) {
+      await task;
+    }
+  }
+
+  it("POSTs the relaunch endpoint with internal auth and confirms a resuming relaunch", async () => {
+    const slackFetch = mockSlackFetch([]);
+    const env = relaunchEnv({ status: "relaunching", sandboxStatus: "spawning", resumed: true });
+    const ctx = makeCtx();
+
+    const response = await app.fetch(relaunchRequest("session-1"), env, ctx);
+    expect(response.status).toBe(200);
+    await flushAll(ctx);
+
+    const relaunchCall = (
+      env.CONTROL_PLANE.fetch as unknown as { mock: { calls: unknown[][] } }
+    ).mock.calls.find(([input]) => String(input).endsWith("/sessions/session-1/sandbox/relaunch"));
+    expect(relaunchCall).toBeTruthy();
+    const init = relaunchCall?.[1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).Authorization).toMatch(/^Bearer /);
+
+    const updates = slackApiBodies(slackFetch, "chat.update");
+    expect(updates).toHaveLength(1);
+    expect(String(updates[0].text)).toContain("resuming your last request");
+
+    slackFetch.mockRestore();
+  });
+
+  it("confirms a plain relaunch (no resume) without the resuming copy", async () => {
+    const slackFetch = mockSlackFetch([]);
+    const env = relaunchEnv({ status: "relaunching", sandboxStatus: "spawning", resumed: false });
+    const ctx = makeCtx();
+
+    await app.fetch(relaunchRequest("session-1"), env, ctx);
+    await flushAll(ctx);
+
+    const updates = slackApiBodies(slackFetch, "chat.update");
+    expect(updates).toHaveLength(1);
+    expect(String(updates[0].text)).toContain("Relaunching the sandbox");
+    expect(String(updates[0].text)).not.toContain("resuming your last request");
+
+    slackFetch.mockRestore();
+  });
+
+  it("guides the user to reply when the sandbox is still alive (skipped)", async () => {
+    const slackFetch = mockSlackFetch([]);
+    const env = relaunchEnv({ status: "skipped", sandboxStatus: "ready" });
+    const ctx = makeCtx();
+
+    await app.fetch(relaunchRequest("session-1"), env, ctx);
+    await flushAll(ctx);
+
+    const updates = slackApiBodies(slackFetch, "chat.update");
+    expect(updates).toHaveLength(1);
+    expect(String(updates[0].text)).toContain("still active");
+
+    slackFetch.mockRestore();
+  });
+
+  it("reports an HTTP error (e.g. 404 missing session) without claiming success", async () => {
+    const slackFetch = mockSlackFetch([]);
+    const env = relaunchEnv({ error: "Session not found" }, 404);
+    const ctx = makeCtx();
+
+    await app.fetch(relaunchRequest("session-1"), env, ctx);
+    await flushAll(ctx);
+
+    const updates = slackApiBodies(slackFetch, "chat.update");
+    expect(updates).toHaveLength(1);
+    expect(String(updates[0].text)).toContain("HTTP 404");
+
+    slackFetch.mockRestore();
+  });
+
+  it("reports a transport error when the control-plane call throws", async () => {
+    const slackFetch = mockSlackFetch([]);
+    const env = makeEnv();
+    env.INTERNAL_CALLBACK_SECRET = "callback-secret";
+    (env.CONTROL_PLANE.fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => {
+        throw new Error("network down");
+      }
+    );
+    const ctx = makeCtx();
+
+    await app.fetch(relaunchRequest("session-1"), env, ctx);
+    await flushAll(ctx);
+
+    const updates = slackApiBodies(slackFetch, "chat.update");
+    expect(updates).toHaveLength(1);
+    expect(String(updates[0].text)).toContain("network error");
+
+    slackFetch.mockRestore();
+  });
+
+  it("does nothing when the button carries no session id", async () => {
+    const slackFetch = mockSlackFetch([]);
+    const env = relaunchEnv({ status: "relaunching" });
+    const ctx = makeCtx();
+
+    await app.fetch(relaunchRequest(undefined), env, ctx);
+    await flushAll(ctx);
+
+    expect(env.CONTROL_PLANE.fetch as unknown as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    expect(slackApiBodies(slackFetch, "chat.update")).toHaveLength(0);
+
+    slackFetch.mockRestore();
+  });
+});
