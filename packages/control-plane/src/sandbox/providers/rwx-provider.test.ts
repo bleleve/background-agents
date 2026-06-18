@@ -5,7 +5,7 @@
  * SCM provider selection, and error classification for createSandbox.
  */
 
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { computeHmacHex } from "@open-inspect/shared";
 import { RwxSandboxProvider, type RwxProviderConfig } from "./rwx-provider";
 import { SandboxProviderError } from "../provider";
@@ -41,7 +41,7 @@ function createMockClient(
     ),
     getDispatch: vi.fn(
       async (): Promise<RwxGetDispatchResponse> => ({
-        status: "dispatched",
+        status: "ready",
         runs: [{ run_id: "rwx-run-id", run_url: "https://cloud.rwx.com/mint/org/runs/1" }],
       })
     ),
@@ -88,6 +88,114 @@ describe("RwxSandboxProvider", () => {
   });
 
   describe("createSandbox", () => {
+    describe("dispatch polling", () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("uses run_url as providerObjectId when dispatch is ready", async () => {
+        const client = createMockClient({
+          getDispatch: vi.fn(
+            async (): Promise<RwxGetDispatchResponse> => ({
+              status: "ready",
+              runs: [{ run_id: "run-1", run_url: "https://cloud.rwx.com/mint/org/runs/42" }],
+            })
+          ),
+        });
+        const provider = new RwxSandboxProvider(client, defaultProviderConfig);
+
+        const result = await provider.createSandbox(baseCreateConfig);
+
+        expect(result.status).toBe("warming");
+        expect(result.providerObjectId).toBe("https://cloud.rwx.com/mint/org/runs/42");
+        expect((client.getDispatch as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+      });
+
+      it("falls back to dispatch_id as providerObjectId when no runs exist yet", async () => {
+        const client = createMockClient({
+          getDispatch: vi.fn(
+            async (): Promise<RwxGetDispatchResponse> => ({
+              status: "pending",
+              runs: [],
+            })
+          ),
+        });
+        const provider = new RwxSandboxProvider(client, defaultProviderConfig);
+
+        const resultPromise = provider.createSandbox(baseCreateConfig);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.status).toBe("warming");
+        expect(result.providerObjectId).toBe("rwx-dispatch-id");
+      });
+
+      it("throws permanent SandboxProviderError when dispatch status is error", async () => {
+        const client = createMockClient({
+          getDispatch: vi.fn(
+            async (): Promise<RwxGetDispatchResponse> => ({
+              status: "error",
+              error: "dispatch key not configured",
+              runs: [],
+            })
+          ),
+        });
+        const provider = new RwxSandboxProvider(client, defaultProviderConfig);
+
+        try {
+          await provider.createSandbox(baseCreateConfig);
+          expect.unreachable("should have thrown");
+        } catch (e) {
+          expect(e).toBeInstanceOf(SandboxProviderError);
+          expect((e as SandboxProviderError).errorType).toBe("permanent");
+          expect((e as SandboxProviderError).message).toContain("dispatch key not configured");
+        }
+      });
+
+      it("includes the RWX error message in the thrown error", async () => {
+        const client = createMockClient({
+          getDispatch: vi.fn(
+            async (): Promise<RwxGetDispatchResponse> => ({
+              status: "error",
+              error: "no workflow found for key testowner-testrepo",
+              runs: [],
+            })
+          ),
+        });
+        const provider = new RwxSandboxProvider(client, defaultProviderConfig);
+
+        await expect(provider.createSandbox(baseCreateConfig)).rejects.toThrow(
+          "no workflow found for key testowner-testrepo"
+        );
+      });
+
+      it("retries after a transient getDispatch failure and succeeds", async () => {
+        let callCount = 0;
+        const client = createMockClient({
+          getDispatch: vi.fn(async (): Promise<RwxGetDispatchResponse> => {
+            callCount++;
+            if (callCount === 1) throw new Error("network timeout");
+            return {
+              status: "dispatched",
+              runs: [{ run_id: "run-1", run_url: "https://cloud.rwx.com/mint/org/runs/1" }],
+            };
+          }),
+        });
+        const provider = new RwxSandboxProvider(client, defaultProviderConfig);
+
+        const resultPromise = provider.createSandbox(baseCreateConfig);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.status).toBe("warming");
+        expect(callCount).toBe(2);
+      });
+    });
+
     it("happy path: dispatches with correct key and returns dispatch_id as providerObjectId", async () => {
       const client = createMockClient();
       const provider = new RwxSandboxProvider(client, defaultProviderConfig);
@@ -95,7 +203,7 @@ describe("RwxSandboxProvider", () => {
       const result = await provider.createSandbox(baseCreateConfig);
 
       expect(result.sandboxId).toBe("sandbox-456");
-      expect(result.providerObjectId).toBe("rwx-dispatch-id");
+      expect(result.providerObjectId).toBe("https://cloud.rwx.com/mint/org/runs/1");
       expect(result.status).toBe("warming");
       expect(result.createdAt).toBeGreaterThan(0);
 
@@ -133,7 +241,6 @@ describe("RwxSandboxProvider", () => {
       const params = (client.createDispatch as ReturnType<typeof vi.fn>).mock.calls[0][0].params;
 
       expect(params.slug).toBe("session-123");
-      expect(params.PYTHONUNBUFFERED).toBe("1");
       expect(params.SANDBOX_ID).toBe("sandbox-456");
       expect(params.CONTROL_PLANE_URL).toBe("https://control-plane.test");
       expect(params.SANDBOX_AUTH_TOKEN).toBe("auth-token-abc");

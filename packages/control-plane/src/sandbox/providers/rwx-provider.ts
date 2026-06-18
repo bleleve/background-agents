@@ -15,7 +15,7 @@ import { computeHmacHex } from "@open-inspect/shared";
 import { createLogger } from "../../logger";
 import type { SourceControlProviderName } from "../../source-control";
 import { buildSessionConfig } from "../sandbox-env";
-import { RwxApiError, type RwxRestClient } from "../rwx-rest-client";
+import { RwxApiError, type RwxGetDispatchResponse, type RwxRestClient } from "../rwx-rest-client";
 import {
   SandboxProviderError,
   type CreateSandboxConfig,
@@ -25,6 +25,15 @@ import {
 } from "../provider";
 
 const log = createLogger("rwx-provider");
+
+// ---------------------------------------------------------------------------
+// Dispatch polling
+// ---------------------------------------------------------------------------
+
+const POLL_DISPATCH_INTERVAL_MS = 3_000;
+const POLL_DISPATCH_MAX_ATTEMPTS = 20; // up to ~60 s; connecting-timeout covers the rest
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ---------------------------------------------------------------------------
 // Provider config
@@ -85,9 +94,21 @@ export class RwxSandboxProvider implements SandboxProvider {
         dispatch_id: dispatch.dispatch_id,
       });
 
+      const dispatchStatus = await this.waitForDispatch(dispatch.dispatch_id, config.sessionId);
+      if (dispatchStatus.status === "error") {
+        throw new SandboxProviderError(
+          `RWX dispatch failed: ${dispatchStatus.error ?? "unknown error"}`,
+          "permanent"
+        );
+      }
+
+      // Use the run URL as providerObjectId when available — it is also the
+      // dashboard link broadcast to the UI. Fall back to dispatch_id when
+      // the dispatch hasn't produced a run yet (budget exhausted before ready).
+      const runUrl = dispatchStatus.runs[0]?.run_url;
       const result: CreateSandboxResult = {
         sandboxId: config.sandboxId,
-        providerObjectId: dispatch.dispatch_id,
+        providerObjectId: runUrl ?? dispatch.dispatch_id,
         status: "warming",
         createdAt: Date.now(),
       };
@@ -106,6 +127,59 @@ export class RwxSandboxProvider implements SandboxProvider {
     } catch (error) {
       throw this.classifyError("Failed to create RWX sandbox dispatch", error);
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Dispatch polling
+  // -----------------------------------------------------------------------
+
+  /**
+   * Poll getDispatch until the dispatch reaches a terminal state ("dispatched"
+   * or "error"), or until the attempt budget is exhausted.
+   *
+   * The connecting-timeout watchdog covers the remaining window if the dispatch
+   * hasn't settled by the time the budget runs out, so it's safe to return the
+   * last known state and let createSandbox proceed.
+   */
+  private async waitForDispatch(
+    dispatchId: string,
+    sessionId: string
+  ): Promise<RwxGetDispatchResponse> {
+    let lastResponse: RwxGetDispatchResponse = { status: "pending", runs: [] };
+
+    for (let i = 0; i < POLL_DISPATCH_MAX_ATTEMPTS; i++) {
+      if (i > 0) {
+        await sleep(POLL_DISPATCH_INTERVAL_MS);
+      }
+
+      try {
+        lastResponse = await this.client.getDispatch(dispatchId);
+        log.debug("rwx.dispatch_polled", {
+          session_id: sessionId,
+          dispatch_id: dispatchId,
+          status: lastResponse.status,
+          attempt: i + 1,
+        });
+      } catch (error) {
+        log.warn("rwx.dispatch_poll_failed", {
+          session_id: sessionId,
+          dispatch_id: dispatchId,
+          attempt: i + 1,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+
+      if (
+        lastResponse.status === "ready" ||
+        lastResponse.status === "dispatched" ||
+        lastResponse.status === "error"
+      ) {
+        break;
+      }
+    }
+
+    return lastResponse;
   }
 
   // -----------------------------------------------------------------------
@@ -180,6 +254,9 @@ export class RwxSandboxProvider implements SandboxProvider {
   // -----------------------------------------------------------------------
 
   private classifyError(message: string, error: unknown): SandboxProviderError {
+    if (error instanceof SandboxProviderError) {
+      return error;
+    }
     if (error instanceof RwxApiError) {
       return SandboxProviderError.fromFetchError(
         `${message}: ${error.message}`,

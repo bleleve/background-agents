@@ -972,7 +972,7 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     const sandboxDashboardUrlBuilder =
-      sandboxBackend === "modal"
+      sandboxBackend === "modal" || sandboxBackend === "rwx"
         ? (providerObjectId: string) => this.getSandboxDashboardUrl(providerObjectId)
         : undefined;
 
@@ -2207,12 +2207,19 @@ export class SessionDO extends DurableObject<Env> {
   }
 
   private getSandboxDashboardUrl(providerObjectId: string | null | undefined): string | null {
-    if (resolveSandboxBackendName(this.env.SANDBOX_PROVIDER) !== "modal") return null;
-    return buildModalSandboxDashboardUrl({
-      workspace: this.env.MODAL_WORKSPACE,
-      environment: this.env.MODAL_ENVIRONMENT,
-      providerObjectId,
-    });
+    const backend = resolveSandboxBackendName(this.env.SANDBOX_PROVIDER);
+    if (backend === "modal") {
+      return buildModalSandboxDashboardUrl({
+        workspace: this.env.MODAL_WORKSPACE,
+        environment: this.env.MODAL_ENVIRONMENT,
+        providerObjectId,
+      });
+    }
+    // For RWX the providerObjectId is the run URL once the dispatch is ready.
+    if (backend === "rwx" && providerObjectId?.startsWith("https://")) {
+      return providerObjectId;
+    }
+    return null;
   }
 
   /**
