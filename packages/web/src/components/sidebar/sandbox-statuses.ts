@@ -1,4 +1,8 @@
-import type { SandboxStatus, SessionStatus } from "@open-inspect/shared";
+import type { SandboxStatus } from "@open-inspect/shared";
+import {
+  RELAUNCHABLE_SANDBOX_STATUSES as SHARED_RELAUNCHABLE_SANDBOX_STATUSES,
+  RESUMABLE_SESSION_STATUSES as SHARED_RESUMABLE_SESSION_STATUSES,
+} from "@open-inspect/shared";
 
 /** Sandbox statuses where tunnel/code-server links are usable. */
 export const ACTIVE_SANDBOX_STATUSES: Set<SandboxStatus> = new Set([
@@ -10,22 +14,19 @@ export const ACTIVE_SANDBOX_STATUSES: Set<SandboxStatus> = new Set([
 /**
  * Sandbox states the relaunch endpoint acts on (any other status returns
  * "skipped"). Both the composer relaunch-and-resume button and the sidebar
- * "Restart" link require the sandbox to be in one of these.
+ * "Restart" link require the sandbox to be in one of these. Set wrapper over the
+ * canonical `@open-inspect/shared` list, for O(1) `.has()` lookups in the UI.
  */
-export const RELAUNCHABLE_SANDBOX_STATUSES: Set<SandboxStatus> = new Set([
-  "stopped",
-  "failed",
-  "stale",
-]);
+export const RELAUNCHABLE_SANDBOX_STATUSES = new Set(SHARED_RELAUNCHABLE_SANDBOX_STATUSES);
 
 /**
- * Session states whose last turn was interrupted (not a clean completion) and so
- * resume on relaunch: `failed` and `cancelled` (a deliberate stop or the
- * duration cap). These route to the composer relaunch-and-resume button; any
- * other session state with a dead sandbox uses the sidebar "Restart" (a plain
- * spawn with no resume). The two are mutually exclusive.
+ * Session states whose last turn was interrupted and so resume on relaunch
+ * (failed/cancelled). These route to the composer relaunch-and-resume button;
+ * any other session state with a dead sandbox uses the sidebar "Restart" (a
+ * plain spawn with no resume). The two are mutually exclusive. Set wrapper over
+ * the canonical `@open-inspect/shared` list.
  */
-export const RESUMABLE_SESSION_STATUSES: Set<SessionStatus> = new Set(["failed", "cancelled"]);
+export const RESUMABLE_SESSION_STATUSES = new Set(SHARED_RESUMABLE_SESSION_STATUSES);
 
 /**
  * Transient states a sandbox passes through while coming up (e.g. after a

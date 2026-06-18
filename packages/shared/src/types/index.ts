@@ -22,6 +22,25 @@ export type SandboxStatus =
   | "snapshotting"
   | "stopped"
   | "failed";
+
+/**
+ * Sandbox states the relaunch endpoint acts on (any other status returns
+ * "skipped"). Canonical so the control-plane guard and the web gating share one
+ * source of truth. Wrap in a `Set` at the call site if O(1) lookup is wanted.
+ */
+export const RELAUNCHABLE_SANDBOX_STATUSES: readonly SandboxStatus[] = [
+  "stopped",
+  "failed",
+  "stale",
+];
+
+/**
+ * Session states whose last turn was interrupted (not a clean completion) and so
+ * resume when the sandbox is relaunched: `failed` (an error) and `cancelled` (a
+ * deliberate stop or the duration cap). Both leave the latest message `failed`,
+ * so the same re-enqueue path applies. Canonical across control-plane and web.
+ */
+export const RESUMABLE_SESSION_STATUSES: readonly SessionStatus[] = ["failed", "cancelled"];
 export type GitSyncStatus = "pending" | "in_progress" | "completed" | "failed";
 export type MessageStatus = "pending" | "processing" | "completed" | "failed";
 export type MessageSource =

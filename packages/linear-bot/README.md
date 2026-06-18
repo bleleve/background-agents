@@ -145,10 +145,10 @@ the full plan-mode workflow (approve / reject / amend).
 
 Reply to an active agent session with a lone command to control it:
 
-| Reply                   | Effect                                                                                                                            |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `approve` / `reject`    | Approve or reject a pending plan (plan-mode sessions) — see PLAN_MODE.md                                                          |
-| `retry` (or `relaunch`) | Relaunch a stopped/failed sandbox and resume the last request. If the sandbox is still running, reply with a new message instead. |
+| Reply                   | Effect                                                                                                                                             |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `approve` / `reject`    | Approve or reject a pending plan (plan-mode sessions) — see PLAN_MODE.md                                                                           |
+| `retry` (or `relaunch`) | Relaunch the sandbox and resume the last turn after it failed or was cancelled. If the sandbox is still running, reply with a new message instead. |
 
 ## Repo Resolution
 

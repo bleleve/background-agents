@@ -9,9 +9,14 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { initSchema } from "./schema";
-import { reEnqueueInterruptedTurnForRelaunch, RESUMABLE_SESSION_STATUSES } from "./relaunch";
+import { reEnqueueInterruptedTurnForRelaunch } from "./relaunch";
 import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
-import { resolveAppName, timingSafeEqual } from "@open-inspect/shared";
+import {
+  resolveAppName,
+  timingSafeEqual,
+  RELAUNCHABLE_SANDBOX_STATUSES,
+  RESUMABLE_SESSION_STATUSES,
+} from "@open-inspect/shared";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl, createModalClient } from "../sandbox/client";
 import { createDaytonaRestClient } from "../sandbox/daytona-rest-client";
@@ -1709,8 +1714,7 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     const sandboxStatus = this.getSandbox()?.status;
-    const relaunchable: SandboxStatus[] = ["stopped", "failed", "stale"];
-    if (!sandboxStatus || !relaunchable.includes(sandboxStatus)) {
+    if (!sandboxStatus || !RELAUNCHABLE_SANDBOX_STATUSES.includes(sandboxStatus)) {
       return Response.json({ status: "skipped", sandboxStatus: sandboxStatus ?? null });
     }
 

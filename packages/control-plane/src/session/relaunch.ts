@@ -1,19 +1,11 @@
 import type { SessionStatus, MessageStatus } from "../types";
+import { RESUMABLE_SESSION_STATUSES } from "@open-inspect/shared";
 
 /** Minimal repository surface needed to resume an interrupted turn on relaunch. */
 export interface RelaunchResumeRepo {
   getLatestTerminalMessage(): { id: string; status: MessageStatus } | null;
   revertMessageToPending(messageId: string): void;
 }
-
-/**
- * Session states whose last turn was interrupted (not a clean completion) and so
- * can be resumed by relaunching the sandbox: `failed` (a genuine error) and
- * `cancelled` (the turn was stopped/aborted — e.g. a deliberate stop or the
- * duration cap). Both leave the latest message marked `failed`, so the same
- * re-enqueue path applies; relaunching flips the session back to `active`.
- */
-export const RESUMABLE_SESSION_STATUSES: SessionStatus[] = ["failed", "cancelled"];
 
 /**
  * Apply the message-level part of resuming an interrupted turn when the sandbox
