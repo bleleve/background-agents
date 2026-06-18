@@ -47,7 +47,7 @@ on:
   # (packages/control-plane/src/sandbox/providers/rwx-provider.ts).
   # The key is derived from repoOwner-repoName — update if the repo is renamed.
   dispatch:
-    key: MartinRoberts-Fountain-background-agents
+    key: onboardiq-background-agents
     params:
       # ── Control plane contract ───────────────────────────────────────────
       - key: slug
