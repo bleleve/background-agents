@@ -52,6 +52,7 @@ function createMockClient(
 const defaultProviderConfig: RwxProviderConfig = {
   scmProvider: "github",
   codeServerPasswordSecret: "test-secret-key",
+  orgSlug: "myorg",
 };
 
 const baseCreateConfig: CreateSandboxConfig = {
@@ -322,6 +323,60 @@ describe("RwxSandboxProvider", () => {
 
       const params = (client.createDispatch as ReturnType<typeof vi.fn>).mock.calls[0][0].params;
       expect(params.CODE_SERVER_PASSWORD).toBeUndefined();
+    });
+  });
+
+  describe("app endpoint URL / codeServerUrl", () => {
+    it("returns codeServerUrl and codeServerPassword in result when code-server is enabled and orgSlug is set", async () => {
+      const client = createMockClient();
+      const provider = new RwxSandboxProvider(client, {
+        ...defaultProviderConfig,
+        orgSlug: "fountain",
+      });
+
+      const result = await provider.createSandbox({ ...baseCreateConfig, codeServerEnabled: true });
+
+      expect(result.codeServerUrl).toBe("https://session-123--fountain.r1.rwx.run");
+      const expectedDigest = await computeHmacHex("code-server:sandbox-456", "test-secret-key");
+      expect(result.codeServerPassword).toBe(expectedDigest.slice(0, 32));
+    });
+
+    it("omits codeServerUrl from result when code-server is disabled", async () => {
+      const client = createMockClient();
+      const provider = new RwxSandboxProvider(client, defaultProviderConfig);
+
+      const result = await provider.createSandbox(baseCreateConfig);
+
+      expect(result.codeServerUrl).toBeUndefined();
+      expect(result.codeServerPassword).toBeUndefined();
+    });
+
+    it("omits codeServerUrl from result when orgSlug is not configured", async () => {
+      const client = createMockClient();
+      const provider = new RwxSandboxProvider(client, {
+        scmProvider: "github",
+        codeServerPasswordSecret: "test-secret-key",
+        // no orgSlug
+      });
+
+      const result = await provider.createSandbox({ ...baseCreateConfig, codeServerEnabled: true });
+
+      expect(result.codeServerUrl).toBeUndefined();
+      expect(result.codeServerPassword).toBeUndefined();
+    });
+
+    it("uses session_id (not sandbox_id) in the URL", async () => {
+      const client = createMockClient();
+      const provider = new RwxSandboxProvider(client, defaultProviderConfig);
+
+      const result = await provider.createSandbox({
+        ...baseCreateConfig,
+        sessionId: "my-session",
+        sandboxId: "different-sandbox-id",
+        codeServerEnabled: true,
+      });
+
+      expect(result.codeServerUrl).toBe("https://my-session--myorg.r1.rwx.run");
     });
   });
 });

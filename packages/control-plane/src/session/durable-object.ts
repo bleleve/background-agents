@@ -840,6 +840,7 @@ export class SessionDO extends DurableObject<Env> {
           // Reuses access token as HMAC secret for code-server password derivation
           // (distinct message prefix prevents collision with auth use)
           codeServerPasswordSecret: this.env.RWX_ACCESS_TOKEN,
+          orgSlug: this.env.RWX_ORG_SLUG,
         });
       }
 

@@ -106,6 +106,7 @@ export interface Env {
   VERCEL_SNAPSHOT_EXPIRATION_MS?: string; // Snapshot expiration in ms; 0 means no expiration
   RWX_ACCESS_TOKEN?: string; // RWX API access token for Dispatch API
   RWX_BASE_URL?: string; // Override for RWX API base URL (default: https://cloud.rwx.com)
+  RWX_ORG_SLUG?: string; // RWX organization slug used to construct app endpoint URLs ({session_id}--{org}.r1.rwx.run)
 
   // Sandbox lifecycle configuration
   SANDBOX_INACTIVITY_TIMEOUT_MS?: string; // Inactivity timeout in ms (default: 900000 = 15 min)

@@ -34,6 +34,12 @@ export interface RwxProviderConfig {
   scmProvider: SourceControlProviderName;
   /** Secret used for HMAC derivation of code-server passwords */
   codeServerPasswordSecret: string;
+  /**
+   * RWX organization slug. When set, the provider constructs the VS Code
+   * endpoint URL as https://{session_id}--{orgSlug}.r1.rwx.run and returns
+   * it in CreateSandboxResult so the control plane can broadcast it to the UI.
+   */
+  orgSlug?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,12 +83,19 @@ export class RwxSandboxProvider implements SandboxProvider {
         dispatch_id: dispatch.dispatch_id,
       });
 
-      return {
+      const result: CreateSandboxResult = {
         sandboxId: config.sandboxId,
         providerObjectId: dispatch.dispatch_id,
         status: "warming",
         createdAt: Date.now(),
       };
+
+      if (config.codeServerEnabled && this.providerConfig.orgSlug) {
+        result.codeServerUrl = this.buildAppEndpointUrl(config.sessionId);
+        result.codeServerPassword = await this.deriveCodeServerPassword(config.sandboxId);
+      }
+
+      return result;
     } catch (error) {
       throw this.classifyError("Failed to create RWX sandbox dispatch", error);
     }
@@ -134,6 +147,14 @@ export class RwxSandboxProvider implements SandboxProvider {
       params.VCS_HOST = "github.com";
       params.VCS_CLONE_USERNAME = "x-access-token";
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // App endpoint URL
+  // -----------------------------------------------------------------------
+
+  private buildAppEndpointUrl(sessionId: string): string {
+    return `https://${sessionId}--${this.providerConfig.orgSlug}.r1.rwx.run`;
   }
 
   // -----------------------------------------------------------------------

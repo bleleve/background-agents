@@ -12,7 +12,7 @@ on:
   #     --init "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
   #
   # VS Code URL (once the sandbox task starts):
-  #   https://oi-{slug}--fountain.r1.rwx.run
+  #   https://{slug}--fountain.r1.rwx.run
   #
   # The SESSION_CONFIG env var is auto-constructed from SANDBOX_ID/REPO_OWNER/
   # REPO_NAME when not supplied — sufficient for dev runs without a live
@@ -165,7 +165,7 @@ tasks:
       cd /app/opencode-deps && sudo npm install --ignore-scripts --no-audit --no-fund
 
   # ── code-server ───────────────────────────────────────────────────────────
-  # VS Code in the browser on :8080, served at the oi-{slug} app endpoint.
+  # VS Code in the browser on :8080, served at the {slug} app endpoint.
   # The supervisor starts code-server only when CODE_SERVER_PASSWORD is set.
   # Version matches CODE_SERVER_VERSION in packages/modal-infra/src/images/base.py.
 
@@ -211,7 +211,7 @@ tasks:
   #   6. Start code-server on :8080 when CODE_SERVER_PASSWORD is set
   #
   # App endpoint — VS Code in the browser:
-  #   https://oi-{slug}--fountain.r1.rwx.run
+  #   https://{slug}--fountain.r1.rwx.run
   #
   # The endpoint is live for the duration of the session (up to 2h). It
   # proxies to code-server on :8080; returns connection refused if
@@ -227,7 +227,7 @@ tasks:
       cpus: 4
       memory: 8gb
     app:
-      endpoint: oi-${{ init.slug }}
+      endpoint: ${{ init.slug }}
       port: 8080
       timeout: 2h
     run: |
