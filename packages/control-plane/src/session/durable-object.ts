@@ -9,9 +9,14 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { initSchema } from "./schema";
-import { reEnqueueFailedTurnForRelaunch } from "./relaunch";
+import { reEnqueueInterruptedTurnForRelaunch } from "./relaunch";
 import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
-import { resolveAppName, timingSafeEqual } from "@open-inspect/shared";
+import {
+  resolveAppName,
+  timingSafeEqual,
+  RELAUNCHABLE_SANDBOX_STATUSES,
+  RESUMABLE_SESSION_STATUSES,
+} from "@open-inspect/shared";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl, createModalClient } from "../sandbox/client";
 import { createDaytonaRestClient } from "../sandbox/daytona-rest-client";
@@ -1709,20 +1714,20 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     const sandboxStatus = this.getSandbox()?.status;
-    const relaunchable: SandboxStatus[] = ["stopped", "failed", "stale"];
-    if (!sandboxStatus || !relaunchable.includes(sandboxStatus)) {
+    if (!sandboxStatus || !RELAUNCHABLE_SANDBOX_STATUSES.includes(sandboxStatus)) {
       return Response.json({ status: "skipped", sandboxStatus: sandboxStatus ?? null });
     }
 
-    // Resume the interrupted turn on relaunch of a FAILED session: revert the
-    // failed message to pending and re-activate the session so it is re-dispatched
-    // once the sandbox reconnects (onSandboxConnected → queue), this time carrying
-    // the stored opencode_session_id so the bridge resumes prior context. We do
-    // NOT write a new user_message event (keeps the single original bubble) and do
-    // NOT dispatch here — dispatch is owned by the reconnect path. Idempotent: a
-    // second relaunch sees status !== "failed" and just spawns.
-    const resumed = reEnqueueFailedTurnForRelaunch(session.status, this.repository);
-    if (session.status === "failed") {
+    // Resume the interrupted turn on relaunch of a failed/cancelled session:
+    // revert the failed message to pending and re-activate the session so it is
+    // re-dispatched once the sandbox reconnects (onSandboxConnected → queue),
+    // this time carrying the stored opencode_session_id so the bridge resumes
+    // prior context. We do NOT write a new user_message event (keeps the single
+    // original bubble) and do NOT dispatch here — dispatch is owned by the
+    // reconnect path. Idempotent: a second relaunch sees a non-resumable status
+    // and just spawns.
+    const resumed = reEnqueueInterruptedTurnForRelaunch(session.status, this.repository);
+    if (RESUMABLE_SESSION_STATUSES.includes(session.status)) {
       await this.transitionSessionStatus("active");
     }
 
