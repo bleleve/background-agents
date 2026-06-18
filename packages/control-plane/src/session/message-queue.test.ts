@@ -94,6 +94,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
     getProcessingMessage: vi.fn(() => null as { id: string } | null),
     getNextPendingMessage: vi.fn(() => null as MessageRow | null),
     updateMessageToProcessing: vi.fn(),
+    revertMessageToPending: vi.fn(),
     getParticipantById: vi.fn(() => createParticipant()),
     updateParticipantCoalesce: vi.fn(),
     updateParticipantRole: vi.fn(),
@@ -116,6 +117,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
   const wsManager = {
     getSandboxSocket: vi.fn(() => null as WebSocket | null),
     send: vi.fn(() => true),
+    clearSandboxSocket: vi.fn(),
   };
 
   const participantService = {
@@ -133,6 +135,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
   const reconcileSessionStatusAfterExecution = vi.fn(async (_success: boolean) => {});
   const updateLastActivity = vi.fn();
   const waitUntil = vi.fn();
+  const getSession = vi.fn(() => createSession());
 
   const queue = new SessionMessageQueue({
     env: {} as Env,
@@ -151,7 +154,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
     scmProvider: "github",
     getClientInfo: options?.getClientInfo ?? (() => createClientInfo()),
     validateReasoningEffort: vi.fn(() => null),
-    getSession: vi.fn(() => createSession()),
+    getSession,
     updateLastActivity,
     spawnSandbox,
     broadcast,
@@ -170,6 +173,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
     setSessionStatus,
     reconcileSessionStatusAfterExecution,
     waitUntil,
+    getSession,
   };
 }
 
@@ -247,6 +251,26 @@ describe("SessionMessageQueue", () => {
     expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: true });
   });
 
+  it("rolls the message back to pending and respawns when the prompt send fails", async () => {
+    const h = buildQueue();
+    const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage({ id: "msg-x" }));
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+    h.wsManager.send.mockReturnValue(false); // delivery fails
+
+    await h.queue.processMessageQueue();
+
+    // Optimistic processing commit is rolled back, not left stuck.
+    expect(h.repository.updateMessageToProcessing).toHaveBeenCalledWith(
+      "msg-x",
+      expect.any(Number)
+    );
+    expect(h.repository.revertMessageToPending).toHaveBeenCalledWith("msg-x");
+    expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });
+    expect(h.wsManager.clearSandboxSocket).toHaveBeenCalled();
+    expect(h.spawnSandbox).toHaveBeenCalled();
+  });
+
   it("omits resumeContext when no plan is saved", async () => {
     const h = buildQueue();
     const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
@@ -289,6 +313,40 @@ describe("SessionMessageQueue", () => {
     expect(command.resumeContext).toEqual({
       currentPlan: { version: 3, content: "## Plan\n- step 1", createdAt: 42 },
     });
+  });
+
+  it("carries the stored opencodeSessionId on the prompt command so the sandbox can resume", async () => {
+    const h = buildQueue();
+    const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage());
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+    h.getSession.mockReturnValue(createSession({ opencode_session_id: "oc-42" }));
+
+    await h.queue.processMessageQueue();
+
+    const promptCall = h.wsManager.send.mock.calls.find(
+      (call: unknown[]) => (call[1] as { type?: string } | undefined)?.type === "prompt"
+    ) as unknown[] | undefined;
+    expect(promptCall).toBeDefined();
+    const command = promptCall![1] as { opencodeSessionId?: string };
+    expect(command.opencodeSessionId).toBe("oc-42");
+  });
+
+  it("omits opencodeSessionId when the session has none stored", async () => {
+    const h = buildQueue();
+    const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage());
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+    h.getSession.mockReturnValue(createSession({ opencode_session_id: null }));
+
+    await h.queue.processMessageQueue();
+
+    const promptCall = h.wsManager.send.mock.calls.find(
+      (call: unknown[]) => (call[1] as { type?: string } | undefined)?.type === "prompt"
+    ) as unknown[] | undefined;
+    expect(promptCall).toBeDefined();
+    const command = promptCall![1] as { opencodeSessionId?: string };
+    expect(command.opencodeSessionId).toBeUndefined();
   });
 
   it("marks processing message failed and broadcasts synthetic completion on stop", async () => {
@@ -350,6 +408,25 @@ describe("SessionMessageQueue", () => {
         expect.any(Number)
       );
     }
+  });
+
+  it("keeps the session active (no reconcile) when failing a stuck message with keepSessionActive", async () => {
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue(null);
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage({ id: "msg-orphan" }));
+
+    await h.queue.failStuckProcessingMessage("spawn_failed", { keepSessionActive: true });
+
+    // The stuck turn is ended (message failed + completion callback) ...
+    expect(h.repository.updateMessageCompletion).toHaveBeenCalledWith(
+      "msg-orphan",
+      "failed",
+      expect.any(Number),
+      "Sandbox never became ready, so the prompt did not run: the sandbox failed to start"
+    );
+    expect(h.callbackService.notifyComplete).toHaveBeenCalled();
+    // ... but the session is left retryable, not reconciled to failed.
+    expect(h.reconcileSessionStatusAfterExecution).not.toHaveBeenCalled();
   });
 
   it("reconciles session status when failing a stuck processing message", async () => {

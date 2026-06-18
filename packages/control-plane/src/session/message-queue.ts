@@ -79,7 +79,24 @@ type ProcessingFailureReason =
   | "connecting_timeout"
   | "sandbox_disconnected"
   | "circuit_breaker_open"
+  | "spawn_failed"
   | (string & {});
+
+/**
+ * How failing a stuck message should reconcile the SESSION.
+ *
+ * - default (terminal): a genuine mid-work termination — reconcile the session
+ *   (→ `failed` when nothing else is queued/processing).
+ * - keepSessionActive: a recoverable spawn-path failure (immediate spawn /
+ *   restore / resume failure, or circuit breaker open). End the stuck TURN
+ *   (fail the message, fire the completion callback) but leave the session
+ *   `active`/retryable — a fresh prompt or relaunch can still succeed, and a
+ *   `failed` sandbox can still revive on reconnect without a contradictory
+ *   `ready`-sandbox / `failed`-session split.
+ */
+interface FailStuckOptions {
+  keepSessionActive?: boolean;
+}
 
 type ProcessingFailure = {
   reason: ProcessingFailureReason;
@@ -97,6 +114,7 @@ const FAILURE_REASON_DETAIL: Record<ProcessingFailureReason, string> = {
   connecting_timeout: "the sandbox failed to connect in time",
   sandbox_disconnected: "the sandbox disconnected",
   circuit_breaker_open: "sandbox spawning is temporarily disabled after repeated failures",
+  spawn_failed: "the sandbox failed to start",
 };
 
 /**
@@ -337,9 +355,16 @@ export class SessionMessageQueue {
         scmName: author?.scm_name ?? null,
         scmEmail: author?.scm_email ?? null,
       },
+      // NOTE: attachments are forwarded on the prompt frame for the contract,
+      // but the current bridge's _handle_prompt does not read cmd.attachments —
+      // they are not yet surfaced to the agent (only persisted for the UI). Wire
+      // the bridge to read them before relying on agent-visible attachments.
       attachments: message.attachments ? JSON.parse(message.attachments) : undefined,
       resumeContext,
       planMode: isPlanningTurn,
+      // Replay the stored OpenCode session so a relaunched/restored sandbox
+      // resumes prior context instead of starting fresh (bridge adopts it).
+      opencodeSessionId: session?.opencode_session_id ?? undefined,
     };
 
     const sent = this.deps.wsManager.send(sandboxWs, command);
@@ -358,6 +383,19 @@ export class SessionMessageQueue {
       queue_wait_ms: now - message.created_at,
       has_attachments: !!message.attachments,
     });
+
+    if (!sent) {
+      // The prompt was never delivered (socket not open), but we optimistically
+      // committed it to 'processing'. Nothing will ever produce an
+      // execution_complete for it, so roll the optimistic commit back: revert the
+      // message to 'pending', clear is_processing, drop the dead sandbox socket,
+      // and re-spawn so a fresh sandbox can pick the prompt back up. Without this
+      // the turn would sit "processing" until a watchdog eventually fires.
+      this.deps.repository.revertMessageToPending(message.id);
+      this.deps.broadcast({ type: "processing_status", isProcessing: false });
+      this.deps.wsManager.clearSandboxSocket();
+      await this.deps.spawnSandbox();
+    }
   }
 
   async stopExecution(options: StopExecutionOptions = {}): Promise<void> {
@@ -460,7 +498,8 @@ export class SessionMessageQueue {
    * where a new prompt could be dispatched to a sandbox being shut down.
    */
   async failStuckProcessingMessage(
-    failure: ProcessingFailureReason | ProcessingFailure = "execution_timeout"
+    failure: ProcessingFailureReason | ProcessingFailure = "execution_timeout",
+    options: FailStuckOptions = {}
   ): Promise<void> {
     const now = Date.now();
     // Fall back to a queued-but-undispatched message. When a sandbox never
@@ -500,7 +539,12 @@ export class SessionMessageQueue {
     this.deps.ctx.waitUntil(
       this.deps.callbackService.notifyComplete(stuckMessage.id, false, error)
     );
-    await this.deps.reconcileSessionStatusAfterExecution(false);
+    // keepSessionActive: end the stuck TURN but leave the session retryable —
+    // used for recoverable spawn-path failures so a fresh prompt or relaunch can
+    // still succeed (the session is not a genuine mid-work termination).
+    if (!options.keepSessionActive) {
+      await this.deps.reconcileSessionStatusAfterExecution(false);
+    }
   }
 
   writeUserMessageEvent(

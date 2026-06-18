@@ -628,6 +628,35 @@ describe("SandboxLifecycleManager", () => {
       expect(storage.calls).toContain("updateSandboxModalObjectId:new-modal-obj-after-restore");
     });
 
+    it("clears the snapshot pointer after a successful restore (lineage hygiene)", async () => {
+      // A successful restore starts a new lineage; the consumed snapshot pointer
+      // must be dropped so a crash-before-new-snapshot falls back to a fresh
+      // spawn instead of re-restoring the same stale image.
+      const sandbox = createMockSandbox({ status: "stopped", snapshot_image_id: "img-abc123" });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      const provider = createMockProvider({
+        restoreFromSnapshot: vi.fn(async (config: RestoreConfig) => ({
+          success: true,
+          sandboxId: config.sandboxId,
+          providerObjectId: "obj-after-restore",
+        })),
+      });
+
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.spawnSandbox();
+
+      expect(storage.calls).toContain("clearSandboxSnapshotImageId");
+    });
+
     it("broadcasts sandbox_dashboard_url after restore when builder is configured", async () => {
       const sandbox = createMockSandbox({
         status: "stopped",
@@ -2494,6 +2523,26 @@ describe("SandboxLifecycleManager", () => {
       expect(onSandboxTerminating).toHaveBeenCalledWith("circuit_breaker_open");
     });
 
+    it("orphan sweep: handleAlarm on a failed sandbox fails the stuck prompt via spawn_failed", async () => {
+      // An immediate spawn failure left status=failed; the pre-armed alarm lands
+      // in the terminal early-return and must sweep the orphaned prompt.
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+      const { manager } = makeManager(createMockSandbox({ status: "failed" }), {
+        onSandboxTerminating,
+      });
+      await manager.handleAlarm();
+      expect(onSandboxTerminating).toHaveBeenCalledWith("spawn_failed");
+    });
+
+    for (const status of ["stopped", "stale"] as const) {
+      it(`orphan sweep does not fire for ${status} (already reconciled by its watchdog)`, async () => {
+        const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+        const { manager } = makeManager(createMockSandbox({ status }), { onSandboxTerminating });
+        await manager.handleAlarm();
+        expect(onSandboxTerminating).not.toHaveBeenCalled();
+      });
+    }
+
     it("#3: connecting timeout increments the breaker and clears the in-memory spawn flag", async () => {
       const now = Date.now();
       const { manager, storage } = makeManager(
@@ -2539,6 +2588,57 @@ describe("SandboxLifecycleManager", () => {
       expect(provider.restoreFromSnapshot).toHaveBeenCalled();
       expect(storage.calls).toContain("incrementCircuitBreakerFailure");
       expect(storage.calls).toContain("updateSandboxStatus:failed");
+    });
+
+    it("#4: a permanent restore failure drops the snapshot pointer (dead-image fallthrough)", async () => {
+      const provider = createMockProvider({
+        restoreFromSnapshot: vi.fn(async () => ({
+          success: false,
+          error: "snapshot image not found",
+          errorType: "permanent" as const,
+        })),
+      });
+      const { manager, storage } = makeManager(
+        createMockSandbox({ status: "stopped", snapshot_image_id: "img-dead" }),
+        { provider }
+      );
+      await manager.spawnSandbox();
+      expect(storage.calls).toContain("clearSandboxSnapshotImageId");
+    });
+
+    it("#4: a transient restore failure keeps the snapshot pointer for retry", async () => {
+      const provider = createMockProvider({
+        restoreFromSnapshot: vi.fn(async () => ({
+          success: false,
+          error: "provider blip",
+          errorType: "transient" as const,
+        })),
+      });
+      const { manager, storage } = makeManager(
+        createMockSandbox({ status: "stopped", snapshot_image_id: "img-ok" }),
+        { provider }
+      );
+      await manager.spawnSandbox();
+      expect(storage.calls).not.toContain("clearSandboxSnapshotImageId");
+    });
+
+    it("#8: connecting timeout marks a provider-managed-stop sandbox stopped (resumable), not failed", async () => {
+      const now = Date.now();
+      const provider = createMockProvider({
+        capabilities: { supportsExplicitStop: true, supportsPersistentResume: true },
+        stopSandbox: vi.fn(async () => ({ success: true })),
+      });
+      const { manager, storage } = makeManager(
+        createMockSandbox({
+          status: "connecting",
+          created_at: now - 130_000,
+          last_heartbeat: now - 130_000,
+        }),
+        { provider }
+      );
+      await manager.handleAlarm();
+      expect(storage.calls).toContain("updateSandboxStatus:stopped");
+      expect(storage.calls).not.toContain("updateSandboxStatus:failed");
     });
   });
 });

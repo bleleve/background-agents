@@ -37,6 +37,7 @@ import {
   buildUntrustedUserContentBlock,
   fetchModelDefaults,
   parsePlanCommand,
+  parseRetryCommand,
   type PlanCommand,
 } from "@open-inspect/shared";
 import {
@@ -251,6 +252,96 @@ async function handlePlanCommand(
   });
 }
 
+/**
+ * Handle a `retry`/`relaunch` reply: relaunch the session's sandbox via the
+ * control-plane endpoint (the same one the web UI uses) and report the outcome
+ * as an agent activity. When the last turn failed, the control plane re-enqueues
+ * it, so the relaunch also resumes the work — surfaced via the `resumed` flag.
+ *
+ * Exported for unit testing the relaunch outcome branches.
+ */
+export async function handleRetryCommand(
+  env: Env,
+  client: LinearApiClient,
+  sessionId: string,
+  agentSessionId: string,
+  traceId?: string
+): Promise<void> {
+  const headers = await getAuthHeaders(env, traceId);
+
+  let res: Response;
+  try {
+    res = await env.CONTROL_PLANE.fetch(`https://internal/sessions/${sessionId}/sandbox/relaunch`, {
+      method: "POST",
+      headers,
+    });
+  } catch (e) {
+    log.error("retry_command.transport_error", {
+      trace_id: traceId,
+      session_id: sessionId,
+      error: e instanceof Error ? e : new Error(String(e)),
+    });
+    await emitAgentActivity(client, agentSessionId, {
+      type: "error",
+      body: "Failed to relaunch the sandbox (network error).",
+    });
+    return;
+  }
+
+  if (!res.ok) {
+    let errBody = "";
+    try {
+      errBody = await res.text();
+    } catch {
+      /* ignore */
+    }
+    log.warn("retry_command.failed", {
+      trace_id: traceId,
+      session_id: sessionId,
+      http_status: res.status,
+      response_body: errBody.slice(0, 300),
+    });
+    await emitAgentActivity(client, agentSessionId, {
+      type: "error",
+      body:
+        res.status === 404
+          ? "Couldn't relaunch — this session no longer exists."
+          : `Relaunch failed (HTTP ${res.status}).`,
+    });
+    return;
+  }
+
+  // 200 covers both "relaunching" and "skipped" (sandbox not in a relaunchable
+  // state) — these are distinct user-facing outcomes, not errors. Tolerate an
+  // empty/non-JSON body.
+  let status: string | undefined;
+  let resumed: boolean | undefined;
+  try {
+    ({ status, resumed } = (await res.json()) as { status?: string; resumed?: boolean });
+  } catch {
+    /* fall back to generic copy below */
+  }
+
+  log.info("retry_command.ok", {
+    trace_id: traceId,
+    session_id: sessionId,
+    relaunch_status: status,
+    resumed,
+  });
+
+  await emitAgentActivity(client, agentSessionId, {
+    type: status === "skipped" ? "thought" : "response",
+    body:
+      status === "skipped"
+        ? // Not stopped/failed/stale — the sandbox is still alive (the turn
+          // failed in-band), so there's nothing to relaunch. Re-prompting works.
+          "The sandbox is still active — reply with your next message to continue."
+        : resumed
+          ? "Relaunching the sandbox and resuming your last request."
+          : "Relaunching the sandbox.",
+  });
+}
+
 // ─── Sub-handlers ────────────────────────────────────────────────────────────
 
 async function handleStop(webhook: AgentSessionWebhook, env: Env, traceId: string): Promise<void> {
@@ -421,6 +512,23 @@ async function handleFollowUp(
     });
     return;
   }
+
+  // Retry shortcut: a lone `retry`/`relaunch` reply relaunches the sandbox
+  // (resuming the failed turn) instead of being forwarded as a new prompt.
+  const retryCommand = parseRetryCommand(followUpContent);
+  if (retryCommand) {
+    await handleRetryCommand(env, client, existingSession.sessionId, agentSessionId, traceId);
+    log.info("agent_session.followup", {
+      trace_id: traceId,
+      issue_identifier: issue.identifier,
+      session_id: existingSession.sessionId,
+      agent_session_id: agentSessionId,
+      route: "retry_command",
+      duration_ms: Date.now() - startTime,
+    });
+    return;
+  }
+
   const followUpMetadata = agentActivity?.content?.body
     ? { followUpSource: "linear_agent_activity", followUpAuthor: "linear" }
     : { followUpSource: "linear_comment", followUpAuthor: "unknown" };

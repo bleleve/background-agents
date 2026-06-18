@@ -168,6 +168,14 @@ export interface PromptCommand {
    * read-only + save_plan and surface a planning-specific preamble.
    */
   planMode?: boolean;
+  /**
+   * OpenCode session to resume. When set, the bridge adopts this session (after
+   * validating it against the local OpenCode API) instead of creating a fresh
+   * one, so a relaunched/restored sandbox continues with prior context. Sourced
+   * from the session's persisted opencode_session_id (stored on the `ready`
+   * event); harmless on a live sandbox that already holds the same id.
+   */
+  opencodeSessionId?: string;
 }
 
 export interface StopCommand {

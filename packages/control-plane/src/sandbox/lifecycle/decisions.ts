@@ -614,12 +614,24 @@ export interface ExecutionTimeoutConfig {
 }
 
 /**
- * Default: 90 minutes — matches the bridge's PROMPT_MAX_DURATION.
- * The control plane timeout should never preempt the bridge's own timeout for
- * legitimate long-running prompts. It fires only when the bridge is dead and
- * can't enforce its own timeout.
+ * The bridge's per-prompt hard cap (PROMPT_MAX_DURATION in
+ * sandbox-runtime/bridge.py). Kept in sync manually across the TS/Python
+ * boundary; the execution timeout below must stay strictly greater than this.
  */
-export const DEFAULT_EXECUTION_TIMEOUT_MS = 90 * 60 * 1000;
+const BRIDGE_PROMPT_MAX_DURATION_MS = 90 * 60 * 1000;
+
+/**
+ * Default: bridge PROMPT_MAX_DURATION + 5 min margin.
+ *
+ * The control-plane timeout must NEVER preempt the bridge's own timeout for a
+ * legitimate long-running prompt — it fires only when the bridge is dead and
+ * can't enforce its own. With equal magnitudes the control-plane clock leads
+ * (it starts at dispatch, the bridge at prompt_start, which is strictly later),
+ * so a prompt running near the cap would be failed by the control plane while
+ * the bridge still considers it healthy. The margin covers worst-case
+ * pre-stream latency (git config + sandbox spawn) so the bridge always wins.
+ */
+export const DEFAULT_EXECUTION_TIMEOUT_MS = BRIDGE_PROMPT_MAX_DURATION_MS + 5 * 60 * 1000;
 
 /**
  * Result of execution timeout evaluation.

@@ -106,27 +106,29 @@ Wide events use `outcome` to indicate result:
 
 #### Session Durable Object (`component: "session-do"`)
 
-| Event             | Level      | Key Fields                                                                                                     | Description                    |
-| ----------------- | ---------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `do.request`      | info       | `http_method`, `http_path`, `http_status`, `duration_ms`, `outcome`                                            | One per DO internal route call |
-| `ws.connect`      | info, warn | `ws_type` (sandbox\|client), `outcome`, `reject_reason`, `sandbox_id`, `participant_id`, `duration_ms`         | WebSocket lifecycle            |
-| `prompt.enqueue`  | info       | `message_id`, `source`, `author_id`, `user_id`, `model`, `content_length`, `has_attachments`, `queue_position` | Message queued                 |
-| `prompt.dispatch` | info       | `message_id`, `outcome`, `reason`, `model`, `has_sandbox_ws`, `queue_wait_ms`                                  | Message sent to sandbox        |
-| `prompt.complete` | info, warn | `message_id`, `outcome`, `total_duration_ms`, `processing_duration_ms`, `queue_duration_ms`                    | Prompt run finished            |
+| Event             | Level      | Key Fields                                                                                                                                                 | Description                    |
+| ----------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `do.request`      | info       | `http_method`, `http_path`, `http_status`, `duration_ms`, `outcome`                                                                                        | One per DO internal route call |
+| `ws.connect`      | info, warn | `ws_type` (sandbox\|client), `outcome`, `reject_reason`, `sandbox_id`, `participant_id`, `duration_ms`                                                     | WebSocket lifecycle            |
+| `prompt.enqueue`  | info       | `message_id`, `source`, `author_id`, `user_id`, `model`, `content_length`, `has_attachments`, `queue_position`                                             | Message queued                 |
+| `prompt.dispatch` | info       | `message_id`, `outcome` (`sent`\|`send_failed`\|`deferred`), `reason` (when `deferred`), `model`, `has_sandbox_ws`, `sandbox_ready_state`, `queue_wait_ms` | Message sent to sandbox        |
+| `prompt.complete` | info, warn | `message_id`, `outcome`, `total_duration_ms`, `processing_duration_ms`, `queue_duration_ms`                                                                | Prompt run finished            |
 
 #### Lifecycle Manager (`component: "lifecycle-manager"`)
 
-| Event                     | Level | Key Fields                                       | Description                |
-| ------------------------- | ----- | ------------------------------------------------ | -------------------------- |
-| `sandbox.spawn`           | info  | `expected_sandbox_id`, `repo_owner`, `repo_name` | Spawn attempt started      |
-| `sandbox.spawned`         | info  | `sandbox_id`, `provider_object_id`               | Spawn succeeded            |
-| `sandbox.spawn_failed`    | error | `error`                                          | Spawn failed               |
-| `sandbox.restore`         | info  | `snapshot_image_id`                              | Restore attempt started    |
-| `sandbox.restored`        | info  | `sandbox_id`, `provider_object_id`               | Restore succeeded          |
-| `sandbox.snapshot`        | info  | `reason`, `provider_object_id`                   | Snapshot attempt started   |
-| `sandbox.snapshot_saved`  | info  | `image_id`, `reason`                             | Snapshot saved             |
-| `sandbox.heartbeat_stale` | warn  | `last_heartbeat_ms`, `threshold_ms`              | Heartbeat missed           |
-| `sandbox.timeout`         | info  | `last_activity`, `timeout_ms`                    | Inactivity timeout reached |
+| Event                          | Level | Key Fields                                       | Description                                                  |
+| ------------------------------ | ----- | ------------------------------------------------ | ------------------------------------------------------------ |
+| `sandbox.spawn`                | info  | `expected_sandbox_id`, `repo_owner`, `repo_name` | Spawn attempt started                                        |
+| `sandbox.spawned`              | info  | `sandbox_id`, `provider_object_id`               | Spawn succeeded                                              |
+| `sandbox.spawn_failed`         | error | `error`                                          | Spawn failed                                                 |
+| `sandbox.restore`              | info  | `snapshot_image_id`                              | Restore attempt started                                      |
+| `sandbox.restored`             | info  | `sandbox_id`, `provider_object_id`               | Restore succeeded                                            |
+| `sandbox.snapshot`             | info  | `reason`, `provider_object_id`                   | Snapshot attempt started                                     |
+| `sandbox.snapshot_saved`       | info  | `image_id`, `reason`                             | Snapshot saved                                               |
+| `sandbox.heartbeat_stale`      | warn  | `last_heartbeat_ms`, `threshold_ms`              | Heartbeat missed                                             |
+| `sandbox.connecting_timeout`   | warn  | `elapsed_ms`, `timeout_ms`                       | Bridge never connected in time                               |
+| `sandbox.circuit_breaker_open` | warn  | `failure_count`, `wait_time_ms`                  | Spawn blocked by the circuit breaker after repeated failures |
+| `sandbox.timeout`              | info  | `last_activity`, `timeout_ms`                    | Inactivity timeout reached                                   |
 
 #### Provider Clients
 
@@ -261,7 +263,8 @@ service="control-plane" msg="prompt.complete" message_id="<MSG_ID>"
 
 Key fields to check:
 
-- `prompt.dispatch` → `outcome` and `reason` (was a sandbox connected?)
+- `prompt.dispatch` → `outcome` (`sent`/`send_failed`/`deferred`), `has_sandbox_ws`,
+  `sandbox_ready_state` (was a sandbox connected and was the socket open?)
 - `prompt.run` → `outcome` and `duration_ms` (did it succeed? how long?)
 - `prompt.complete` → `total_duration_ms` (end-to-end time)
 

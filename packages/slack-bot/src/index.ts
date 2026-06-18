@@ -2284,6 +2284,80 @@ async function handleSlackInteraction(
       await openPlanRejectModal(env, payload.trigger_id, sessionId, originMessage);
       break;
     }
+
+    case "relaunch_sandbox": {
+      // "Retry" button on the failure message: relaunch the sandbox and, when the
+      // last turn failed, resume it (the control plane re-enqueues the failed
+      // message). The relaunch endpoint is the same one the web UI uses; auth is
+      // the standard internal HMAC. This handler runs under waitUntil, so the
+      // network round-trip doesn't block the interaction ack.
+      const sessionId = action.value;
+      if (!sessionId) return;
+
+      let res: Response;
+      try {
+        const headers = await getAuthHeaders(env, traceId);
+        res = await env.CONTROL_PLANE.fetch(
+          `https://internal/sessions/${sessionId}/sandbox/relaunch`,
+          { method: "POST", headers }
+        );
+      } catch (e) {
+        log.error("slack.sandbox_relaunch.transport_error", {
+          trace_id: traceId,
+          session_id: sessionId,
+          user_id: userId,
+          error: e instanceof Error ? e : new Error(String(e)),
+        });
+        if (channel && messageTs) {
+          const text = ":warning: Couldn't relaunch the sandbox (network error).";
+          await updateMessage(env.SLACK_BOT_TOKEN, channel, messageTs, text, {
+            blocks: [{ type: "section", text: { type: "mrkdwn", text } }],
+          });
+        }
+        return;
+      }
+
+      // The endpoint returns 200 for both "relaunching" and "skipped" — only a
+      // non-2xx (e.g. 404 missing session) is a real failure. Tolerate an empty
+      // or non-JSON body.
+      let status: string | undefined;
+      let resumed: boolean | undefined;
+      try {
+        ({ status, resumed } = (await res.json()) as { status?: string; resumed?: boolean });
+      } catch {
+        /* no/!JSON body — fall back to generic copy below */
+      }
+
+      log.info("slack.sandbox_relaunch", {
+        trace_id: traceId,
+        session_id: sessionId,
+        user_id: userId,
+        http_status: res.status,
+        ok: res.ok,
+        relaunch_status: status,
+        resumed,
+      });
+
+      if (channel && messageTs) {
+        // "skipped" means the sandbox isn't stopped/failed/stale — it's still
+        // alive (the turn failed in-band rather than the box dying), so there's
+        // nothing to relaunch. Point the user at the action that does work:
+        // replying in-thread re-prompts the live sandbox.
+        const text = !res.ok
+          ? `:warning: Couldn't relaunch the sandbox (HTTP ${res.status}).`
+          : status === "skipped"
+            ? ":information_source: The sandbox is still active — reply in this thread to continue."
+            : resumed
+              ? ":arrows_counterclockwise: Relaunching the sandbox and resuming your last request…"
+              : ":arrows_counterclockwise: Relaunching the sandbox…";
+        // Replacing the original message also drops the now-stale Retry button,
+        // preventing a double-click on a sandbox that's already coming back up.
+        await updateMessage(env.SLACK_BOT_TOKEN, channel, messageTs, text, {
+          blocks: [{ type: "section", text: { type: "mrkdwn", text } }],
+        });
+      }
+      break;
+    }
   }
 }
 

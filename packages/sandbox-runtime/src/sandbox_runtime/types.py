@@ -32,71 +32,21 @@ class GitSyncStatus(StrEnum):
 
 
 class SandboxEvent(BaseModel):
-    """Event emitted from sandbox to control plane."""
+    """Loose schema for an event emitted from sandbox to control plane.
+
+    NOTE: this is a permissive documentation shape, NOT the source of truth for
+    the wire protocol. The bridge builds and sends event payloads as plain dicts
+    with camelCase keys (e.g. `messageId`, `sandboxId`, `callId`) and a flat
+    shape — see AgentBridge._send_event in bridge.py and the SandboxEvent union
+    in @open-inspect/shared. Do not add per-event subclasses here expecting them
+    to validate or build the real frames; they previously drifted (snake_case +
+    nested `data`) from what the bridge actually sends and were removed.
+    """
 
     type: str
     sandbox_id: str
     data: dict[str, Any] = {}
     timestamp: float
-
-
-class HeartbeatEvent(SandboxEvent):
-    """Heartbeat event from sandbox."""
-
-    type: str = "heartbeat"
-    status: SandboxStatus
-
-
-class TokenEvent(SandboxEvent):
-    """Token streaming event from agent."""
-
-    type: str = "token"
-    content: str
-    message_id: str
-
-
-class ToolCallEvent(SandboxEvent):
-    """Tool call event from agent."""
-
-    type: str = "tool_call"
-    tool: str
-    args: dict[str, Any]
-    call_id: str
-
-
-class ToolResultEvent(SandboxEvent):
-    """Tool result event from agent."""
-
-    type: str = "tool_result"
-    call_id: str
-    result: str
-    error: str | None = None
-
-
-class GitSyncEvent(SandboxEvent):
-    """Git sync status event."""
-
-    type: str = "git_sync"
-    status: GitSyncStatus
-    sha: str | None = None
-    error: str | None = None
-
-
-class ExecutionCompleteEvent(SandboxEvent):
-    """Execution complete event."""
-
-    type: str = "execution_complete"
-    message_id: str
-    success: bool
-
-
-class ArtifactEvent(SandboxEvent):
-    """Artifact created event."""
-
-    type: str = "artifact"
-    artifact_type: str
-    url: str
-    metadata: dict[str, Any] = {}
 
 
 class GitUser(BaseModel):

@@ -111,6 +111,24 @@ export function parsePlanCommand(body: string): PlanCommand | null {
 }
 
 /**
+ * A lone `retry` (or `relaunch`) reply: relaunch the session's sandbox and, if
+ * the last turn failed, resume it. Lives in shared so comment-driven bots stay
+ * in sync; currently consumed by linear-bot (github-bot may adopt the same
+ * syntax). Exact-match only — a body like `retry the build` is a normal prompt,
+ * not a command.
+ */
+export type RetryCommand = { command: "retry" };
+
+export function parseRetryCommand(body: string): RetryCommand | null {
+  const trimmed = body.trim();
+  if (!trimmed) return null;
+  if (/^(?:retry|relaunch)\s*$/i.test(trimmed)) {
+    return { command: "retry" };
+  }
+  return null;
+}
+
+/**
  * Canonical title for a github-bot PR-review session. Shared so the bot (which
  * sets it) and the web UI (which detects review sessions from it, to show the
  * "Re-run review" action) can't drift. A build/coding session or a comment

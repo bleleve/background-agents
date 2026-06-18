@@ -234,11 +234,19 @@ export interface SlackAgentNotifyLookup {
  */
 export interface LifecycleCallbacks {
   /** Called when the sandbox is being terminated (heartbeat stale, inactivity
-   * timeout, connecting timeout) or when the circuit breaker is open so no spawn
-   * is even attempted. Lets the DO fail the in-flight or queued-but-undispatched
-   * message instead of leaving it stuck "pending" forever. */
+   * timeout, connecting timeout), when the circuit breaker is open so no spawn
+   * is even attempted (`circuit_breaker_open`), or as a one-shot sweep for a
+   * prompt orphaned by an immediate spawn failure (`spawn_failed`). Lets the DO
+   * fail the in-flight or queued-but-undispatched message instead of leaving it
+   * stuck "pending" forever. The DO keeps the session retryable for the
+   * recoverable reasons (circuit_breaker_open, spawn_failed). */
   onSandboxTerminating?: (
-    reason: "connecting_timeout" | "heartbeat_stale" | "inactivity_timeout" | "circuit_breaker_open"
+    reason:
+      | "connecting_timeout"
+      | "heartbeat_stale"
+      | "inactivity_timeout"
+      | "circuit_breaker_open"
+      | "spawn_failed"
   ) => Promise<void>;
 }
 
@@ -700,6 +708,14 @@ export class SandboxLifecycleManager {
         if (result.providerObjectId) {
           this.storeAndBroadcastProviderObjectId(result.providerObjectId);
         }
+        // A successful restore starts a new sandbox lineage (like a fresh
+        // spawn), so drop the consumed snapshot pointer. Otherwise, if the
+        // restored sandbox crashes before taking its own snapshot,
+        // evaluateSpawnDecision would re-restore the same now-stale image
+        // instead of falling back to a fresh spawn. triggerSnapshot() will
+        // repopulate snapshot_image_id once the new sandbox snapshots. Mirrors
+        // the clear in doSpawn().
+        this.storage.clearSandboxSnapshotImageId();
         if (result.codeServerUrl && result.codeServerPassword) {
           await this.storeAndBroadcastCodeServer(result.codeServerUrl, result.codeServerPassword);
         }
@@ -741,6 +757,13 @@ export class SandboxLifecycleManager {
         // no backoff. The breaker (checked before restore dispatch) closes that
         // loop after the failure threshold.
         this.storage.incrementCircuitBreakerFailure(Date.now());
+        // A permanent restore failure means the snapshot image is unusable
+        // (GC'd / not found). Drop the pointer so evaluateSpawnDecision falls
+        // through to a fresh spawn next time instead of re-restoring the same
+        // dead image. Transient failures keep the snapshot for a later retry.
+        if (result.errorType !== "transient") {
+          this.storage.clearSandboxSnapshotImageId();
+        }
         this.storage.updateSandboxStatus("failed");
         this.broadcaster.broadcast({
           type: "sandbox_error",
@@ -755,9 +778,11 @@ export class SandboxLifecycleManager {
         snapshot_image_id: snapshotImageId,
       });
       // Transient provider errors don't count toward the breaker (mirrors
-      // doSpawn); permanent/unknown errors do, so a dead snapshot can't loop.
+      // doSpawn); permanent/unknown errors do, and also drop the snapshot
+      // pointer so a dead image can't loop.
       if (!(error instanceof SandboxProviderError) || error.errorType === "permanent") {
         this.storage.incrementCircuitBreakerFailure(Date.now());
+        this.storage.clearSandboxSnapshotImageId();
       }
       this.storage.updateSandboxStatus("failed");
       this.broadcaster.broadcast({
@@ -1018,6 +1043,16 @@ export class SandboxLifecycleManager {
 
     // Skip if sandbox is already in terminal state
     if (sandbox.status === "stopped" || sandbox.status === "failed" || sandbox.status === "stale") {
+      // Orphan sweep: an immediate spawn/restore/resume failure sets status to
+      // "failed" synchronously, so the pre-armed connecting-timeout alarm lands
+      // here and would otherwise be dropped — leaving the queued prompt that
+      // triggered the spawn stuck "pending" forever. Fail it once (the DO keeps
+      // the session retryable for this reason). No-op if no message is stuck, so
+      // it's safe and idempotent; "stopped"/"stale" were already reconciled by
+      // their watchdogs, so this only does work for the immediate-failure case.
+      if (sandbox.status === "failed") {
+        await this.callbacks.onSandboxTerminating?.("spawn_failed");
+      }
       this.log.debug("Alarm: sandbox in terminal state, skipping", {
         sandbox_status: sandbox.status,
       });
@@ -1047,7 +1082,13 @@ export class SandboxLifecycleManager {
       // finally never ran, so without this every later spawn attempt would skip
       // with "spawn already in progress" for the lifetime of this DO instance.
       this.isSpawningSandbox = false;
-      this.storage.updateSandboxStatus("failed");
+      // For provider-managed-stop providers (e.g. Daytona) the provider object
+      // remains resumable after stopProviderSandbox, so mark it "stopped" — the
+      // resume gate (stopped/stale) then recovers it in place on the next
+      // prompt instead of stranding the work into a cold fresh spawn. Snapshot/
+      // non-persistent providers (Modal/Vercel) stay "failed".
+      const terminalStatus: SandboxStatus = this.usesProviderManagedStop() ? "stopped" : "failed";
+      this.storage.updateSandboxStatus(terminalStatus);
       this.clearSandboxAccessState();
       if (this.canStopProviderSandbox()) {
         try {
@@ -1058,7 +1099,7 @@ export class SandboxLifecycleManager {
           });
         }
       }
-      this.broadcaster.broadcast({ type: "sandbox_status", status: "failed" });
+      this.broadcaster.broadcast({ type: "sandbox_status", status: terminalStatus });
       this.broadcaster.broadcast({
         type: "sandbox_error",
         error: "Sandbox failed to connect within the allowed time. Resend your prompt to retry.",

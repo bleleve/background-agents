@@ -969,8 +969,15 @@ describe("evaluateWarmDecision", () => {
 
 describe("evaluateExecutionTimeout", () => {
   const config: ExecutionTimeoutConfig = {
-    timeoutMs: DEFAULT_EXECUTION_TIMEOUT_MS, // 90 minutes
+    timeoutMs: DEFAULT_EXECUTION_TIMEOUT_MS,
   };
+
+  it("must exceed the bridge's PROMPT_MAX_DURATION so it never preempts it", () => {
+    // The bridge's per-prompt cap is 90 min (sandbox-runtime/bridge.py). The
+    // control-plane timeout must be strictly greater so it only fires when the
+    // bridge is dead, never on a healthy long-running prompt.
+    expect(DEFAULT_EXECUTION_TIMEOUT_MS).toBeGreaterThan(90 * 60 * 1000);
+  });
 
   it("returns not timed out within threshold", () => {
     const now = Date.now();

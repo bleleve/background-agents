@@ -9,8 +9,14 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { initSchema } from "./schema";
+import { reEnqueueInterruptedTurnForRelaunch } from "./relaunch";
 import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
-import { resolveAppName, timingSafeEqual } from "@open-inspect/shared";
+import {
+  resolveAppName,
+  timingSafeEqual,
+  RELAUNCHABLE_SANDBOX_STATUSES,
+  RESUMABLE_SESSION_STATUSES,
+} from "@open-inspect/shared";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl, createModalClient } from "../sandbox/client";
 import { createDaytonaRestClient } from "../sandbox/daytona-rest-client";
@@ -983,7 +989,12 @@ export class SessionDO extends DurableObject<Env> {
       idGenerator,
       config,
       {
-        onSandboxTerminating: (reason) => this.messageQueue.failStuckProcessingMessage(reason),
+        onSandboxTerminating: (reason) =>
+          this.messageQueue.failStuckProcessingMessage(reason, {
+            // Recoverable spawn-path failures end the stuck turn but keep the
+            // session retryable; genuine mid-work terminations reconcile it.
+            keepSessionActive: reason === "circuit_breaker_open" || reason === "spawn_failed",
+          }),
       },
       repoImageLookup
     );
@@ -1101,7 +1112,14 @@ export class SessionDO extends DurableObject<Env> {
       const sandbox = this.getSandbox();
       const expectedSandboxId = sandbox?.modal_sandbox_id;
 
-      // Reject connection if sandbox should be stopped (prevents reconnection after inactivity timeout)
+      // Reject reconnection only for stopped/stale — NOT "failed". A sandbox
+      // failed by the connecting-timeout watchdog (a slow-but-healthy boot) is
+      // intentionally allowed to revive when its bridge finally connects; the
+      // session is left retryable (not stuck-failed) by the recovery-aware
+      // reconcile, so there is no contradictory ready-sandbox/failed-session
+      // split. Stale sandboxes from a previous lifecycle are already rejected by
+      // the sandbox-ID check below (modal_sandbox_id rotates per spawn) and by
+      // auth-token rotation, so this gate does not need to block "failed".
       if (sandbox?.status === "stopped" || sandbox?.status === "stale") {
         this.log.warn("ws.connect", {
           event: "ws.connect",
@@ -1696,15 +1714,28 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     const sandboxStatus = this.getSandbox()?.status;
-    const relaunchable: SandboxStatus[] = ["stopped", "failed", "stale"];
-    if (!sandboxStatus || !relaunchable.includes(sandboxStatus)) {
+    if (!sandboxStatus || !RELAUNCHABLE_SANDBOX_STATUSES.includes(sandboxStatus)) {
       return Response.json({ status: "skipped", sandboxStatus: sandboxStatus ?? null });
+    }
+
+    // Resume the interrupted turn on relaunch of a failed/cancelled session:
+    // revert the failed message to pending and re-activate the session so it is
+    // re-dispatched once the sandbox reconnects (onSandboxConnected → queue),
+    // this time carrying the stored opencode_session_id so the bridge resumes
+    // prior context. We do NOT write a new user_message event (keeps the single
+    // original bubble) and do NOT dispatch here — dispatch is owned by the
+    // reconnect path. Idempotent: a second relaunch sees a non-resumable status
+    // and just spawns.
+    const resumed = reEnqueueInterruptedTurnForRelaunch(session.status, this.repository);
+    if (RESUMABLE_SESSION_STATUSES.includes(session.status)) {
+      await this.transitionSessionStatus("active");
     }
 
     await this.spawnSandbox();
     return Response.json({
       status: "relaunching",
       sandboxStatus: this.getSandbox()?.status ?? null,
+      resumed,
     });
   }
 
@@ -2286,9 +2317,9 @@ export class SessionDO extends DurableObject<Env> {
     return false;
   }
 
-  private updateSandboxStatus(status: string): void {
-    this.repository.updateSandboxStatus(status as SandboxStatus);
-    this.syncSandboxStatusIndex(status as SandboxStatus);
+  private updateSandboxStatus(status: SandboxStatus): void {
+    this.repository.updateSandboxStatus(status);
+    this.syncSandboxStatusIndex(status);
   }
 
   // HTTP handlers

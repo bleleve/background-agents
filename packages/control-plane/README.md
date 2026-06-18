@@ -67,6 +67,7 @@ The control plane provides:
 | `/sessions/:id/participants`      | GET/POST  | Manage participants                                               |
 | `/sessions/:id/messages`          | GET       | List messages                                                     |
 | `/sessions/:id/pr`                | POST      | Create pull request                                               |
+| `/sessions/:id/pr-state`          | POST      | Sync PR artifact state (e.g. on PR close/reopen)                  |
 | `/sessions/:id/pr-review`         | POST      | Submit a formal PR review (policy-checked, sandbox-authenticated) |
 | `/sessions/:id/record-suggestion` | POST      | Record a posted inline review suggestion (sandbox-authenticated)  |
 | `/sessions/:id/scm-credentials`   | POST      | Broker sandbox git credentials                                    |
@@ -166,26 +167,27 @@ These routes are called by the github-bot via its `CONTROL_PLANE` service bindin
 
 ### Server → Client Messages
 
-| Type               | Description                   |
-| ------------------ | ----------------------------- |
-| `pong`             | Health check response         |
-| `subscribed`       | Confirm subscription          |
-| `prompt_queued`    | Confirm prompt queued         |
-| `sandbox_event`    | Event from sandbox            |
-| `presence_sync`    | Full presence state           |
-| `presence_update`  | Presence change               |
-| `presence_leave`   | Participant disconnected      |
-| `sandbox_spawning` | Sandbox is being created      |
-| `sandbox_warming`  | Sandbox warming               |
-| `sandbox_status`   | Sandbox status update         |
-| `sandbox_ready`    | Sandbox ready                 |
-| `sandbox_error`    | Sandbox error occurred        |
-| `sandbox_warning`  | Sandbox warning message       |
-| `sandbox_restored` | Restored from snapshot        |
-| `artifact_created` | New artifact (PR, screenshot) |
-| `snapshot_saved`   | Filesystem snapshot saved     |
-| `session_status`   | Session status change         |
-| `error`            | Error occurred                |
+| Type                | Description                                           |
+| ------------------- | ----------------------------------------------------- |
+| `pong`              | Health check response                                 |
+| `subscribed`        | Confirm subscription                                  |
+| `prompt_queued`     | Confirm prompt queued                                 |
+| `processing_status` | Agent processing started/stopped (`{ isProcessing }`) |
+| `sandbox_event`     | Event from sandbox                                    |
+| `presence_sync`     | Full presence state                                   |
+| `presence_update`   | Presence change                                       |
+| `presence_leave`    | Participant disconnected                              |
+| `sandbox_spawning`  | Sandbox is being created                              |
+| `sandbox_warming`   | Sandbox warming                                       |
+| `sandbox_status`    | Sandbox status update                                 |
+| `sandbox_ready`     | Sandbox ready                                         |
+| `sandbox_error`     | Sandbox error occurred                                |
+| `sandbox_warning`   | Sandbox warning message                               |
+| `sandbox_restored`  | Restored from snapshot                                |
+| `artifact_created`  | New artifact (PR, screenshot)                         |
+| `snapshot_saved`    | Filesystem snapshot saved                             |
+| `session_status`    | Session status change                                 |
+| `error`             | Error occurred                                        |
 
 ## Development
 

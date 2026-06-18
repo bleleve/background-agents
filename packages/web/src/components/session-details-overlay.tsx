@@ -40,6 +40,7 @@ export function SessionDetailsOverlay({
   participants,
   events,
   artifacts,
+  isProcessing,
   terminalOpen,
   onToggleTerminal,
   onOpenMedia,
@@ -163,6 +164,7 @@ export function SessionDetailsOverlay({
       participants={participants}
       events={events}
       artifacts={artifacts}
+      isProcessing={isProcessing}
       terminalOpen={terminalOpen}
       onToggleTerminal={onToggleTerminal}
       onOpenMedia={onOpenMedia}

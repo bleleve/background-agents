@@ -382,6 +382,11 @@ async function handleCompletionCallback(
       } else {
         message = `The agent was unable to complete this task.`;
       }
+      // Linear has no action buttons, so point the user at the comment command.
+      // `retry` relaunches a dead sandbox (resuming the failed turn); if the
+      // sandbox is still alive, a new message re-prompts it. See
+      // parseRetryCommand / handleRetryCommand in webhook-handler.
+      message += `\n\n_Reply **retry** to relaunch and resume, or send a new message to try again._`;
     }
 
     // Emit via Agent API if we have session context

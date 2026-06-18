@@ -163,6 +163,16 @@ export interface RestoreResult {
   providerObjectId?: string;
   /** Error message if failed */
   error?: string;
+  /**
+   * Failure classification when `success` is false.
+   * - "permanent": the snapshot image is unusable (e.g. GC'd / not found), so a
+   *   retry against the same image is futile — the caller should drop the
+   *   snapshot pointer and fall back to a fresh spawn.
+   * - "transient": a recoverable error (network / provider blip) — retrying the
+   *   same image later may succeed; keep the snapshot pointer.
+   * Omitted when unknown (treated conservatively as permanent by the caller).
+   */
+  errorType?: SandboxErrorType;
   /** Code-server tunnel URL (if available) */
   codeServerUrl?: string;
   /** Code-server password (if available) */
