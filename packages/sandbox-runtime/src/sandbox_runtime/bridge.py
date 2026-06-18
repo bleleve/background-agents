@@ -805,6 +805,7 @@ class AgentBridge:
 
             had_error = False
             error_message = None
+            emitted_output = False
             async for event in self._stream_opencode_response_sse(
                 message_id, content, model, reasoning_effort
             ):
@@ -815,11 +816,27 @@ class AgentBridge:
                 if event.get("type") == "error" and not event.get("isSubtask"):
                     had_error = True
                     error_message = event.get("error")
-                if plan_mode and event.get("type") == "token":
-                    token_text = event.get("content")
-                    if isinstance(token_text, str):
-                        text_buffer.append(token_text)
+                elif event.get("type") == "error" and event.get("isSubtask"):
+                    # A forwarded sub-task error is meaningful, visible output:
+                    # it must not trip the "completed without output" guard below.
+                    emitted_output = True
+                elif event.get("type") in ("token", "tool_call", "step_finish"):
+                    emitted_output = True
+                    if plan_mode and event.get("type") == "token":
+                        token_text = event.get("content")
+                        if isinstance(token_text, str):
+                            text_buffer.append(token_text)
                 await self._send_event(event)
+
+            if not had_error and not emitted_output:
+                had_error = True
+                error_message = "OpenCode completed without emitting assistant output."
+                self.log.error(
+                    "prompt.no_output",
+                    message_id=message_id,
+                    model=model,
+                    reasoning_effort=reasoning_effort,
+                )
 
             if had_error:
                 outcome = "error"
@@ -1006,146 +1023,6 @@ class AgentBridge:
                     error_type=type(e).__name__,
                 )
                 await asyncio.sleep(retry_delay_seconds)
-
-    def _normalize_forwardable_session_title(self, title: object) -> str | None:
-        if not isinstance(title, str):
-            return None
-
-        trimmed = title.strip()
-        if not trimmed or self.OPENCODE_DEFAULT_TITLE_RE.match(trimmed):
-            return None
-        return trimmed
-
-    def _session_title_event_once(self, title: object) -> dict[str, str] | None:
-        trimmed = self._normalize_forwardable_session_title(title)
-        if trimmed is None:
-            return None
-        if trimmed == self._last_forwarded_session_title:
-            return None
-
-        self._last_forwarded_session_title = trimmed
-        return {"type": "session_title", "title": trimmed}
-
-    def _session_title_event_from_sse(
-        self, event_type: object, props: dict[str, Any]
-    ) -> dict[str, str] | None:
-        if event_type != "session.updated":
-            return None
-
-        info = props.get("info")
-        if not isinstance(info, dict):
-            return None
-
-        session_id = props.get("sessionID") or info.get("id")
-        if session_id != self.opencode_session_id:
-            return None
-
-        return self._session_title_event_once(info.get("title"))
-
-    def _normalize_forwardable_session_title(self, title: object) -> str | None:
-        if not isinstance(title, str):
-            return None
-
-        trimmed = title.strip()
-        if not trimmed or self.OPENCODE_DEFAULT_TITLE_RE.match(trimmed):
-            return None
-        return trimmed
-
-    def _session_title_event_once(self, title: object) -> dict[str, str] | None:
-        trimmed = self._normalize_forwardable_session_title(title)
-        if trimmed is None:
-            return None
-        if trimmed == self._last_forwarded_session_title:
-            return None
-
-        self._last_forwarded_session_title = trimmed
-        return {"type": "session_title", "title": trimmed}
-
-    def _session_title_event_from_sse(
-        self, event_type: object, props: dict[str, Any]
-    ) -> dict[str, str] | None:
-        if event_type != "session.updated":
-            return None
-
-        info = props.get("info")
-        if not isinstance(info, dict):
-            return None
-
-        session_id = props.get("sessionID") or info.get("id")
-        if session_id != self.opencode_session_id:
-            return None
-
-        return self._session_title_event_once(info.get("title"))
-
-    def _normalize_forwardable_session_title(self, title: object) -> str | None:
-        if not isinstance(title, str):
-            return None
-
-        trimmed = title.strip()
-        if not trimmed or self.OPENCODE_DEFAULT_TITLE_RE.match(trimmed):
-            return None
-        return trimmed
-
-    def _session_title_event_once(self, title: object) -> dict[str, str] | None:
-        trimmed = self._normalize_forwardable_session_title(title)
-        if trimmed is None:
-            return None
-        if trimmed == self._last_forwarded_session_title:
-            return None
-
-        self._last_forwarded_session_title = trimmed
-        return {"type": "session_title", "title": trimmed}
-
-    def _session_title_event_from_sse(
-        self, event_type: object, props: dict[str, Any]
-    ) -> dict[str, str] | None:
-        if event_type != "session.updated":
-            return None
-
-        info = props.get("info")
-        if not isinstance(info, dict):
-            return None
-
-        session_id = props.get("sessionID") or info.get("id")
-        if session_id != self.opencode_session_id:
-            return None
-
-        return self._session_title_event_once(info.get("title"))
-
-    def _normalize_forwardable_session_title(self, title: object) -> str | None:
-        if not isinstance(title, str):
-            return None
-
-        trimmed = title.strip()
-        if not trimmed or self.OPENCODE_DEFAULT_TITLE_RE.match(trimmed):
-            return None
-        return trimmed
-
-    def _session_title_event_once(self, title: object) -> dict[str, str] | None:
-        trimmed = self._normalize_forwardable_session_title(title)
-        if trimmed is None:
-            return None
-        if trimmed == self._last_forwarded_session_title:
-            return None
-
-        self._last_forwarded_session_title = trimmed
-        return {"type": "session_title", "title": trimmed}
-
-    def _session_title_event_from_sse(
-        self, event_type: object, props: dict[str, Any]
-    ) -> dict[str, str] | None:
-        if event_type != "session.updated":
-            return None
-
-        info = props.get("info")
-        if not isinstance(info, dict):
-            return None
-
-        session_id = props.get("sessionID") or info.get("id")
-        if session_id != self.opencode_session_id:
-            return None
-
-        return self._session_title_event_once(info.get("title"))
 
     def _normalize_forwardable_session_title(self, title: object) -> str | None:
         if not isinstance(title, str):
@@ -1418,6 +1295,7 @@ class AgentBridge:
         cumulative_text: dict[str, str] = {}
         emitted_tool_states: set[str] = set()
         allowed_assistant_msg_ids: set[str] = set()
+        user_message_ids: set[str] = {opencode_message_id}
         pending_parts: dict[str, list[tuple[dict[str, Any], Any]]] = {}
         pending_parts_total = 0
         pending_drop_logged = False
@@ -1653,7 +1531,16 @@ class AgentBridge:
                                         role = info.get("role", "")
                                         finish = info.get("finish", "")
 
-                                        parent_matches = parent_id == opencode_message_id
+                                        if role == "user" and oc_msg_id:
+                                            if oc_msg_id not in user_message_ids:
+                                                self.log.info(
+                                                    "bridge.user_message_id_discovered",
+                                                    expected_id=opencode_message_id,
+                                                    actual_id=oc_msg_id,
+                                                )
+                                            user_message_ids.add(oc_msg_id)
+
+                                        parent_matches = parent_id in user_message_ids
                                         is_compaction_summary = info.get("summary") is True
 
                                         self.log.debug(
@@ -1751,6 +1638,7 @@ class AgentBridge:
                                             opencode_message_id,
                                             cumulative_text,
                                             allowed_assistant_msg_ids,
+                                            user_message_ids=user_message_ids,
                                             compaction_occurred=compaction_occurred,
                                         ):
                                             yield final_event
@@ -1775,6 +1663,7 @@ class AgentBridge:
                                             opencode_message_id,
                                             cumulative_text,
                                             allowed_assistant_msg_ids,
+                                            user_message_ids=user_message_ids,
                                             compaction_occurred=compaction_occurred,
                                         ):
                                             yield final_event
@@ -1833,6 +1722,7 @@ class AgentBridge:
                                 opencode_message_id,
                                 cumulative_text,
                                 allowed_assistant_msg_ids,
+                                user_message_ids=user_message_ids,
                                 compaction_occurred=compaction_occurred,
                             ):
                                 yield final_event
@@ -1869,6 +1759,7 @@ class AgentBridge:
                 opencode_message_id,
                 cumulative_text,
                 allowed_assistant_msg_ids,
+                user_message_ids=user_message_ids,
                 compaction_occurred=compaction_occurred,
             ):
                 yield final_event
@@ -1892,6 +1783,7 @@ class AgentBridge:
         opencode_message_id: str,
         cumulative_text: dict[str, str],
         tracked_msg_ids: set[str] | None = None,
+        user_message_ids: set[str] | None = None,
         compaction_occurred: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         """Fetch final message state from API to ensure complete text.
@@ -1940,7 +1832,8 @@ class AgentBridge:
                 if role != "assistant":
                     continue
 
-                parent_matches = parent_id == opencode_message_id
+                valid_parent_ids = user_message_ids or {opencode_message_id}
+                parent_matches = parent_id in valid_parent_ids
                 in_tracked_set = tracked_msg_ids and msg_id in tracked_msg_ids
                 is_compaction_summary = info.get("summary") is True
 
