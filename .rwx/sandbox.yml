@@ -287,6 +287,10 @@ tasks:
         cache-key: excluded
         value: ${{ init.CODE_SERVER_PASSWORD }}
       AGENT_SLACK_NOTIFY_ENABLED: ${{ init.AGENT_SLACK_NOTIFY_ENABLED }}
+      # GitHub CLI access
+      GH_TOKEN:
+        cache-key: excluded
+        value: ${{ github.token }}
       # LLM API keys
       ANTHROPIC_API_KEY:
         cache-key: excluded
