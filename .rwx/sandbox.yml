@@ -71,6 +71,7 @@ on:
       - key: VCS_CLONE_USERNAME
         default: x-access-token
       - key: CODE_SERVER_PASSWORD
+        default: ""
         description: >-
           When set, starts code-server on :8080 and activates the VS Code endpoint.
           Derived via HMAC in the control plane.
@@ -80,6 +81,7 @@ on:
       # These arrive via config.userEnvVars in the control plane.
       # Add any additional provider keys your deployment uses.
       - key: ANTHROPIC_API_KEY
+        default: ""
     init:
       commit-sha: ${{ event.git.sha }}
       slug: ${{ event.dispatch.params.slug }}
