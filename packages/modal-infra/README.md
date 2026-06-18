@@ -171,6 +171,12 @@ Set via Modal secrets:
 | `MODAL_API_SECRET` | `internal-api` | Shared secret for control plane auth |
 | `ALLOWED_CONTROL_PLANE_HOSTS` | `internal-api` | Comma-separated allowed hostnames for URL validation |
 
+### Optional tuning
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `IMAGE_SNAPSHOT_TIMEOUT_SECONDS` | `900` | Max seconds to wait for a repo-image / session filesystem snapshot. Raise for repos whose built filesystem is very large (big `node_modules`, baked Docker images) and fails with `Timed out waiting for image to be created`. Set it as a plain key on the `internal-api` secret (like `ALLOWED_CONTROL_PLANE_HOSTS`). |
+
 ## Verification Criteria
 
 | Criterion | Test Method |

@@ -9,15 +9,52 @@ import httpx
 import pytest
 
 from sandbox_runtime.auth.internal import generate_internal_token, verify_internal_token
-from src.sandbox.manager import SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS
+from src.sandbox.manager import (
+    BUILD_TIMEOUT_SECONDS,
+    DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS,
+    SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS,
+    _resolve_snapshot_timeout_seconds,
+)
 from src.scheduler.image_builder import (
     CALLBACK_BACKOFF_BASE,
     CALLBACK_MAX_RETRIES,
     BuildError,
     _callback_with_retry,
+    _resolve_stale_threshold_seconds,
     _stream_build_logs,
     build_repo_image,
 )
+
+
+class TestBuildTimeoutCoupling:
+    """Guard the relationship between the build timeouts and the stale sweep."""
+
+    def test_stale_threshold_exceeds_build_plus_snapshot(self):
+        """A slow-but-healthy build must never be reaped mid-flight.
+
+        The scheduler marks any build still in "building" older than the stale
+        threshold as failed. The worst-case healthy build is the build-sandbox
+        lifetime plus the snapshot timeout, so the threshold must stay strictly
+        above their sum. Both sides are resolved at runtime so the invariant
+        holds for any IMAGE_SNAPSHOT_TIMEOUT_SECONDS, not just the default.
+        """
+        worst_case = BUILD_TIMEOUT_SECONDS + _resolve_snapshot_timeout_seconds()
+        assert worst_case < _resolve_stale_threshold_seconds()
+
+    def test_stale_threshold_scales_with_snapshot_override(self, monkeypatch):
+        """Raising the snapshot timeout widens the stale window rather than
+        stranding a healthy build — the exact regression Reef flagged."""
+        monkeypatch.setenv("IMAGE_SNAPSHOT_TIMEOUT_SECONDS", "1500")
+        worst_case = BUILD_TIMEOUT_SECONDS + _resolve_snapshot_timeout_seconds()
+        assert worst_case < _resolve_stale_threshold_seconds()
+
+    def test_snapshot_timeout_default_covers_heavy_repos(self):
+        """The default snapshot ceiling must exceed Modal's old 300s default.
+
+        Heavy repos (large node_modules, baked Docker layers) timed out at 300s
+        with "Timed out waiting for image to be created".
+        """
+        assert DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS >= 900
 
 
 class TestGenerateInternalToken:

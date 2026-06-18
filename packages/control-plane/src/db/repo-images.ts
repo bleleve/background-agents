@@ -191,6 +191,59 @@ export class RepoImageStore {
     return (result.meta?.changes ?? 0) > 0;
   }
 
+  /**
+   * Count the current build-failure streak for the repo owning `buildId`: the
+   * number of failed builds recorded since its most recent successful (ready)
+   * build, or all recorded failures if it has never succeeded. A successful
+   * build resets the streak to 0. Used to surface repos whose image builds keep
+   * failing (so a regression doesn't go unnoticed, as wx-system's 300s snapshot
+   * timeout did). Returns null when `buildId` is unknown.
+   *
+   * Bounded by retention: markReady keeps one ready row per repo/branch and
+   * deleteOldFailedBuilds prunes failures older than 24h — adequate for alerting.
+   */
+  async countFailuresSinceLastReady(
+    buildId: string,
+    provider: RepoImageProvider
+  ): Promise<{
+    repoOwner: string;
+    repoName: string;
+    baseBranch: string;
+    failureCount: number;
+  } | null> {
+    const build = await this.db
+      .prepare(
+        "SELECT repo_owner, repo_name, base_branch FROM repo_images WHERE id = ? AND provider = ?"
+      )
+      .bind(buildId, provider)
+      .first<{ repo_owner: string; repo_name: string; base_branch: string }>();
+
+    if (!build) return null;
+
+    const lastReady = await this.db
+      .prepare(
+        "SELECT MAX(created_at) AS ts FROM repo_images WHERE repo_owner = ? AND repo_name = ? AND status = 'ready'"
+      )
+      .bind(build.repo_owner, build.repo_name)
+      .first<{ ts: number | null }>();
+
+    const since = lastReady?.ts ?? 0;
+
+    const failed = await this.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM repo_images WHERE repo_owner = ? AND repo_name = ? AND status = 'failed' AND created_at > ?"
+      )
+      .bind(build.repo_owner, build.repo_name, since)
+      .first<{ n: number }>();
+
+    return {
+      repoOwner: build.repo_owner,
+      repoName: build.repo_name,
+      baseBranch: build.base_branch,
+      failureCount: failed?.n ?? 0,
+    };
+  }
+
   async getLatestReady(
     repoOwner: string,
     repoName: string,
