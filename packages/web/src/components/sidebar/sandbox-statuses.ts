@@ -31,7 +31,7 @@ export const RESUMABLE_SESSION_STATUSES = new Set(SHARED_RESUMABLE_SESSION_STATU
 /**
  * Transient states a sandbox passes through while coming up (e.g. after a
  * relaunch) before it is live and republishes its preview URL. The sidebar uses
- * this to keep the Preview row visible — greyed, with a "Restarting…" label —
+ * this to keep the Preview row visible — greyed, with a "Starting…" label —
  * across the gap instead of letting it vanish.
  */
 export const BOOTING_SANDBOX_STATUSES: Set<SandboxStatus> = new Set([
