@@ -26,3 +26,17 @@ export const RELAUNCHABLE_SANDBOX_STATUSES: Set<SandboxStatus> = new Set([
  * spawn with no resume). The two are mutually exclusive.
  */
 export const RESUMABLE_SESSION_STATUSES: Set<SessionStatus> = new Set(["failed", "cancelled"]);
+
+/**
+ * Transient states a sandbox passes through while coming up (e.g. after a
+ * relaunch) before it is live and republishes its preview URL. The sidebar uses
+ * this to keep the Preview row visible — greyed, with a "Restarting…" label —
+ * across the gap instead of letting it vanish.
+ */
+export const BOOTING_SANDBOX_STATUSES: Set<SandboxStatus> = new Set([
+  "pending",
+  "spawning",
+  "connecting",
+  "warming",
+  "syncing",
+]);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   CollapsibleSection,
   ParticipantsSection,
@@ -16,8 +16,9 @@ import {
   RELAUNCHABLE_SANDBOX_STATUSES,
   RESUMABLE_SESSION_STATUSES,
 } from "./sidebar/sandbox-statuses";
+import { resolvePreviewDisplay } from "./sidebar/preview-display";
 import { ChildSessionsSection } from "./sidebar/child-sessions-section";
-import { TerminalIcon, LinkIcon } from "@/components/ui/icons";
+import { TerminalIcon, LinkIcon, RefreshIcon } from "@/components/ui/icons";
 import { buildAuthenticatedUrl } from "@/lib/urls";
 import { extractLatestTasks } from "@/lib/tasks";
 import { extractChangedFiles } from "@/lib/files";
@@ -61,6 +62,20 @@ export function SessionRightSidebarContent({
     () => buildAuthenticatedUrl(sessionState?.ttydUrl, sessionState?.ttydToken),
     [sessionState?.ttydUrl, sessionState?.ttydToken]
   );
+
+  // Remember the last non-empty preview URLs. A relaunched sandbox boots and
+  // (often) drops its tunnel URLs until it republishes; keeping the last set lets
+  // the Preview row stay visible (greyed, "Restarting…") across that gap instead
+  // of vanishing. Hooks must run before the early return below.
+  const liveTunnelUrls =
+    sessionState?.tunnelUrls && Object.keys(sessionState.tunnelUrls).length > 0
+      ? sessionState.tunnelUrls
+      : null;
+  const lastTunnelUrlsRef = useRef<Record<string, string> | null>(null);
+  useEffect(() => {
+    if (liveTunnelUrls) lastTunnelUrlsRef.current = liveTunnelUrls;
+  }, [liveTunnelUrls]);
+
   if (!sessionState) {
     return (
       <div className="p-4">
@@ -73,14 +88,21 @@ export function SessionRightSidebarContent({
     );
   }
 
-  const hasTunnelUrls =
-    !!sessionState.tunnelUrls && Object.keys(sessionState.tunnelUrls).length > 0;
   // Sidebar "Restart" is the plain-spawn path: a relaunchable (dead) sandbox on
   // a session that is NOT interrupted. Interrupted (failed/cancelled) sessions
   // are recovered by the composer relaunch-and-resume button instead.
   const isRestartable =
     RELAUNCHABLE_SANDBOX_STATUSES.has(sessionState.sandboxStatus) &&
     !RESUMABLE_SESSION_STATUSES.has(sessionState.status);
+
+  // Decide what the Preview row shows: the live URLs, or — while the sandbox
+  // boots after a relaunch — the last-known URLs (greyed) with a "Restarting…"
+  // label, so the row persists across the gap before the URL is republished.
+  const { previewUrls, restarting: showRestartingLabel } = resolvePreviewDisplay({
+    liveTunnelUrls,
+    lastTunnelUrls: lastTunnelUrlsRef.current,
+    sandboxStatus: sessionState.sandboxStatus,
+  });
 
   return (
     <>
@@ -150,25 +172,31 @@ export function SessionRightSidebarContent({
       )}
 
       {/* Preview + Restart. The "Restart" link sits on the right of the Preview
-          row (like the Terminal "Show" action) for a dead-idle (stopped/stale)
-          sandbox; with no preview to anchor to it stands alone. `failed` is
-          recovered via the composer relaunch-and-resume button, not here. */}
-      {(hasTunnelUrls || isRestartable) && (
+          row (like the Terminal "Show" action) for a dead-idle sandbox; with no
+          preview to anchor to it stands alone. While the sandbox boots after a
+          relaunch the (greyed) Preview row persists with a "Restarting…" label
+          instead of vanishing. Interrupted sessions are recovered via the
+          composer relaunch-and-resume button, not here. */}
+      {(previewUrls || isRestartable) && (
         <div className="px-4 py-4 border-b border-border-muted">
-          {hasTunnelUrls ? (
+          {previewUrls ? (
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <TunnelUrlsSection
-                  urls={sessionState.tunnelUrls!}
-                  sandboxStatus={sessionState.sandboxStatus}
-                />
+                <TunnelUrlsSection urls={previewUrls} sandboxStatus={sessionState.sandboxStatus} />
               </div>
-              {isRestartable && (
+              {isRestartable ? (
                 <SandboxRestartSection
                   sessionId={sessionId}
                   sandboxStatus={sessionState.sandboxStatus}
                   sessionStatus={sessionState.status}
                 />
+              ) : (
+                showRestartingLabel && (
+                  <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                    <RefreshIcon className="h-3.5 w-3.5 animate-spin" />
+                    Restarting…
+                  </span>
+                )
               )}
             </div>
           ) : (
