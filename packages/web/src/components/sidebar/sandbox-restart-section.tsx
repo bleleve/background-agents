@@ -11,11 +11,13 @@ interface SandboxRestartSectionProps {
 }
 
 /**
- * Sidebar control to bring a dead-idle (stopped/stale) sandbox back up. It POSTs
- * the same relaunch endpoint as the composer button, but because the session is
- * not `failed` the control plane performs a plain spawn with no turn resume.
- * Renders nothing for any other status (a live sandbox shows its links instead;
- * `failed` is recovered via the composer relaunch-and-resume button).
+ * Compact "Restart" link to bring a dead-idle (stopped/stale) sandbox back up.
+ * It POSTs the same relaunch endpoint as the composer button, but because the
+ * session is not `failed` the control plane performs a plain spawn with no turn
+ * resume. Styled as a right-aligned row action (like the Terminal "Show" link),
+ * so the sidebar can place it on the right of the Preview row. Renders nothing
+ * for any other status (a live sandbox shows its links; `failed` is recovered
+ * via the composer relaunch-and-resume button).
  */
 export function SandboxRestartSection({ sessionId, sandboxStatus }: SandboxRestartSectionProps) {
   const [isRestarting, setIsRestarting] = useState(false);
@@ -43,10 +45,11 @@ export function SandboxRestartSection({ sessionId, sandboxStatus }: SandboxResta
       type="button"
       onClick={handleRestart}
       disabled={isRestarting}
-      className="flex w-full items-center gap-2 text-sm text-accent hover:underline disabled:opacity-50 disabled:cursor-not-allowed transition"
+      title="Restart sandbox"
+      className="inline-flex shrink-0 items-center gap-1 text-xs text-accent hover:underline disabled:opacity-50 disabled:cursor-not-allowed transition"
     >
-      <RefreshIcon className={`h-4 w-4 shrink-0${isRestarting ? " animate-spin" : ""}`} />
-      <span className="font-medium">{isRestarting ? "Restarting…" : "Restart sandbox"}</span>
+      <RefreshIcon className={`h-3.5 w-3.5${isRestarting ? " animate-spin" : ""}`} />
+      {isRestarting ? "Restarting…" : "Restart"}
     </button>
   );
 }

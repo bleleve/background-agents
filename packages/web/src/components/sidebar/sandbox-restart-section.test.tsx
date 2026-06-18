@@ -15,10 +15,12 @@ afterEach(() => {
 
 describe("SandboxRestartSection", () => {
   it.each(["stopped", "stale"] as SandboxStatus[])(
-    "shows a restart button when the sandbox is %s",
+    "shows a Restart link when the sandbox is %s",
     (status) => {
       render(<SandboxRestartSection sessionId="s1" sandboxStatus={status} />);
-      expect(screen.getByRole("button", { name: /restart sandbox/i })).toBeInTheDocument();
+      const button = screen.getByRole("button", { name: /restart/i });
+      expect(button).toBeInTheDocument();
+      expect(button).toHaveTextContent("Restart");
     }
   );
 

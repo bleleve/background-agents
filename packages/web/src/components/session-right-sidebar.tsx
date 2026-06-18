@@ -70,6 +70,10 @@ export function SessionRightSidebarContent({
     );
   }
 
+  const hasTunnelUrls =
+    !!sessionState.tunnelUrls && Object.keys(sessionState.tunnelUrls).length > 0;
+  const isRestartable = RESTARTABLE_SANDBOX_STATUSES.has(sessionState.sandboxStatus);
+
   return (
     <>
       {/* Participants */}
@@ -137,21 +141,33 @@ export function SessionRightSidebarContent({
         </div>
       )}
 
-      {/* Tunnel URLs */}
-      {sessionState.tunnelUrls && Object.keys(sessionState.tunnelUrls).length > 0 && (
+      {/* Preview + Restart. The "Restart" link sits on the right of the Preview
+          row (like the Terminal "Show" action) for a dead-idle (stopped/stale)
+          sandbox; with no preview to anchor to it stands alone. `failed` is
+          recovered via the composer relaunch-and-resume button, not here. */}
+      {(hasTunnelUrls || isRestartable) && (
         <div className="px-4 py-4 border-b border-border-muted">
-          <TunnelUrlsSection
-            urls={sessionState.tunnelUrls}
-            sandboxStatus={sessionState.sandboxStatus}
-          />
-        </div>
-      )}
-
-      {/* Restart sandbox — only for a dead-idle (stopped/stale) sandbox, where
-          the links above are absent. failed is handled by the composer button. */}
-      {RESTARTABLE_SANDBOX_STATUSES.has(sessionState.sandboxStatus) && (
-        <div className="px-4 py-4 border-b border-border-muted">
-          <SandboxRestartSection sessionId={sessionId} sandboxStatus={sessionState.sandboxStatus} />
+          {hasTunnelUrls ? (
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <TunnelUrlsSection
+                  urls={sessionState.tunnelUrls!}
+                  sandboxStatus={sessionState.sandboxStatus}
+                />
+              </div>
+              {isRestartable && (
+                <SandboxRestartSection
+                  sessionId={sessionId}
+                  sandboxStatus={sessionState.sandboxStatus}
+                />
+              )}
+            </div>
+          ) : (
+            <SandboxRestartSection
+              sessionId={sessionId}
+              sandboxStatus={sessionState.sandboxStatus}
+            />
+          )}
         </div>
       )}
 
