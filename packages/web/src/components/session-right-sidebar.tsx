@@ -96,9 +96,9 @@ export function SessionRightSidebarContent({
     !RESUMABLE_SESSION_STATUSES.has(sessionState.status);
 
   // Decide what the Preview row shows: the live URLs, or — while the sandbox
-  // boots after a relaunch — the last-known URLs (greyed) with a "Restarting…"
-  // label, so the row persists across the gap before the URL is republished.
-  const { previewUrls, restarting: showRestartingLabel } = resolvePreviewDisplay({
+  // boots — the last-known URLs (greyed) with a "Starting…" label, so the row
+  // persists across the gap before the URL is (re)published.
+  const { previewUrls, starting: showStartingLabel } = resolvePreviewDisplay({
     liveTunnelUrls,
     lastTunnelUrls: lastTunnelUrlsRef.current,
     sandboxStatus: sessionState.sandboxStatus,
@@ -173,10 +173,10 @@ export function SessionRightSidebarContent({
 
       {/* Preview + Restart. The "Restart" link sits on the right of the Preview
           row (like the Terminal "Show" action) for a dead-idle sandbox; with no
-          preview to anchor to it stands alone. While the sandbox boots after a
-          relaunch the (greyed) Preview row persists with a "Restarting…" label
-          instead of vanishing. Interrupted sessions are recovered via the
-          composer relaunch-and-resume button, not here. */}
+          preview to anchor to it stands alone. While the sandbox boots the
+          (greyed) Preview row persists with a "Starting…" label instead of
+          vanishing. Interrupted sessions are recovered via the composer
+          relaunch-and-resume button, not here. */}
       {(previewUrls || isRestartable) && (
         <div className="px-4 py-4 border-b border-border-muted">
           {previewUrls ? (
@@ -191,10 +191,10 @@ export function SessionRightSidebarContent({
                   sessionStatus={sessionState.status}
                 />
               ) : (
-                showRestartingLabel && (
+                showStartingLabel && (
                   <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                     <RefreshIcon className="h-3.5 w-3.5 animate-spin" />
-                    Restarting…
+                    Starting…
                   </span>
                 )
               )}
