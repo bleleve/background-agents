@@ -13,13 +13,14 @@ from src.sandbox.manager import (
     BUILD_TIMEOUT_SECONDS,
     DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS,
     SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS,
+    _resolve_snapshot_timeout_seconds,
 )
 from src.scheduler.image_builder import (
     CALLBACK_BACKOFF_BASE,
     CALLBACK_MAX_RETRIES,
-    STALE_BUILD_THRESHOLD_SECONDS,
     BuildError,
     _callback_with_retry,
+    _resolve_stale_threshold_seconds,
     _stream_build_logs,
     build_repo_image,
 )
@@ -31,13 +32,21 @@ class TestBuildTimeoutCoupling:
     def test_stale_threshold_exceeds_build_plus_snapshot(self):
         """A slow-but-healthy build must never be reaped mid-flight.
 
-        The scheduler marks any build still in "building" older than
-        STALE_BUILD_THRESHOLD_SECONDS as failed. The worst-case healthy build is
-        the build-sandbox lifetime plus the snapshot timeout, so the stale
-        threshold has to stay strictly above their sum.
+        The scheduler marks any build still in "building" older than the stale
+        threshold as failed. The worst-case healthy build is the build-sandbox
+        lifetime plus the snapshot timeout, so the threshold must stay strictly
+        above their sum. Both sides are resolved at runtime so the invariant
+        holds for any IMAGE_SNAPSHOT_TIMEOUT_SECONDS, not just the default.
         """
-        worst_case = BUILD_TIMEOUT_SECONDS + DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS
-        assert worst_case < STALE_BUILD_THRESHOLD_SECONDS
+        worst_case = BUILD_TIMEOUT_SECONDS + _resolve_snapshot_timeout_seconds()
+        assert worst_case < _resolve_stale_threshold_seconds()
+
+    def test_stale_threshold_scales_with_snapshot_override(self, monkeypatch):
+        """Raising the snapshot timeout widens the stale window rather than
+        stranding a healthy build — the exact regression Reef flagged."""
+        monkeypatch.setenv("IMAGE_SNAPSHOT_TIMEOUT_SECONDS", "1500")
+        worst_case = BUILD_TIMEOUT_SECONDS + _resolve_snapshot_timeout_seconds()
+        assert worst_case < _resolve_stale_threshold_seconds()
 
     def test_snapshot_timeout_default_covers_heavy_repos(self):
         """The default snapshot ceiling must exceed Modal's old 300s default.
