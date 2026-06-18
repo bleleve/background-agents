@@ -426,13 +426,13 @@ variable "rwx_access_token" {
 # =============================================================================
 
 variable "sandbox_provider" {
-  description = "Sandbox backend for session execution: 'modal', 'daytona', or 'vercel'"
+  description = "Sandbox backend for session execution: 'modal', 'daytona', 'rwx', or 'vercel'"
   type        = string
   default     = "modal"
 
   validation {
-    condition     = contains(["modal", "daytona", "vercel"], var.sandbox_provider)
-    error_message = "sandbox_provider must be 'modal', 'daytona', or 'vercel'."
+    condition     = contains(["modal", "daytona", "rwx", "vercel"], var.sandbox_provider)
+    error_message = "sandbox_provider must be 'modal', 'daytona', 'rwx', or 'vercel'."
   }
 }
 
