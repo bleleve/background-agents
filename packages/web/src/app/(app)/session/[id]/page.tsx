@@ -28,6 +28,10 @@ import { PlanApprovalBanner } from "@/components/plan-approval-banner";
 import { copyToClipboard, formatModelNameLower } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { shouldWarmForPrompt } from "@/lib/sandbox-warming";
+import {
+  RELAUNCHABLE_SANDBOX_STATUSES,
+  RESUMABLE_SESSION_STATUSES,
+} from "@/components/sidebar/sandbox-statuses";
 import { archiveSession } from "@/lib/archive-session";
 import {
   isArchivedSessionListKey,
@@ -553,22 +557,30 @@ function SessionContent({
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isRelaunching, setIsRelaunching] = useState(false);
 
-  // The composer relaunch button is reserved for a FAILED session: clicking it
-  // relaunches AND resumes the interrupted turn (the control plane re-enqueues
-  // the failed message against the stored OpenCode session). stopped/stale are
-  // recovered via the sidebar "Restart sandbox" button instead — a plain spawn
-  // with no resume — so they are intentionally excluded here. Hidden while a
-  // turn is processing; sandbox_status broadcasts drive the indicator from there.
+  // The composer relaunch button is reserved for an *interrupted* session —
+  // `failed` or `cancelled` (the turn was stopped or hit the duration cap) —
+  // whose sandbox is down. Clicking it relaunches AND resumes that turn (the
+  // control plane re-enqueues the failed message against the stored OpenCode
+  // session). The discriminator is the SESSION status, not the sandbox status:
+  // an interrupted turn typically leaves the sandbox `stopped`, not `failed`.
+  // A non-interrupted session whose sandbox merely went idle is recovered via
+  // the sidebar "Restart" link instead (a plain spawn, no resume). Hidden while
+  // a turn is processing; sandbox_status broadcasts drive the indicator.
   const sandboxStatus = sessionState?.sandboxStatus;
-  const canRelaunchSandbox = !isProcessing && sandboxStatus === "failed";
+  const sessionStatus = sessionState?.status;
+  const sandboxIsRelaunchable = !!sandboxStatus && RELAUNCHABLE_SANDBOX_STATUSES.has(sandboxStatus);
+  const sessionIsResumable = !!sessionStatus && RESUMABLE_SESSION_STATUSES.has(sessionStatus);
+  const canRelaunchSandbox = !isProcessing && sessionIsResumable && sandboxIsRelaunchable;
 
-  // Warm-on-type applies only to a stopped/idle sandbox (NOT failed): typing a
-  // real follow-up pre-warms it so it's ready by submit, mirroring the
-  // new-session prompt's warm-on-type. A failed session must be recovered
-  // through the explicit relaunch button (which resumes), never silently on a
-  // keystroke, so failed is excluded from warming.
+  // Warm-on-type applies only to a stopped/idle sandbox of a non-interrupted
+  // session: typing a real follow-up pre-warms it so it's ready by submit,
+  // mirroring the new-session prompt's warm-on-type. An interrupted (failed/
+  // cancelled) session must be recovered through the explicit relaunch button
+  // (which resumes), never silently on a keystroke.
   const canWarmSandbox =
-    !isProcessing && (sandboxStatus === "stopped" || sandboxStatus === "stale");
+    !isProcessing &&
+    !sessionIsResumable &&
+    (sandboxStatus === "stopped" || sandboxStatus === "stale");
 
   const handleRelaunchSandbox = useCallback(async () => {
     setIsRelaunching(true);
@@ -1004,7 +1016,7 @@ function SessionContent({
                     disabled={isRelaunching}
                     className="p-2 text-warning hover:bg-warning-muted disabled:opacity-30 disabled:cursor-not-allowed transition"
                     title="Relaunch and resume"
-                    aria-label="Relaunch the sandbox and resume the failed turn"
+                    aria-label="Relaunch the sandbox and resume the interrupted turn"
                   >
                     <RefreshIcon className={`w-5 h-5${isRelaunching ? " animate-spin" : ""}`} />
                   </button>

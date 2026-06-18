@@ -12,7 +12,10 @@ import {
   TunnelUrlsSection,
   SandboxRestartSection,
 } from "./sidebar";
-import { RESTARTABLE_SANDBOX_STATUSES } from "./sidebar/sandbox-statuses";
+import {
+  RELAUNCHABLE_SANDBOX_STATUSES,
+  RESUMABLE_SESSION_STATUSES,
+} from "./sidebar/sandbox-statuses";
 import { ChildSessionsSection } from "./sidebar/child-sessions-section";
 import { TerminalIcon, LinkIcon } from "@/components/ui/icons";
 import { buildAuthenticatedUrl } from "@/lib/urls";
@@ -72,7 +75,12 @@ export function SessionRightSidebarContent({
 
   const hasTunnelUrls =
     !!sessionState.tunnelUrls && Object.keys(sessionState.tunnelUrls).length > 0;
-  const isRestartable = RESTARTABLE_SANDBOX_STATUSES.has(sessionState.sandboxStatus);
+  // Sidebar "Restart" is the plain-spawn path: a relaunchable (dead) sandbox on
+  // a session that is NOT interrupted. Interrupted (failed/cancelled) sessions
+  // are recovered by the composer relaunch-and-resume button instead.
+  const isRestartable =
+    RELAUNCHABLE_SANDBOX_STATUSES.has(sessionState.sandboxStatus) &&
+    !RESUMABLE_SESSION_STATUSES.has(sessionState.status);
 
   return (
     <>
@@ -159,6 +167,7 @@ export function SessionRightSidebarContent({
                 <SandboxRestartSection
                   sessionId={sessionId}
                   sandboxStatus={sessionState.sandboxStatus}
+                  sessionStatus={sessionState.status}
                 />
               )}
             </div>
@@ -166,6 +175,7 @@ export function SessionRightSidebarContent({
             <SandboxRestartSection
               sessionId={sessionId}
               sandboxStatus={sessionState.sandboxStatus}
+              sessionStatus={sessionState.status}
             />
           )}
         </div>

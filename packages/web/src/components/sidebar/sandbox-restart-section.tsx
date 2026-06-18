@@ -2,27 +2,36 @@
 
 import { useState } from "react";
 import { RefreshIcon } from "@/components/ui/icons";
-import type { SandboxStatus } from "@open-inspect/shared";
-import { RESTARTABLE_SANDBOX_STATUSES } from "./sandbox-statuses";
+import type { SandboxStatus, SessionStatus } from "@open-inspect/shared";
+import { RELAUNCHABLE_SANDBOX_STATUSES, RESUMABLE_SESSION_STATUSES } from "./sandbox-statuses";
 
 interface SandboxRestartSectionProps {
   sessionId: string;
   sandboxStatus: SandboxStatus;
+  sessionStatus: SessionStatus;
 }
 
 /**
- * Compact "Restart" link to bring a dead-idle (stopped/stale) sandbox back up.
- * It POSTs the same relaunch endpoint as the composer button, but because the
- * session is not `failed` the control plane performs a plain spawn with no turn
- * resume. Styled as a right-aligned row action (like the Terminal "Show" link),
- * so the sidebar can place it on the right of the Preview row. Renders nothing
- * for any other status (a live sandbox shows its links; `failed` is recovered
- * via the composer relaunch-and-resume button).
+ * Compact "Restart" link to bring a dead (stopped/failed/stale) sandbox back up
+ * for a session that was NOT interrupted. It POSTs the same relaunch endpoint as
+ * the composer button, but because the session isn't failed/cancelled the
+ * control plane performs a plain spawn with no turn resume. Styled as a
+ * right-aligned row action (like the Terminal "Show" link), so the sidebar can
+ * place it on the right of the Preview row. Renders nothing for a live sandbox
+ * or an interrupted session (recovered via the composer relaunch-and-resume
+ * button).
  */
-export function SandboxRestartSection({ sessionId, sandboxStatus }: SandboxRestartSectionProps) {
+export function SandboxRestartSection({
+  sessionId,
+  sandboxStatus,
+  sessionStatus,
+}: SandboxRestartSectionProps) {
   const [isRestarting, setIsRestarting] = useState(false);
 
-  if (!RESTARTABLE_SANDBOX_STATUSES.has(sandboxStatus)) {
+  if (
+    !RELAUNCHABLE_SANDBOX_STATUSES.has(sandboxStatus) ||
+    RESUMABLE_SESSION_STATUSES.has(sessionStatus)
+  ) {
     return null;
   }
 
