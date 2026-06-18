@@ -29,7 +29,11 @@ import { copyToClipboard, formatModelNameLower } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { shouldWarmForPrompt } from "@/lib/sandbox-warming";
 import { deriveCanRelaunchSandbox } from "@/lib/relaunch-gating";
-import { RESUMABLE_SESSION_STATUSES } from "@/components/sidebar/sandbox-statuses";
+import {
+  BOOTING_SANDBOX_STATUSES,
+  RESUMABLE_SESSION_STATUSES,
+  resolveDisplaySandboxStatus,
+} from "@/components/sidebar/sandbox-statuses";
 import { archiveSession } from "@/lib/archive-session";
 import {
   isArchivedSessionListKey,
@@ -45,6 +49,7 @@ import {
   parseReviewSessionPrNumber,
   type ModelCategory,
   type PlanArtifact,
+  type SandboxStatus,
 } from "@open-inspect/shared";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
 import { ReasoningEffortPills } from "@/components/reasoning-effort-pills";
@@ -566,6 +571,11 @@ function SessionContent({
   // resume). Hidden while processing or mid-transition; see deriveCanRelaunchSandbox.
   const sandboxStatus = sessionState?.sandboxStatus;
   const sessionStatus = sessionState?.status;
+  // Status to *show*: a terminal session never has a sandbox worth booting, so a
+  // boot status pinned on it (stale "spawning" etc.) is collapsed to "stopped"
+  // to avoid a phantom "Starting sandbox…". Gating logic below keeps the raw
+  // status. See resolveDisplaySandboxStatus.
+  const displaySandboxStatus = resolveDisplaySandboxStatus(sandboxStatus, sessionStatus);
   const canRelaunchSandbox = deriveCanRelaunchSandbox({
     sandboxStatus,
     sessionStatus,
@@ -890,7 +900,7 @@ function SessionContent({
                     })
                   )}
                   {isProcessing && <ThinkingIndicator />}
-                  {!isProcessing && <SandboxStatusIndicator status={sandboxStatus} />}
+                  {!isProcessing && <SandboxStatusIndicator status={displaySandboxStatus} />}
 
                   <div ref={messagesEndRef} />
                 </div>
@@ -1145,20 +1155,17 @@ function ThinkingIndicator() {
   );
 }
 
-// Transient sandbox boot states. Deliberately one generic label rather than a
-// per-state message: the user just needs to know the sandbox is coming up, not
-// which micro-phase it's in. Ready/running/snapshotting and terminal states
-// (stopped/failed/stale) render nothing here.
-const SANDBOX_BOOT_STATUSES = new Set(["pending", "spawning", "connecting", "warming", "syncing"]);
-
 /**
  * Shows that the sandbox is starting while it boots, so the message area isn't
  * blank between sending a prompt and the agent starting. Mirrors
  * ThinkingIndicator but in blue, and hands off to "Thinking..." once the agent
- * starts (isProcessing).
+ * starts (isProcessing). Deliberately one generic label rather than a per-state
+ * message: the user just needs to know the sandbox is coming up, not which
+ * micro-phase it's in. Ready/running/snapshotting and terminal sandbox states
+ * (stopped/failed/stale) render nothing here.
  */
-function SandboxStatusIndicator({ status }: { status?: string }) {
-  if (!status || !SANDBOX_BOOT_STATUSES.has(status)) return null;
+function SandboxStatusIndicator({ status }: { status?: SandboxStatus | null }) {
+  if (!status || !BOOTING_SANDBOX_STATUSES.has(status)) return null;
   return (
     <div className="bg-card p-4 flex items-center gap-2">
       <span className="inline-block w-2 h-2 bg-info rounded-full animate-pulse" />

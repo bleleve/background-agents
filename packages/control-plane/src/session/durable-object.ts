@@ -38,7 +38,10 @@ import { RepoImageStore } from "../db/repo-images";
 import { McpServerStore } from "../db/mcp-servers";
 import { IntegrationSettingsStore, resolveSlackSettings } from "../db/integration-settings";
 import { SessionIndexStore } from "../db/session-index";
-import { DEFAULT_EXECUTION_TIMEOUT_MS } from "../sandbox/lifecycle/decisions";
+import {
+  DEFAULT_EXECUTION_TIMEOUT_MS,
+  reconcileTerminalSandboxStatus,
+} from "../sandbox/lifecycle/decisions";
 import {
   createSourceControlProviderFromEnv,
   resolveScmProviderFromEnv,
@@ -1948,12 +1951,38 @@ export class SessionDO extends DurableObject<Env> {
 
     if (TERMINAL_STATUSES.includes(status)) {
       this.syncSessionMetrics(publicSessionId);
+      this.reconcileStuckSandboxForTerminalSession();
     }
 
     // Notify parent session (if this is a child) so its UI can refresh
     this.notifyParentOfStatusChange(session, publicSessionId, status);
 
     return true;
+  }
+
+  /**
+   * On a terminal session transition, reconcile a sandbox still pinned at a
+   * transient boot status (e.g. a "spawning" left behind by an interrupted spawn
+   * that no watchdog ever cleaned up) down to "stopped". Without this the box
+   * reads as perpetually "Starting sandbox…" in the UI even though nothing is
+   * booting, and the relaunch gate stays a no-op. Idempotent: a no-op for a
+   * live/already-down/snapshotting sandbox, so re-asserting a terminal status
+   * costs nothing.
+   */
+  private reconcileStuckSandboxForTerminalSession(): void {
+    const sandbox = this.getSandbox();
+    if (!sandbox) return;
+    const reconciled = reconcileTerminalSandboxStatus(sandbox.status as SandboxStatus);
+    if (!reconciled) return;
+
+    this.repository.updateSandboxStatus(reconciled);
+    this.syncSandboxStatusIndex(reconciled);
+    this.broadcast({ type: "sandbox_status", status: reconciled });
+    this.log.info("sandbox.reconcile_terminal", {
+      event: "sandbox.reconcile_terminal",
+      from_status: sandbox.status,
+      to_status: reconciled,
+    });
   }
 
   private applySessionTitleUpdate(
