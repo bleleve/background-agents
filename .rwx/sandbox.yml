@@ -109,7 +109,7 @@ tasks:
     run: |
       git clone \
         --depth 100 \
-        "https://x-access-token:${{ github.token }}@github.com/MartinRoberts-Fountain/background-agents.git" \
+        "https://x-access-token:${{ github.token }}@github.com/onboardiq/background-agents.git" \
         .
       git checkout ${{ init.commit-sha }}
 
