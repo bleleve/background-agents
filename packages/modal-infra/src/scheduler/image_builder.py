@@ -370,8 +370,13 @@ async def build_repo_image(
 # Scheduler: cron-based rebuild logic
 # ---------------------------------------------------------------------------
 
-# Stale build threshold: builds older than this are marked failed
-STALE_BUILD_THRESHOLD_SECONDS = 2100  # 35 minutes
+# Stale build threshold: builds still in "building" older than this are marked
+# failed by the scheduler sweep. Must stay above the worst-case healthy build so a
+# slow-but-progressing build is never reaped mid-flight: that is
+# manager.BUILD_TIMEOUT_SECONDS (1800) + manager.DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS
+# (900) = 2700s. 3000 leaves ~5 min of headroom. The test
+# test_stale_threshold_exceeds_build_plus_snapshot guards this invariant.
+STALE_BUILD_THRESHOLD_SECONDS = 3000  # 50 minutes
 
 # Cleanup threshold: failed builds older than this are deleted
 FAILED_BUILD_CLEANUP_SECONDS = 86400  # 24 hours

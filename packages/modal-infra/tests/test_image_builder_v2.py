@@ -9,15 +9,43 @@ import httpx
 import pytest
 
 from sandbox_runtime.auth.internal import generate_internal_token, verify_internal_token
-from src.sandbox.manager import SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS
+from src.sandbox.manager import (
+    BUILD_TIMEOUT_SECONDS,
+    DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS,
+    SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS,
+)
 from src.scheduler.image_builder import (
     CALLBACK_BACKOFF_BASE,
     CALLBACK_MAX_RETRIES,
+    STALE_BUILD_THRESHOLD_SECONDS,
     BuildError,
     _callback_with_retry,
     _stream_build_logs,
     build_repo_image,
 )
+
+
+class TestBuildTimeoutCoupling:
+    """Guard the relationship between the build timeouts and the stale sweep."""
+
+    def test_stale_threshold_exceeds_build_plus_snapshot(self):
+        """A slow-but-healthy build must never be reaped mid-flight.
+
+        The scheduler marks any build still in "building" older than
+        STALE_BUILD_THRESHOLD_SECONDS as failed. The worst-case healthy build is
+        the build-sandbox lifetime plus the snapshot timeout, so the stale
+        threshold has to stay strictly above their sum.
+        """
+        worst_case = BUILD_TIMEOUT_SECONDS + DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS
+        assert worst_case < STALE_BUILD_THRESHOLD_SECONDS
+
+    def test_snapshot_timeout_default_covers_heavy_repos(self):
+        """The default snapshot ceiling must exceed Modal's old 300s default.
+
+        Heavy repos (large node_modules, baked Docker layers) timed out at 300s
+        with "Timed out waiting for image to be created".
+        """
+        assert DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS >= 900
 
 
 class TestGenerateInternalToken:

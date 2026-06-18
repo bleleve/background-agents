@@ -39,7 +39,30 @@ from ..images.base import base_image
 log = get_logger("manager")
 
 DEFAULT_SANDBOX_TIMEOUT_SECONDS = 7200  # 2 hours
-SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS = 300
+# Lifetime of an image-build sandbox: it clones, runs setup.sh, then exits so the
+# filesystem can be snapshotted. Promoted to module scope so the scheduler's stale
+# threshold can be derived from it (see STALE_BUILD_THRESHOLD_SECONDS).
+BUILD_TIMEOUT_SECONDS = 1800  # 30 minutes
+# Upper bound on how long Modal may take to create a filesystem snapshot. This is
+# a ceiling, not a fixed wait — repos that snapshot quickly are unaffected. Heavy
+# repos (large node_modules, baked Docker layers) exceeded the previous 300s and
+# failed with "Timed out waiting for image to be created", leaving them with no
+# ready image and forcing a full cold setup on every session. Overridable per
+# deployment via IMAGE_SNAPSHOT_TIMEOUT_SECONDS.
+DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS = 900  # 15 minutes
+
+
+def _resolve_snapshot_timeout_seconds() -> int:
+    """Resolve the snapshot timeout, allowing a per-deployment override."""
+    return int(
+        os.environ.get(
+            "IMAGE_SNAPSHOT_TIMEOUT_SECONDS",
+            str(DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS),
+        )
+    )
+
+
+SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS = _resolve_snapshot_timeout_seconds()
 MAX_TUNNEL_PORTS = 10
 DOCKER_EXPERIMENTAL_OPTIONS = {"enable_docker": True}
 
@@ -626,8 +649,6 @@ class SandboxManager:
         Note: MCP servers are not available during image builds (no session config).
         MCP packages are installed at first use via npx instead.
         """
-        BUILD_TIMEOUT_SECONDS = 1800
-
         start_time = time.time()
         sandbox_id = f"build-{repo_owner}-{repo_name}-{int(time.time() * 1000)}"
 
