@@ -35,6 +35,15 @@ export const RELAUNCHABLE_SANDBOX_STATUSES: readonly SandboxStatus[] = [
 ];
 
 /**
+ * Sandbox states where the bridge is connected and serving prompts, so an
+ * interrupted turn can be resumed *in place* — re-dispatched to the live socket
+ * (continuing the existing OpenCode session) instead of respawning. Excludes
+ * `snapshotting`: the sandbox is live for tunnels but must not take a new prompt
+ * mid-snapshot. Canonical across the control-plane relaunch guard and web gating.
+ */
+export const LIVE_SANDBOX_STATUSES: readonly SandboxStatus[] = ["ready", "running"];
+
+/**
  * Session states whose last turn was interrupted (not a clean completion) and so
  * resume when the sandbox is relaunched: `failed` (an error) and `cancelled` (a
  * deliberate stop or the duration cap). Both leave the latest message `failed`,

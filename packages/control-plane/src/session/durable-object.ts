@@ -9,14 +9,9 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { initSchema } from "./schema";
-import { reEnqueueInterruptedTurnForRelaunch } from "./relaunch";
+import { reEnqueueInterruptedTurnForRelaunch, decideRelaunchAction } from "./relaunch";
 import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
-import {
-  resolveAppName,
-  timingSafeEqual,
-  RELAUNCHABLE_SANDBOX_STATUSES,
-  RESUMABLE_SESSION_STATUSES,
-} from "@open-inspect/shared";
+import { resolveAppName, timingSafeEqual, RESUMABLE_SESSION_STATUSES } from "@open-inspect/shared";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl, createModalClient } from "../sandbox/client";
 import { createDaytonaRestClient } from "../sandbox/daytona-rest-client";
@@ -1701,11 +1696,19 @@ export class SessionDO extends DurableObject<Env> {
   }
 
   /**
-   * User-triggered "Relaunch" of a dead sandbox. Only acts when the sandbox is
-   * in a recoverable terminal state (stopped/failed/stale); spawnSandbox() then
-   * resolves the right action (provider resume, snapshot restore, or fresh
-   * spawn) from the current state and broadcasts sandbox_status updates that the
-   * client watches. A no-op when the sandbox is already live.
+   * User-triggered "Relaunch and resume". Three outcomes, decided from the
+   * sandbox + session state (see decideRelaunchAction):
+   *   - resume:   sandbox is live (ready/running) and the session was interrupted
+   *               (failed/cancelled) — re-dispatch the failed turn to the still-
+   *               connected sandbox in place, no respawn. The bridge still holds
+   *               the OpenCode session, so the agent continues with full context.
+   *   - relaunch: sandbox is down (stopped/failed/stale) — respawn it, resuming
+   *               the interrupted turn if the session was interrupted.
+   *   - skip:     nothing actionable (booting/snapshotting, no sandbox, or a live
+   *               sandbox on a cleanly-completed/active session).
+   * In every case we re-enqueue by reverting the failed message to pending (no
+   * new user_message event — keeps the single original bubble) rather than
+   * dispatching a fresh prompt.
    */
   private async relaunchSandbox(): Promise<Response> {
     const session = this.getSession();
@@ -1714,19 +1717,29 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     const sandboxStatus = this.getSandbox()?.status;
-    if (!sandboxStatus || !RELAUNCHABLE_SANDBOX_STATUSES.includes(sandboxStatus)) {
+    const action = decideRelaunchAction({ sandboxStatus, sessionStatus: session.status });
+
+    if (action === "skip") {
       return Response.json({ status: "skipped", sandboxStatus: sandboxStatus ?? null });
     }
 
-    // Resume the interrupted turn on relaunch of a failed/cancelled session:
-    // revert the failed message to pending and re-activate the session so it is
-    // re-dispatched once the sandbox reconnects (onSandboxConnected → queue),
-    // this time carrying the stored opencode_session_id so the bridge resumes
-    // prior context. We do NOT write a new user_message event (keeps the single
-    // original bubble) and do NOT dispatch here — dispatch is owned by the
-    // reconnect path. Idempotent: a second relaunch sees a non-resumable status
-    // and just spawns.
     const resumed = reEnqueueInterruptedTurnForRelaunch(session.status, this.repository);
+
+    if (action === "resume") {
+      // The sandbox is alive — re-activate the session (this MUST precede the
+      // queue: a terminal session status short-circuits processMessageQueue) and
+      // dispatch the reverted turn straight to the connected socket. If the
+      // socket has since dropped, the queue degrades to a respawn carrying the
+      // same opencode_session_id, so the turn is never lost.
+      await this.transitionSessionStatus("active");
+      await this.processMessageQueue();
+      return Response.json({ status: "resuming", sandboxStatus: sandboxStatus ?? null, resumed });
+    }
+
+    // action === "relaunch": sandbox is down. Re-activate an interrupted session
+    // so dispatch resumes once the sandbox reconnects (onSandboxConnected →
+    // queue), carrying the stored opencode_session_id. Dispatch is owned by the
+    // reconnect path, not here.
     if (RESUMABLE_SESSION_STATUSES.includes(session.status)) {
       await this.transitionSessionStatus("active");
     }
