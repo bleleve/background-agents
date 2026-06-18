@@ -148,6 +148,9 @@ module "control_plane_worker" {
     ] : [],
     length(var.rwx_access_token) > 0 ? [
       { name = "RWX_ACCESS_TOKEN", value = var.rwx_access_token },
+    ] : [],
+    length(var.rwx_org_slug) > 0 ? [
+      { name = "RWX_ORG_SLUG", value = var.rwx_org_slug },
     ] : []
   )
 

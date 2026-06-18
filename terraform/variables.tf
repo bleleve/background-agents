@@ -421,6 +421,12 @@ variable "rwx_access_token" {
   default     = ""
 }
 
+variable "rwx_org_slug" {
+  description = "RWX organization slug used to construct app endpoint URLs ({session_id}--{org}.r1.rwx.run)"
+  type        = string
+  default     = "fountain"
+}
+
 # =============================================================================
 # Configuration
 # =============================================================================
