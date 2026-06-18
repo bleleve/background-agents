@@ -65,7 +65,7 @@ export function SessionRightSidebarContent({
 
   // Remember the last non-empty preview URLs. A relaunched sandbox boots and
   // (often) drops its tunnel URLs until it republishes; keeping the last set lets
-  // the Preview row stay visible (greyed, "Restarting…") across that gap instead
+  // the Preview row stay visible (greyed, "Starting…") across that gap instead
   // of vanishing. Hooks must run before the early return below.
   const liveTunnelUrls =
     sessionState?.tunnelUrls && Object.keys(sessionState.tunnelUrls).length > 0
