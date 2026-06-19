@@ -62,8 +62,8 @@ export async function dispatchPreview(
       });
       return { dispatchId: result.dispatch_id, runUrl, previewUrls };
     }
-    if (dispatch.error) {
-      throw new Error(`Dispatch failed: ${dispatch.error}`);
+    if (dispatch.error || dispatch.status === "failed" || dispatch.status === "cancelled") {
+      throw new Error(`Dispatch failed: ${dispatch.error ?? dispatch.status}`);
     }
   }
   throw new Error(`Dispatch timed out after ${POLL_TIMEOUT_MS / 1000}s`);
