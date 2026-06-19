@@ -84,13 +84,13 @@ export function SessionRightSidebarContent({
       });
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
-        rwxRunUrl?: string;
+        previewUrls?: Record<string, string>;
       };
       if (!response.ok) {
         setPreviewOn(!enabled);
         toast.error(data.error || "Failed to update preview");
-      } else if (data.rwxRunUrl) {
-        setRwxRunUrl(data.rwxRunUrl);
+      } else if (data.previewUrls?.hire) {
+        setRwxRunUrl(data.previewUrls.hire);
       }
     } catch {
       setPreviewOn(!enabled);

@@ -1913,7 +1913,7 @@ describe("handlePullRequestLabeled", () => {
     const env = createMockEnv();
     const log = createMockLogger();
     const cpFetch = getControlPlaneFetch(env);
-    cpFetch.mockResolvedValue(new Response(null, { status: 202 }));
+    cpFetch.mockResolvedValue(new Response(JSON.stringify({ dispatchId: "d-1" }), { status: 202 }));
     const payload: PullRequestLabeledPayload = {
       ...pullRequestLabeledPayload,
       label: { name: "preview" },
@@ -2068,7 +2068,7 @@ describe("handlePullRequestSynchronized", () => {
     const env = createMockEnv();
     const log = createMockLogger();
     const cpFetch = getControlPlaneFetch(env);
-    cpFetch.mockResolvedValue(new Response(null, { status: 202 }));
+    cpFetch.mockResolvedValue(new Response(JSON.stringify({ dispatchId: "d-1" }), { status: 202 }));
     const payload: PullRequestSynchronizedPayload = {
       action: "synchronize",
       pull_request: {

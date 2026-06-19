@@ -45,17 +45,17 @@ async function enablePreviewForExistingSession(
         status: response.status,
       });
     } else {
-      const result = (await response.json()) as { rwxRunUrl?: string };
+      const result = (await response.json()) as { previewUrls?: Record<string, string> };
       log.info("automation_events.preview_enabled", {
         issue_id: payload.data.id,
         issue_identifier: payload.data.identifier,
         session_id: existingSession.sessionId,
       });
-      if (result.rwxRunUrl && env.LINEAR_API_KEY) {
+      if (result.previewUrls?.hire && env.LINEAR_API_KEY) {
         await postIssueComment(
           env.LINEAR_API_KEY,
           payload.data.id,
-          `[hire preview](${result.rwxRunUrl})`
+          `[hire preview](${result.previewUrls.hire})`
         );
       }
     }

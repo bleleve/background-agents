@@ -115,7 +115,10 @@ function createHandler() {
   const updateSandboxStatus = vi.fn();
 
   const createSystemMessage = vi.fn();
-  const dispatchPreview = vi.fn(async () => ({ runUrl: "https://cloud.rwx.com/mint/org/runs/1" }));
+  const dispatchPreview = vi.fn(async () => ({
+    runUrl: "https://cloud.rwx.com/mint/org/runs/1",
+    previewUrls: { hire: "https://hire-session-1--testorg.r1.rwx.run/" },
+  }));
   const broadcastArtifactCreated = vi.fn();
   const broadcast = vi.fn();
 

@@ -1208,9 +1208,12 @@ async function dispatchPullRequestPreview(
   if (!response.ok) {
     throw new Error(`Preview dispatch failed: ${response.status} ${await response.text()}`);
   }
-  const result = (await response.json()) as { rwxRunUrl?: string; runUrl?: string };
-  const runUrl = result.rwxRunUrl ?? result.runUrl;
-  if (runUrl) {
+  const result = (await response.json()) as {
+    previewUrls?: Record<string, string>;
+    runUrl?: string;
+  };
+  const linkUrl = result.previewUrls?.hire ?? result.runUrl;
+  if (linkUrl) {
     const userAgent = resolveAppName(env);
     const token = await generateInstallationToken({
       appId: env.GITHUB_APP_ID,
@@ -1223,7 +1226,7 @@ async function dispatchPullRequestPreview(
       owner,
       repoName,
       pr.number,
-      `[hire preview](${runUrl})`,
+      `[hire preview](${linkUrl})`,
       userAgent
     );
   }

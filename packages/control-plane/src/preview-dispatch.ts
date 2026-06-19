@@ -10,6 +10,8 @@ const POLL_TIMEOUT_MS = 120_000;
 export interface DispatchPreviewResult {
   dispatchId: string;
   runUrl: string;
+  /** Map of product name → frontend preview URL, set when RWX_ORG_SLUG is configured. */
+  previewUrls?: Record<string, string>;
 }
 
 export async function dispatchPreview(
@@ -33,6 +35,10 @@ export async function dispatchPreview(
   const params: Record<string, string> = { slug: input.slug };
   if (input.reason) params["reason"] = input.reason;
 
+  const previewUrls = env.RWX_ORG_SLUG
+    ? { hire: `https://hire-${input.slug}--${env.RWX_ORG_SLUG}.r1.rwx.run/` }
+    : undefined;
+
   const result = await client.createDispatch({
     key: `${input.repoOwner}-${input.repoName}`,
     ref: input.branchName,
@@ -51,8 +57,9 @@ export async function dispatchPreview(
         ...input,
         dispatch_id: result.dispatch_id,
         run_url: runUrl,
+        preview_urls: previewUrls,
       });
-      return { dispatchId: result.dispatch_id, runUrl };
+      return { dispatchId: result.dispatch_id, runUrl, previewUrls };
     }
     if (dispatch.error) {
       throw new Error(`Dispatch failed: ${dispatch.error}`);

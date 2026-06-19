@@ -101,7 +101,9 @@ export interface SessionLifecycleHandlerDeps {
    * the agent.
    */
   createSystemMessage: (content: string) => void;
-  dispatchPreview: (reason?: string) => Promise<{ runUrl: string }>;
+  dispatchPreview: (
+    reason?: string
+  ) => Promise<{ runUrl: string; previewUrls?: Record<string, string> }>;
   broadcastArtifactCreated: (artifact: SessionArtifact) => void;
   broadcast: (message: { type: "preview_mode"; enabled: boolean }) => void;
 }
@@ -300,9 +302,10 @@ export function createSessionLifecycleHandler(
       }
 
       let runUrl: string | undefined;
+      let previewUrls: Record<string, string> | undefined;
       if (body.enabled) {
         try {
-          ({ runUrl } = await deps.dispatchPreview(body.reason));
+          ({ runUrl, previewUrls } = await deps.dispatchPreview(body.reason));
         } catch (error) {
           deps.getLog().error("preview.dispatch_failed", {
             error: error instanceof Error ? error : String(error),
@@ -314,17 +317,18 @@ export function createSessionLifecycleHandler(
       deps.repository.updatePreviewEnabled(body.enabled, now);
       if (runUrl) {
         const artifactId = deps.generateId();
+        const artifactUrl = (previewUrls && Object.values(previewUrls)[0]) ?? runUrl;
         const artifact: SessionArtifact = {
           id: artifactId,
           type: "link",
-          url: runUrl,
+          url: artifactUrl,
           metadata: { label: "RWX Run URL" },
           createdAt: now,
         };
         deps.repository.createArtifact({
           id: artifactId,
           type: "link",
-          url: runUrl,
+          url: artifactUrl,
           metadata: JSON.stringify({ label: "RWX Run URL" }),
           createdAt: now,
         });
@@ -333,7 +337,7 @@ export function createSessionLifecycleHandler(
       deps.broadcast({ type: "preview_mode", enabled: body.enabled });
       return Response.json({
         enabled: body.enabled,
-        ...(runUrl ? { rwxRunUrl: runUrl, rwxRunLabel: "RWX Run URL" } : {}),
+        ...(previewUrls ? { previewUrls } : {}),
       });
     },
 
