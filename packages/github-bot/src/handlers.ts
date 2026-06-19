@@ -1198,7 +1198,7 @@ async function dispatchPullRequestPreview(
         body: JSON.stringify({
           repoOwner: owner,
           repoName,
-          commitSha: pr.head.sha,
+          branchName: pr.head.ref,
           slug: `${repoName}-${pr.number}`,
         }),
       });
