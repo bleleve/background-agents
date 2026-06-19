@@ -73,6 +73,7 @@ The control plane provides:
 | `/sessions/:id/scm-credentials`   | POST      | Broker sandbox git credentials                                          |
 | `/sessions/:id/slack-notify`      | POST      | Post a Slack notification from the agent (sandbox-authenticated)        |
 | `/sessions/:id/ws-token`          | POST      | Generate WebSocket token                                                |
+| `/sessions/:id/preview`           | POST      | Enable or disable preview mode (dispatches RWX run when enabled)        |
 | `/sessions/:id/archive`           | POST      | Archive session                                                         |
 | `/sessions/:id/unarchive`         | POST      | Unarchive session                                                       |
 
@@ -89,6 +90,19 @@ the workflow.
 | `/sessions/:id/plans`        | GET    | List all plan versions for a session                               |
 | `/sessions/:id/plan/approve` | POST   | Flip status to `approved`; optional `implementationModel` override |
 | `/sessions/:id/plan/reject`  | POST   | Flip status to `rejected` with optional reason                     |
+
+### Previews
+
+`POST /sessions/:id/preview` toggles preview mode for a session. When `enabled: true`, the control
+plane dispatches an RWX run for the session's current branch and returns the run URL (and optional
+per-product preview URLs when `RWX_ORG_SLUG` is configured).
+
+`POST /previews/dispatch` is a standalone endpoint for triggering an RWX preview run by repo
+coordinates. Accepts `repoOwner`, `repoName`, `branchName`, `commitSha` (optional), `slug`, and
+`reason` (optional). Returns `{ dispatchId, runUrl, previewUrls? }`.
+
+Both endpoints require HMAC authentication (`INTERNAL_CALLBACK_SECRET`); they are excluded from the
+public and sandbox-auth route lists.
 
 ### Model Preferences
 
@@ -187,6 +201,7 @@ These routes are called by the github-bot via its `CONTROL_PLANE` service bindin
 | `artifact_created`  | New artifact (PR, screenshot)                         |
 | `snapshot_saved`    | Filesystem snapshot saved                             |
 | `session_status`    | Session status change (`{ status: SessionStatus }`)   |
+| `preview_mode`      | Preview mode toggled (`{ enabled: boolean }`)         |
 | `error`             | Error occurred                                        |
 
 **Status values** (canonical unions and groupings live in `@open-inspect/shared`):
@@ -320,6 +335,12 @@ Optional variables:
   allowed to soft-delete any automation, regardless of ownership. Creators can always delete their
   own automations; this variable grants that same capability to designated admin users. Leave empty
   (default) to restrict deletion to creators only.
+- `RWX_ACCESS_TOKEN` - RWX API access token. Required to use preview mode (`POST /sessions/:id/preview`
+  and `POST /previews/dispatch`). Leave unset to disable preview dispatch.
+- `RWX_BASE_URL` - Override the RWX API base URL (default: `https://cloud.rwx.com/mint/api`). Useful
+  for testing against a non-production RWX environment.
+- `RWX_ORG_SLUG` - RWX organization slug. When set, preview responses include per-product frontend
+  URLs (e.g. `hire-<slug>--<org>.r1.rwx.run`) alongside the run URL.
 
 See [terraform/terraform.tfvars.example](../../terraform/terraform.tfvars.example) for the complete
 list.
