@@ -414,18 +414,31 @@ variable "nextauth_secret" {
   sensitive   = true
 }
 
+variable "rwx_access_token" {
+  description = "RWX access token for RWX CI/CD integration"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "rwx_org_slug" {
+  description = "RWX organization slug used to construct app endpoint URLs ({session_id}--{org}.r1.rwx.run)"
+  type        = string
+  default     = "fountain"
+}
+
 # =============================================================================
 # Configuration
 # =============================================================================
 
 variable "sandbox_provider" {
-  description = "Sandbox backend for session execution: 'modal', 'daytona', or 'vercel'"
+  description = "Sandbox backend for session execution: 'modal', 'daytona', 'rwx', or 'vercel'"
   type        = string
   default     = "modal"
 
   validation {
-    condition     = contains(["modal", "daytona", "vercel"], var.sandbox_provider)
-    error_message = "sandbox_provider must be 'modal', 'daytona', or 'vercel'."
+    condition     = contains(["modal", "daytona", "rwx", "vercel"], var.sandbox_provider)
+    error_message = "sandbox_provider must be 'modal', 'daytona', 'rwx', or 'vercel'."
   }
 }
 

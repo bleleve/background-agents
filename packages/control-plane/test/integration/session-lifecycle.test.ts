@@ -53,6 +53,39 @@ describe("POST /internal/archive", () => {
     expect(state.status).toBe("archived");
   });
 
+  it("archive reconciles a boot-status sandbox down to a terminal status", async () => {
+    const { stub } = await initSession({ userId: "user-1" });
+
+    // A freshly initialized session leaves the sandbox in a boot status
+    // (pending/spawning). Archiving is a terminal transition, so the box —
+    // which will never serve a turn — must not be left pinned as a phantom
+    // boot: a still-booting box is reconciled to "stopped", while a box whose
+    // background spawn has already failed stays "failed". Either way it must
+    // read as cleanly down (no boot status).
+    const beforeRes = await stub.fetch("http://internal/internal/state");
+    const before = await beforeRes.json<{ sandbox: { status: string } | null }>();
+    // The background warmSandbox() spawn fires via ctx.waitUntil, so by now the
+    // sandbox is either still booting or has already failed (no real provider
+    // under test) — both are acceptable starting points for this transition.
+    const bootStatuses = ["pending", "spawning", "connecting", "warming", "syncing"];
+    expect([...bootStatuses, "failed"]).toContain(before.sandbox!.status);
+
+    const res = await stub.fetch("http://internal/internal/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: "user-1" }),
+    });
+    expect(res.status).toBe(200);
+
+    const stateRes = await stub.fetch("http://internal/internal/state");
+    const state = await stateRes.json<{ status: string; sandbox: { status: string } | null }>();
+    expect(state.status).toBe("archived");
+    // Reconciled (was a boot status) → "stopped"; already-failed spawn stays
+    // "failed". The invariant is that it is no longer a phantom boot status.
+    expect(bootStatuses).not.toContain(state.sandbox!.status);
+    expect(["stopped", "failed"]).toContain(state.sandbox!.status);
+  });
+
   it("archive rejects non-participant", async () => {
     const { stub } = await initSession({ userId: "user-1" });
 

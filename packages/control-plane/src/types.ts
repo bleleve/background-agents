@@ -88,7 +88,7 @@ export interface Env {
   WORKER_URL?: string; // Base URL for the worker (for callbacks)
   WEB_APP_URL?: string; // Base URL for the web app (for PR links)
   CF_ACCOUNT_ID?: string; // Cloudflare account ID
-  SANDBOX_PROVIDER?: string; // "modal" (default), "daytona", or "vercel"
+  SANDBOX_PROVIDER?: string; // "modal" (default), "daytona", "vercel", or "rwx"
   MODAL_WORKSPACE?: string; // Modal workspace name
   MODAL_ENVIRONMENT?: string; // Modal environment name for dashboard URLs
   MODAL_ENVIRONMENT_WEB_SUFFIX?: string; // Modal environment web suffix for endpoint URLs
@@ -104,6 +104,9 @@ export interface Env {
   VERCEL_RUNTIME?: string; // Vercel sandbox runtime (default: node24)
   VERCEL_SANDBOX_API_BASE_URL?: string; // Override for tests or non-default Vercel API base URL
   VERCEL_SNAPSHOT_EXPIRATION_MS?: string; // Snapshot expiration in ms; 0 means no expiration
+  RWX_ACCESS_TOKEN?: string; // RWX API access token for Dispatch API
+  RWX_BASE_URL?: string; // Override for RWX API base URL (default: https://cloud.rwx.com)
+  RWX_ORG_SLUG?: string; // RWX organization slug used to construct app endpoint URLs ({session_id}--{org}.r1.rwx.run)
 
   // Sandbox lifecycle configuration
   SANDBOX_INACTIVITY_TIMEOUT_MS?: string; // Inactivity timeout in ms (default: 900000 = 15 min)

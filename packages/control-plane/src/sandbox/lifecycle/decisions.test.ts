@@ -13,6 +13,7 @@ import {
   evaluateConnectingTimeout,
   evaluateWarmDecision,
   evaluateExecutionTimeout,
+  reconcileTerminalSandboxStatus,
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   DEFAULT_SPAWN_CONFIG,
   DEFAULT_INACTIVITY_CONFIG,
@@ -1018,5 +1019,24 @@ describe("evaluateExecutionTimeout", () => {
 
     expect(result.isTimedOut).toBe(true);
     expect(result.elapsedMs).toBe(6000);
+  });
+});
+
+describe("reconcileTerminalSandboxStatus", () => {
+  it("collapses every transient boot status to stopped", () => {
+    for (const status of ["pending", "spawning", "connecting", "warming", "syncing"] as const) {
+      expect(reconcileTerminalSandboxStatus(status)).toBe("stopped");
+    }
+  });
+
+  it("leaves a live sandbox untouched (no change)", () => {
+    expect(reconcileTerminalSandboxStatus("ready")).toBeNull();
+    expect(reconcileTerminalSandboxStatus("running")).toBeNull();
+  });
+
+  it("leaves an already-down or snapshotting sandbox untouched", () => {
+    for (const status of ["stopped", "failed", "stale", "snapshotting"] as const) {
+      expect(reconcileTerminalSandboxStatus(status)).toBeNull();
+    }
   });
 });

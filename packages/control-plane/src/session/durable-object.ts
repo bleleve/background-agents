@@ -9,21 +9,23 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { initSchema } from "./schema";
-import { reEnqueueInterruptedTurnForRelaunch } from "./relaunch";
+import { reEnqueueInterruptedTurnForRelaunch, decideRelaunchAction } from "./relaunch";
 import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
 import {
   resolveAppName,
   timingSafeEqual,
-  RELAUNCHABLE_SANDBOX_STATUSES,
   RESUMABLE_SESSION_STATUSES,
+  TERMINAL_SESSION_STATUSES,
 } from "@open-inspect/shared";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl, createModalClient } from "../sandbox/client";
 import { createDaytonaRestClient } from "../sandbox/daytona-rest-client";
 import { createVercelSandboxClient } from "../sandbox/providers/vercel/client";
+import { createRwxRestClient } from "../sandbox/rwx-rest-client";
 import { createModalProvider } from "../sandbox/providers/modal-provider";
 import { createDaytonaProvider } from "../sandbox/providers/daytona-provider";
 import { createVercelProvider } from "../sandbox/providers/vercel/provider";
+import { createRwxProvider } from "../sandbox/providers/rwx-provider";
 import { resolveSandboxBackendName, supportsRepoImageBackend } from "../sandbox/provider-name";
 import { createLogger, parseLogLevel } from "../logger";
 import type { Logger } from "../logger";
@@ -43,7 +45,10 @@ import { RepoImageStore } from "../db/repo-images";
 import { McpServerStore } from "../db/mcp-servers";
 import { IntegrationSettingsStore, resolveSlackSettings } from "../db/integration-settings";
 import { SessionIndexStore } from "../db/session-index";
-import { DEFAULT_EXECUTION_TIMEOUT_MS } from "../sandbox/lifecycle/decisions";
+import {
+  DEFAULT_EXECUTION_TIMEOUT_MS,
+  reconcileTerminalSandboxStatus,
+} from "../sandbox/lifecycle/decisions";
 import {
   createSourceControlProviderFromEnv,
   resolveScmProviderFromEnv,
@@ -153,9 +158,6 @@ const WS_AUTH_TIMEOUT_MS = 30000; // 30 seconds
  * the client to fetch a fresh token on reconnect.
  */
 const WS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-/** Statuses that indicate a session is finished — metrics are synced to D1 on these transitions. */
-const TERMINAL_STATUSES: SessionStatus[] = ["completed", "failed", "cancelled"];
 
 /**
  * Stable identity for system-generated prompts (e.g. the implementation
@@ -823,6 +825,25 @@ export class SessionDO extends DurableObject<Env> {
         });
       }
 
+      if (sandboxBackend === "rwx") {
+        if (!this.env.RWX_ACCESS_TOKEN) {
+          throw new Error("RWX_ACCESS_TOKEN is required when SANDBOX_PROVIDER=rwx");
+        }
+
+        const rwxClient = createRwxRestClient({
+          apiToken: this.env.RWX_ACCESS_TOKEN,
+          baseUrl: this.env.RWX_BASE_URL,
+        });
+
+        return createRwxProvider(rwxClient, {
+          scmProvider: resolveScmProviderFromEnv(this.env.SCM_PROVIDER),
+          // Reuses access token as HMAC secret for code-server password derivation
+          // (distinct message prefix prevents collision with auth use)
+          codeServerPasswordSecret: this.env.RWX_ACCESS_TOKEN,
+          orgSlug: this.env.RWX_ORG_SLUG,
+        });
+      }
+
       if (!this.env.MODAL_API_SECRET || !this.env.MODAL_WORKSPACE) {
         throw new Error(
           "MODAL_API_SECRET and MODAL_WORKSPACE are required when SANDBOX_PROVIDER=modal"
@@ -951,7 +972,7 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     const sandboxDashboardUrlBuilder =
-      sandboxBackend === "modal"
+      sandboxBackend === "modal" || sandboxBackend === "rwx"
         ? (providerObjectId: string) => this.getSandboxDashboardUrl(providerObjectId)
         : undefined;
 
@@ -1701,11 +1722,19 @@ export class SessionDO extends DurableObject<Env> {
   }
 
   /**
-   * User-triggered "Relaunch" of a dead sandbox. Only acts when the sandbox is
-   * in a recoverable terminal state (stopped/failed/stale); spawnSandbox() then
-   * resolves the right action (provider resume, snapshot restore, or fresh
-   * spawn) from the current state and broadcasts sandbox_status updates that the
-   * client watches. A no-op when the sandbox is already live.
+   * User-triggered "Relaunch and resume". Three outcomes, decided from the
+   * sandbox + session state (see decideRelaunchAction):
+   *   - resume:   sandbox is live (ready/running) and the session was interrupted
+   *               (failed/cancelled) — re-dispatch the failed turn to the still-
+   *               connected sandbox in place, no respawn. The bridge still holds
+   *               the OpenCode session, so the agent continues with full context.
+   *   - relaunch: sandbox is down (stopped/failed/stale) — respawn it, resuming
+   *               the interrupted turn if the session was interrupted.
+   *   - skip:     nothing actionable (booting/snapshotting, no sandbox, or a live
+   *               sandbox on a cleanly-completed/active session).
+   * In every case we re-enqueue by reverting the failed message to pending (no
+   * new user_message event — keeps the single original bubble) rather than
+   * dispatching a fresh prompt.
    */
   private async relaunchSandbox(): Promise<Response> {
     const session = this.getSession();
@@ -1714,19 +1743,29 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     const sandboxStatus = this.getSandbox()?.status;
-    if (!sandboxStatus || !RELAUNCHABLE_SANDBOX_STATUSES.includes(sandboxStatus)) {
+    const action = decideRelaunchAction({ sandboxStatus, sessionStatus: session.status });
+
+    if (action === "skip") {
       return Response.json({ status: "skipped", sandboxStatus: sandboxStatus ?? null });
     }
 
-    // Resume the interrupted turn on relaunch of a failed/cancelled session:
-    // revert the failed message to pending and re-activate the session so it is
-    // re-dispatched once the sandbox reconnects (onSandboxConnected → queue),
-    // this time carrying the stored opencode_session_id so the bridge resumes
-    // prior context. We do NOT write a new user_message event (keeps the single
-    // original bubble) and do NOT dispatch here — dispatch is owned by the
-    // reconnect path. Idempotent: a second relaunch sees a non-resumable status
-    // and just spawns.
     const resumed = reEnqueueInterruptedTurnForRelaunch(session.status, this.repository);
+
+    if (action === "resume") {
+      // The sandbox is alive — re-activate the session (this MUST precede the
+      // queue: a terminal session status short-circuits processMessageQueue) and
+      // dispatch the reverted turn straight to the connected socket. If the
+      // socket has since dropped, the queue degrades to a respawn carrying the
+      // same opencode_session_id, so the turn is never lost.
+      await this.transitionSessionStatus("active");
+      await this.processMessageQueue();
+      return Response.json({ status: "resuming", sandboxStatus: sandboxStatus ?? null, resumed });
+    }
+
+    // action === "relaunch": sandbox is down. Re-activate an interrupted session
+    // so dispatch resumes once the sandbox reconnects (onSandboxConnected →
+    // queue), carrying the stored opencode_session_id. Dispatch is owned by the
+    // reconnect path, not here.
     if (RESUMABLE_SESSION_STATUSES.includes(session.status)) {
       await this.transitionSessionStatus("active");
     }
@@ -1905,7 +1944,7 @@ export class SessionDO extends DurableObject<Env> {
     const publicSessionId = this.getPublicSessionId(session);
     if (session.status === status) {
       this.syncSessionIndexStatus(publicSessionId, status, session.updated_at);
-      if (TERMINAL_STATUSES.includes(status)) {
+      if (TERMINAL_SESSION_STATUSES.includes(status)) {
         this.syncSessionMetrics(publicSessionId);
       }
       return false;
@@ -1914,7 +1953,7 @@ export class SessionDO extends DurableObject<Env> {
     const updatedAt = Math.max(Date.now(), session.updated_at + 1);
     this.repository.updateSessionStatus(session.id, status, updatedAt);
 
-    if (TERMINAL_STATUSES.includes(status)) {
+    if (TERMINAL_SESSION_STATUSES.includes(status)) {
       // The sidebar reads status from D1; persist terminal transitions durably
       // (awaited) so the write can't be dropped and leave the index stale.
       try {
@@ -1933,14 +1972,40 @@ export class SessionDO extends DurableObject<Env> {
 
     this.broadcast({ type: "session_status", status });
 
-    if (TERMINAL_STATUSES.includes(status)) {
+    if (TERMINAL_SESSION_STATUSES.includes(status)) {
       this.syncSessionMetrics(publicSessionId);
+      this.reconcileStuckSandboxForTerminalSession();
     }
 
     // Notify parent session (if this is a child) so its UI can refresh
     this.notifyParentOfStatusChange(session, publicSessionId, status);
 
     return true;
+  }
+
+  /**
+   * On a terminal session transition, reconcile a sandbox still pinned at a
+   * transient boot status (e.g. a "spawning" left behind by an interrupted spawn
+   * that no watchdog ever cleaned up) down to "stopped". Without this the box
+   * reads as perpetually "Starting sandbox…" in the UI even though nothing is
+   * booting, and the relaunch gate stays a no-op. Idempotent: a no-op for a
+   * live/already-down/snapshotting sandbox, so re-asserting a terminal status
+   * costs nothing.
+   */
+  private reconcileStuckSandboxForTerminalSession(): void {
+    const sandbox = this.getSandbox();
+    if (!sandbox) return;
+    const reconciled = reconcileTerminalSandboxStatus(sandbox.status as SandboxStatus);
+    if (!reconciled) return;
+
+    this.repository.updateSandboxStatus(reconciled);
+    this.syncSandboxStatusIndex(reconciled);
+    this.broadcast({ type: "sandbox_status", status: reconciled });
+    this.log.info("sandbox.reconcile_terminal", {
+      event: "sandbox.reconcile_terminal",
+      from_status: sandbox.status,
+      to_status: reconciled,
+    });
   }
 
   private applySessionTitleUpdate(
@@ -2066,7 +2131,7 @@ export class SessionDO extends DurableObject<Env> {
     // e.g. when the detail page connects — re-mirrors it. Limited to terminal
     // statuses, the only ones that can diverge and stick (live sessions keep
     // getting fresh writes). The monotonic guard makes this a no-op when in sync.
-    if (session && TERMINAL_STATUSES.includes(session.status)) {
+    if (session && TERMINAL_SESSION_STATUSES.includes(session.status)) {
       this.syncSessionIndexStatus(
         this.getPublicSessionId(session),
         session.status,
@@ -2142,12 +2207,19 @@ export class SessionDO extends DurableObject<Env> {
   }
 
   private getSandboxDashboardUrl(providerObjectId: string | null | undefined): string | null {
-    if (resolveSandboxBackendName(this.env.SANDBOX_PROVIDER) !== "modal") return null;
-    return buildModalSandboxDashboardUrl({
-      workspace: this.env.MODAL_WORKSPACE,
-      environment: this.env.MODAL_ENVIRONMENT,
-      providerObjectId,
-    });
+    const backend = resolveSandboxBackendName(this.env.SANDBOX_PROVIDER);
+    if (backend === "modal") {
+      return buildModalSandboxDashboardUrl({
+        workspace: this.env.MODAL_WORKSPACE,
+        environment: this.env.MODAL_ENVIRONMENT,
+        providerObjectId,
+      });
+    }
+    // For RWX the providerObjectId is the run URL once the dispatch is ready.
+    if (backend === "rwx" && providerObjectId?.startsWith("https://")) {
+      return providerObjectId;
+    }
+    return null;
   }
 
   /**

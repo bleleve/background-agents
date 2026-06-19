@@ -46,14 +46,21 @@ A **session** is the core unit of work in Open-Inspect. Each session is:
 ### Session Lifecycle
 
 ```
-Created → Active → Archived
-            ↑
-            └── Can be restored from archive
+Created → Active ──┬─→ Completed            (turn finished cleanly)
+                   ├─→ Failed / Cancelled   (errored or stopped — resumable)
+                   └─→ Archived             (hidden from the list — restorable)
 ```
 
 Sessions start when you create one (via web or Slack). They remain active as long as there's work
-happening or recent activity. You can archive sessions to clean up your list, and restore them later
-if needed.
+happening or recent activity. A turn ends in `completed` (clean), `failed` (errored or timed out),
+or `cancelled` (stopped, or hit the duration cap); you can archive sessions to clean up your list
+and restore them later.
+
+`completed`, `failed`, `cancelled`, and `archived` are the **terminal** statuses
+(`TERMINAL_SESSION_STATUSES` in `@open-inspect/shared`): no prompt dispatches while a session sits
+in one, and entering one reconciles a sandbox still stuck in a boot status down to `stopped` so it
+no longer reads as "starting". A `failed`/`cancelled` session can be resumed (relaunching the
+sandbox if needed); a fresh prompt re-activates any of them.
 
 ### What's Stored in a Session
 

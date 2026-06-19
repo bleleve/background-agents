@@ -35,12 +35,48 @@ export const RELAUNCHABLE_SANDBOX_STATUSES: readonly SandboxStatus[] = [
 ];
 
 /**
+ * Sandbox states where the bridge is connected and serving prompts, so an
+ * interrupted turn can be resumed *in place* — re-dispatched to the live socket
+ * (continuing the existing OpenCode session) instead of respawning. Excludes
+ * `snapshotting`: the sandbox is live for tunnels but must not take a new prompt
+ * mid-snapshot. Canonical across the control-plane relaunch guard and web gating.
+ */
+export const LIVE_SANDBOX_STATUSES: readonly SandboxStatus[] = ["ready", "running"];
+
+/**
  * Session states whose last turn was interrupted (not a clean completion) and so
  * resume when the sandbox is relaunched: `failed` (an error) and `cancelled` (a
  * deliberate stop or the duration cap). Both leave the latest message `failed`,
  * so the same re-enqueue path applies. Canonical across control-plane and web.
  */
 export const RESUMABLE_SESSION_STATUSES: readonly SessionStatus[] = ["failed", "cancelled"];
+
+/**
+ * Transient sandbox states a box passes through while coming up — it is booting,
+ * not yet serving prompts. The UI renders these as "Starting…" (boot spinner,
+ * preview placeholder, warming dot). Canonical so the control-plane reconcile and
+ * every web display path agree on what counts as "still starting".
+ */
+export const SANDBOX_BOOT_STATUSES: readonly SandboxStatus[] = [
+  "pending",
+  "spawning",
+  "connecting",
+  "warming",
+  "syncing",
+];
+
+/**
+ * Session states that are final — no further turn will ever run. Once a session
+ * is terminal its sandbox is meaningless: a boot status left pinned on it (e.g.
+ * an unreconciled "spawning") is stale and must not be presented as a live boot.
+ * Canonical across control-plane and web.
+ */
+export const TERMINAL_SESSION_STATUSES: readonly SessionStatus[] = [
+  "completed",
+  "failed",
+  "cancelled",
+  "archived",
+];
 export type GitSyncStatus = "pending" | "in_progress" | "completed" | "failed";
 export type MessageStatus = "pending" | "processing" | "completed" | "failed";
 export type MessageSource =

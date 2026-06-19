@@ -1,6 +1,7 @@
 import type { Logger } from "../../../logger";
 import type { ParticipantRow, SandboxRow, SessionRow } from "../../types";
 import type { SandboxSettings } from "@open-inspect/shared";
+import { TERMINAL_SESSION_STATUSES } from "@open-inspect/shared";
 import type { SandboxStatus, SessionStatus, SpawnSource } from "../../../types";
 import type { SessionRepository } from "../../repository";
 import { DEFAULT_PLAN_MODEL, getValidModelOrDefault, isValidModel } from "../../../utils/models";
@@ -10,7 +11,7 @@ import {
   type SessionTitleUpdateResult,
 } from "../../title";
 
-const TERMINAL_STATUSES = new Set<SessionStatus>(["completed", "archived", "cancelled", "failed"]);
+const TERMINAL_STATUSES = new Set<SessionStatus>(TERMINAL_SESSION_STATUSES);
 
 /**
  * Request body for the /internal/init endpoint.
