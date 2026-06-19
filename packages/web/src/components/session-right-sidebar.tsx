@@ -42,7 +42,7 @@ interface SessionRightSidebarProps {
 
 export type SessionRightSidebarContentProps = SessionRightSidebarProps;
 
-const PREVIEW_URL = "https://hire-slug--fountain.r1.rwx.run";
+const buildPreviewUrl = (slug: string) => `https://hire-${slug}--fountain.r1.rwx.run`;
 
 export function SessionRightSidebarContent({
   sessionId,
@@ -218,7 +218,7 @@ export function SessionRightSidebarContent({
           <div className="flex items-center gap-2">
             {previewOn && (
               <a
-                href={PREVIEW_URL}
+                href={buildPreviewUrl(sessionId)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-1 text-muted-foreground hover:text-foreground transition"
