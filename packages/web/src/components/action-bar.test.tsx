@@ -2,7 +2,7 @@
 /// <reference types="@testing-library/jest-dom" />
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { ActionBar } from "./action-bar";
 
@@ -18,18 +18,25 @@ afterEach(() => {
 });
 
 describe("ActionBar", () => {
-  it("toggles preview mode for the session", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ enabled: true }));
-    vi.stubGlobal("fetch", fetchMock);
-    render(<ActionBar sessionId="session-1" sessionStatus="active" artifacts={[]} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Preview off" }));
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "Preview on" })).toBePressed());
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/sessions/session-1/preview",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ enabled: true }) })
+  it("renders View preview for hydrated preview artifacts", () => {
+    render(
+      <ActionBar
+        sessionId="session-1"
+        sessionStatus="active"
+        artifacts={[
+          {
+            id: "artifact-preview-1",
+            type: "preview",
+            url: "https://preview.example.com/session-1",
+            metadata: { previewStatus: "active" },
+            createdAt: 1234,
+          },
+        ]}
+      />
     );
+
+    const link = screen.getByRole("link", { name: /view preview/i });
+    expect(link).toHaveAttribute("href", "https://preview.example.com/session-1");
   });
 
   it("renders View PR for hydrated PR artifacts", () => {
