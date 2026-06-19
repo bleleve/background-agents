@@ -577,7 +577,7 @@ async def api_restore(
     secrets=[internal_api_secret, github_app_secrets],
 )
 @fastapi_endpoint(method="POST")
-async def api_build_img(
+async def api_build_repo_image(
     request: dict,
     authorization: str | None = Header(None),
     x_trace_id: str | None = Header(None),
@@ -598,7 +598,8 @@ async def api_build_img(
         "repo_name": "...",
         "default_branch": "main",
         "build_id": "...",
-        "callback_url": "..."
+        "callback_url": "...",
+        "build_timeout_seconds": 1800  // optional
     }
     """
     start_time = time.time()
@@ -608,6 +609,10 @@ async def api_build_img(
     require_auth(authorization)
 
     try:
+        from .sandbox.manager import (
+            DEFAULT_BUILD_TIMEOUT_SECONDS,
+            build_function_timeout_seconds,
+        )
         from .scheduler.image_builder import build_repo_image
 
         repo_owner = request.get("repo_owner")
@@ -616,6 +621,10 @@ async def api_build_img(
         build_id = request.get("build_id", "")
         callback_url = request.get("callback_url", "")
         user_env_vars = request.get("user_env_vars") or None
+        # Already capped by the control plane; default when absent/null.
+        build_timeout_seconds = int(
+            request.get("build_timeout_seconds") or DEFAULT_BUILD_TIMEOUT_SECONDS
+        )
 
         if not repo_owner or not repo_name:
             raise HTTPException(status_code=400, detail="repo_owner and repo_name are required")
@@ -626,14 +635,17 @@ async def api_build_img(
         if not default_branch:
             raise HTTPException(status_code=400, detail="default_branch is required")
 
+        function_timeout = build_function_timeout_seconds(build_timeout_seconds)
+
         # Spawn the async builder — returns immediately
-        await build_repo_image.spawn.aio(
+        await build_repo_image.with_options(timeout=function_timeout).spawn.aio(
             repo_owner=repo_owner,
             repo_name=repo_name,
             default_branch=default_branch,
             callback_url=callback_url,
             build_id=build_id,
             user_env_vars=user_env_vars,
+            build_timeout_seconds=build_timeout_seconds,
         )
 
         return {
