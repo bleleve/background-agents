@@ -317,18 +317,17 @@ export function createSessionLifecycleHandler(
       deps.repository.updatePreviewEnabled(body.enabled, now);
       if (runUrl) {
         const artifactId = deps.generateId();
-        const artifactUrl = (previewUrls && Object.values(previewUrls)[0]) ?? runUrl;
         const artifact: SessionArtifact = {
           id: artifactId,
           type: "link",
-          url: artifactUrl,
+          url: runUrl,
           metadata: { label: "RWX Run URL" },
           createdAt: now,
         };
         deps.repository.createArtifact({
           id: artifactId,
           type: "link",
-          url: artifactUrl,
+          url: runUrl,
           metadata: JSON.stringify({ label: "RWX Run URL" }),
           createdAt: now,
         });
@@ -337,6 +336,7 @@ export function createSessionLifecycleHandler(
       deps.broadcast({ type: "preview_mode", enabled: body.enabled });
       return Response.json({
         enabled: body.enabled,
+        ...(runUrl ? { runUrl } : {}),
         ...(previewUrls ? { previewUrls } : {}),
       });
     },
