@@ -31,11 +31,10 @@ import {
   parseJsonBody,
   extractRepoParams,
   createRouteSourceControlProvider,
-  resolveInstalledRepo,
+  resolveRepoOrError,
 } from "./shared";
 
 const logger = createLogger("router:repo-images");
-const DEFAULT_IMAGE_BUILD_BRANCH = "main";
 // Builds run on a ~30 min cadence, so 3 consecutive failures means a repo has had
 // no fresh image for ~1.5h and every session is cold-booting the full setup.sh.
 // Emitting a distinct log event at this point gives ops a hook for alerting.
@@ -642,44 +641,18 @@ async function handleTriggerBuild(
   if (params instanceof Response) return params;
   const { owner, name } = params;
 
+  // Resolve the repo to get its actual default branch — never assume "main".
+  // The same resolution yields repoId, reused below for repo-scoped secrets.
+  const resolved = await resolveRepoOrError(env, owner, name, ctx, logger);
+  if (resolved instanceof Response) return resolved;
+  const { repoId, defaultBranch } = resolved;
+
   const store = new RepoImageStore(env.DB);
   const backend = getRepoImageBackend(env);
   const now = Date.now();
   const buildId = `img-${owner}-${name}-${now}`;
 
   try {
-    // Resolve repo once so we can use the real default branch when available.
-    let resolvedRepo: { repoId: number; defaultBranch: string } | null = null;
-    let defaultBranch = DEFAULT_IMAGE_BUILD_BRANCH;
-    try {
-      const provider = createRouteSourceControlProvider(env);
-      const resolved = await resolveInstalledRepo(provider, owner, name);
-      if (resolved) {
-        resolvedRepo = {
-          repoId: resolved.repoId,
-          defaultBranch: resolved.defaultBranch,
-        };
-        defaultBranch = resolved.defaultBranch || DEFAULT_IMAGE_BUILD_BRANCH;
-      } else {
-        logger.warn("repo_image.repo_not_installed", {
-          repo_owner: owner,
-          repo_name: name,
-          fallback_branch: defaultBranch,
-          request_id: ctx.request_id,
-          trace_id: ctx.trace_id,
-        });
-      }
-    } catch (e) {
-      logger.warn("repo_image.default_branch_resolve_failed", {
-        error: e instanceof Error ? e.message : String(e),
-        repo_owner: owner,
-        repo_name: name,
-        fallback_branch: defaultBranch,
-        request_id: ctx.request_id,
-        trace_id: ctx.trace_id,
-      });
-    }
-
     const callbackToken = backend === "vercel" ? generateRepoImageCallbackToken() : undefined;
     const callbackTokenHash = callbackToken
       ? await hashRepoImageCallbackToken(callbackToken, env)
@@ -716,10 +689,8 @@ async function handleTriggerBuild(
 
       let repoSecrets: Record<string, string> = {};
       try {
-        if (resolvedRepo) {
-          const repoStore = new RepoSecretsStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY);
-          repoSecrets = await repoStore.getDecryptedSecrets(resolvedRepo.repoId);
-        }
+        const repoStore = new RepoSecretsStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY);
+        repoSecrets = await repoStore.getDecryptedSecrets(repoId);
       } catch (e) {
         logger.warn("repo_image.repo_secrets_failed", {
           error: e instanceof Error ? e.message : String(e),

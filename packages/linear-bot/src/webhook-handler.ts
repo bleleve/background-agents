@@ -21,6 +21,7 @@ import {
   type LinearApiClient,
 } from "./utils/linear-client";
 import { buildInternalAuthHeaders } from "./utils/internal";
+import { splitRepoFullName } from "./utils/repo";
 import { classifyRepo } from "./classifier";
 import { getAvailableRepos } from "./classifier/repos";
 import { getLinearConfig } from "./utils/integration-config";
@@ -743,7 +744,9 @@ async function handleNewSession(
       }
       const topSuggestion = suggestions.find((s) => s.confidence >= 0.7);
       if (topSuggestion) {
-        const [owner, name] = topSuggestion.repositoryFullName.split("/");
+        // Split on the last slash — GitLab nested-group paths
+        // ("group/subgroup/project") carry slashes in the owner.
+        const { owner, name } = splitRepoFullName(topSuggestion.repositoryFullName);
         repoOwner = owner;
         repoName = name;
         repoFullName = topSuggestion.repositoryFullName;

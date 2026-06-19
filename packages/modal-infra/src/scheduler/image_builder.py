@@ -244,7 +244,7 @@ async def _stream_build_logs(
 async def build_repo_image(
     repo_owner: str,
     repo_name: str,
-    default_branch: str = "main",
+    default_branch: str,
     callback_url: str = "",
     build_id: str = "",
     user_env_vars: dict[str, str] | None = None,
@@ -441,13 +441,14 @@ async def _api_post(
 def _git_ls_remote_sha(
     repo_owner: str,
     repo_name: str,
-    branch: str,
+    ref: str,
     clone_token: str,
 ) -> str | None:
     """
-    Run git ls-remote to get the SHA for a ref.
+    Run git ls-remote to get the SHA a ref points to.
 
-    `branch="HEAD"` queries the repository's default branch tip.
+    Pass "HEAD" to follow the remote's default branch, or "refs/heads/<name>"
+    for a specific branch.
 
     Returns the SHA string, or None on failure.
     """
@@ -457,7 +458,6 @@ def _git_ls_remote_sha(
         url = f"https://github.com/{repo_owner}/{repo_name}.git"
 
     try:
-        ref = "HEAD" if branch == "HEAD" else f"refs/heads/{branch}"
         result = subprocess.run(
             ["git", "ls-remote", url, ref],
             capture_output=True,
@@ -472,7 +472,7 @@ def _git_ls_remote_sha(
                 "scheduler.ls_remote_failed",
                 repo_owner=repo_owner,
                 repo_name=repo_name,
-                branch=branch,
+                ref=ref,
                 stderr=stderr,
             )
             return None
@@ -613,12 +613,15 @@ async def rebuild_repo_images():
         for repo in enabled_repos:
             repo_owner = repo.get("repoOwner", "")
             repo_name = repo.get("repoName", "")
-            default_branch = repo.get("defaultBranch", "HEAD")
 
             if not repo_owner or not repo_name:
                 continue
 
-            remote_sha = _git_ls_remote_sha(repo_owner, repo_name, default_branch, clone_token)
+            # Detect changes on the repo's default branch via HEAD: ls-remote
+            # resolves HEAD to the default branch tip, so the scheduler never
+            # needs the branch name. The build path resolves the name when it
+            # tags the image (see handleTriggerBuild in repo-images.ts).
+            remote_sha = _git_ls_remote_sha(repo_owner, repo_name, "HEAD", clone_token)
             if not remote_sha:
                 continue
 
