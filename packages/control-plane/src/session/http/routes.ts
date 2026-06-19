@@ -25,6 +25,7 @@ export interface SessionInternalRouteHandlers {
   listArtifacts: SessionInternalRouteHandler;
   listMessages: SessionInternalRouteHandler;
   createPr: SessionInternalRouteHandler;
+  updatePrState: SessionInternalRouteHandler;
   wsToken: SessionInternalRouteHandler;
   updateTitle: SessionInternalRouteHandler;
   archive: SessionInternalRouteHandler;
@@ -43,6 +44,7 @@ export interface SessionInternalRouteHandlers {
   listPlans: SessionInternalRouteHandler;
   approvePlan: SessionInternalRouteHandler;
   rejectPlan: SessionInternalRouteHandler;
+  supersede: SessionInternalRouteHandler;
 }
 
 /**
@@ -82,6 +84,7 @@ export function createSessionInternalRoutes(
     { method: "GET", path: SessionInternalPaths.artifacts, handler: handlers.listArtifacts },
     { method: "GET", path: SessionInternalPaths.messages, handler: handlers.listMessages },
     { method: "POST", path: SessionInternalPaths.createPr, handler: handlers.createPr },
+    { method: "POST", path: SessionInternalPaths.updatePrState, handler: handlers.updatePrState },
     { method: "POST", path: SessionInternalPaths.wsToken, handler: handlers.wsToken },
     { method: "POST", path: SessionInternalPaths.updateTitle, handler: handlers.updateTitle },
     { method: "POST", path: SessionInternalPaths.archive, handler: handlers.archive },
@@ -120,5 +123,6 @@ export function createSessionInternalRoutes(
     { method: "GET", path: SessionInternalPaths.plans, handler: handlers.listPlans },
     { method: "POST", path: SessionInternalPaths.planApprove, handler: handlers.approvePlan },
     { method: "POST", path: SessionInternalPaths.planReject, handler: handlers.rejectPlan },
+    { method: "POST", path: SessionInternalPaths.supersede, handler: handlers.supersede },
   ];
 }

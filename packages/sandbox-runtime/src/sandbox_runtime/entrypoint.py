@@ -51,8 +51,16 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+# Maps tool filename → env var that gates its installation. A tool is installed
+# only when its env var is set to "true" (case-insensitive). Two naming schemes:
+#   Legacy: AGENT_SLACK_NOTIFY_ENABLED (pre-existing, kept for back-compat)
+#   Generic: AGENT_TOOL_<UPPER_SNAKE> (e.g. "ast-anchor.js" → AGENT_TOOL_AST_ANCHOR_JS)
+#            Set via agentToolFlags in the control-plane session config.
 AGENT_TOOLS_GATED_ON_ENV: dict[str, str] = {
     "slack-notify.js": "AGENT_SLACK_NOTIFY_ENABLED",
+    "ast-anchor.js": "AGENT_TOOL_AST_ANCHOR_JS",
+    "validate-suggestion.js": "AGENT_TOOL_VALIDATE_SUGGESTION_JS",
+    "record-suggestion.js": "AGENT_TOOL_RECORD_SUGGESTION_JS",
 }
 
 # Wrapper installed at /usr/local/bin/gh (ahead of the real /usr/bin/gh in
@@ -125,6 +133,10 @@ class SandboxSupervisor:
     # doesn't trip the connecting-timeout watchdog. Must stay well under the
     # control plane's connecting/heartbeat timeouts (120s / 90s).
     BOOT_PROGRESS_INTERVAL_SECONDS = 20
+    # Cap for the build-time OpenCode DB pre-migration. Generous because it
+    # only runs during image builds (already minutes long), never at session
+    # boot. OpenCode warns the migration "may take a few minutes".
+    OPENCODE_PREWARM_TIMEOUT_SECONDS = 300
 
     def __init__(self):
         self.opencode_process: asyncio.subprocess.Process | None = None
@@ -1022,6 +1034,13 @@ class SandboxSupervisor:
         opencode_config: dict = {
             "model": f"{provider}/{model}",
             "permission": {"*": {"*": "allow"}},
+            # Enable LSP opportunistically. Useful only after the PR-head checkout fix
+            # and when repo deps are installed; on a first-pass review against the
+            # default branch it adds latency without semantic value.
+            # Never used as a gate — diagnostics surface best-effort via edit/write output.
+            # Only TS/JS gets a bundled server (typescript-language-server@5.3.0);
+            # other languages depend on the target repo's own toolchain.
+            "lsp": True,
         }
 
         # Apply user-supplied OpenCode config (deep-merged on top of system config)
@@ -1074,13 +1093,20 @@ class SandboxSupervisor:
         if self.repo_path.exists() and (self.repo_path / ".git").exists():
             workdir = self.repo_path
 
-        self._install_tools(workdir)
-        self._install_skills(workdir)
-        self._install_agents()
-        self._install_bin_scripts()
+        # Tool/skill/agent/plugin installation does synchronous, potentially
+        # heavy filesystem work — most notably _install_tools' shutil.copytree
+        # of the OpenCode node_modules. Run it off the event loop: while
+        # start_opencode() runs, the concurrent _boot_progress_loop must keep
+        # pinging the control plane. A multi-second blocking copy here would
+        # otherwise freeze the loop, stall the pings, and let the 90s heartbeat
+        # watchdog mark a healthy-but-slow boot as stale.
+        await asyncio.to_thread(self._install_tools, workdir)
+        await asyncio.to_thread(self._install_skills, workdir)
+        await asyncio.to_thread(self._install_agents)
+        await asyncio.to_thread(self._install_bin_scripts)
 
         opencode_dir = workdir / ".opencode"
-        self._deploy_opencode_plugins(opencode_dir)
+        await asyncio.to_thread(self._deploy_opencode_plugins, opencode_dir)
 
         env = {
             **os.environ,
@@ -1180,6 +1206,79 @@ class SandboxSupervisor:
                 await asyncio.sleep(0.5)
 
         raise RuntimeError("OpenCode server failed to become healthy")
+
+    async def _prewarm_opencode_db(self) -> None:
+        """Run OpenCode once at image-build time so its one-time SQLite
+        migration ("Performing one time database migration, may take a few
+        minutes") is baked into the snapshot.
+
+        Without this the migration runs on the FIRST session boot from a freshly
+        built image, blocking the bridge from connecting long enough that the
+        control plane's 90s heartbeat watchdog kills the session before it is
+        ever usable. Best-effort: any failure just defers the migration to first
+        boot (the prior behaviour), so it never fails the image build.
+        """
+        self.log.info("opencode.prewarm_start")
+        proc: asyncio.subprocess.Process | None = None
+        drain_task: asyncio.Task[None] | None = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "opencode",
+                "serve",
+                "--port",
+                str(self.OPENCODE_PORT),
+                "--hostname",
+                "127.0.0.1",
+                "--print-logs",
+                cwd=self.workspace_path,
+                env={**os.environ, "OPENCODE_CLIENT": "serve"},
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+
+            async def _drain() -> None:
+                assert proc is not None and proc.stdout is not None
+                async for line in proc.stdout:
+                    print(f"[opencode-prewarm] {line.decode().rstrip()}")
+
+            drain_task = asyncio.create_task(_drain())
+
+            # Health 200 means startup (incl. the DB migration) is complete.
+            health_url = f"http://127.0.0.1:{self.OPENCODE_PORT}/global/health"
+            deadline = time.time() + self.OPENCODE_PREWARM_TIMEOUT_SECONDS
+            ready = False
+            async with httpx.AsyncClient() as client:
+                while time.time() < deadline:
+                    # If opencode exited before serving (crash, port conflict,
+                    # missing binary), stop immediately instead of polling for
+                    # the full timeout — the migration just won't be baked this
+                    # build (deferred to first boot, the prior behaviour).
+                    if proc.returncode is not None:
+                        self.log.warn("opencode.prewarm_exited_early", returncode=proc.returncode)
+                        break
+                    try:
+                        resp = await client.get(health_url, timeout=2.0)
+                        if resp.status_code == 200:
+                            ready = True
+                            break
+                    except Exception:
+                        pass
+                    await asyncio.sleep(1.0)
+            self.log.info("opencode.prewarm_complete", ready=ready)
+        except Exception as e:
+            self.log.warn("opencode.prewarm_failed", exc=e)
+        finally:
+            if drain_task is not None:
+                drain_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await drain_task
+            if proc is not None and proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=10)
+                except TimeoutError:
+                    with contextlib.suppress(ProcessLookupError):
+                        proc.kill()
 
     async def start_bridge(self) -> None:
         """Start the agent bridge process."""
@@ -1563,13 +1662,31 @@ class SandboxSupervisor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 env=self._hook_env(),
+                # Put the hook in its own process group so that killing it on
+                # timeout also reaps background children (e.g. dev servers started
+                # by start.sh that would otherwise keep the pipe write-end open,
+                # causing process.stdout.read() to block indefinitely).
+                start_new_session=True,
             )
 
             try:
                 stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
             except TimeoutError:
-                process.kill()
-                stdout = await process.stdout.read() if process.stdout else b""
+                # Kill the entire process group, not just bash. Background
+                # processes spawned by the hook inherit the pipe's write fd; if
+                # only bash is killed they keep the pipe open and any subsequent
+                # read() blocks forever.
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except OSError:
+                    # Process or group already gone, or insufficient permissions
+                    # (e.g. restricted test environments). Fall back to killing
+                    # just the process itself.
+                    process.kill()
+                # Do NOT read from process.stdout here — orphaned children may
+                # still hold the write end open. We have no usable data anyway
+                # since communicate() was cancelled.
+                stdout = b""
                 await process.wait()
                 output_tail = "\n".join(stdout.decode(errors="replace").splitlines()[-50:])
                 duration_ms = int((time.time() - start_time) * 1000)
@@ -1868,6 +1985,11 @@ class SandboxSupervisor:
             # snapshot_filesystem(). MCP packages are not pre-installed during
             # builds — they are installed at first use via npx at session start.
             if image_build_mode:
+                # Bake OpenCode's one-time SQLite migration into the image so
+                # sessions don't pay it on first boot (it otherwise blocks the
+                # bridge long enough to trip the 90s heartbeat watchdog).
+                await self._prewarm_opencode_db()
+
                 duration_ms = int((time.time() - startup_start) * 1000)
                 self.log.info("image_build.complete", duration_ms=duration_ms)
                 if repo_image_callback:

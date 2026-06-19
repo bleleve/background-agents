@@ -16,6 +16,7 @@ export const SessionInternalPaths = {
   artifacts: "/internal/artifacts",
   messages: "/internal/messages",
   createPr: "/internal/create-pr",
+  updatePrState: "/internal/update-pr-state",
   wsToken: "/internal/ws-token",
   archive: "/internal/archive",
   unarchive: "/internal/unarchive",
@@ -33,6 +34,7 @@ export const SessionInternalPaths = {
   plans: "/internal/plans",
   planApprove: "/internal/plan/approve",
   planReject: "/internal/plan/reject",
+  supersede: "/internal/supersede",
 } as const;
 
 export type SessionInternalPath = (typeof SessionInternalPaths)[keyof typeof SessionInternalPaths];

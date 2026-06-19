@@ -191,6 +191,18 @@ class AgentBridge:
             max_value=self.SSE_INACTIVITY_TIMEOUT_MAX,
         )
 
+        # Per-prompt hard cap. Resolvable from the environment so a provider with
+        # a shorter sandbox lifetime than PROMPT_MAX_DURATION (e.g. Vercel's
+        # 45-min cap) can lower it — the bridge then self-stops a long prompt
+        # before the provider hard-kills the sandbox. max_value is the built-in
+        # default, so the env can only SHORTEN it, never extend it.
+        self.prompt_max_duration = self._resolve_timeout_seconds(
+            name="BRIDGE_PROMPT_MAX_DURATION",
+            default=self.PROMPT_MAX_DURATION,
+            min_value=60.0,
+            max_value=self.PROMPT_MAX_DURATION,
+        )
+
         self.ws: ClientConnection | None = None
         self.shutdown_event = asyncio.Event()
         self.git_sync_complete = asyncio.Event()
@@ -789,22 +801,42 @@ class AgentBridge:
                 )
             )
 
-            if not self.opencode_session_id:
-                await self._create_opencode_session()
+            await self._ensure_opencode_session(cmd.get("opencodeSessionId"))
 
             had_error = False
             error_message = None
+            emitted_output = False
             async for event in self._stream_opencode_response_sse(
                 message_id, content, model, reasoning_effort
             ):
-                if event.get("type") == "error":
+                # A sub-task (child session) error must NOT fail the parent turn:
+                # it is forwarded to the client for visibility, but the parent
+                # stream keeps going and can still finish successfully. Only a
+                # parent-session error (no isSubtask flag) marks the turn failed.
+                if event.get("type") == "error" and not event.get("isSubtask"):
                     had_error = True
                     error_message = event.get("error")
-                if plan_mode and event.get("type") == "token":
-                    token_text = event.get("content")
-                    if isinstance(token_text, str):
-                        text_buffer.append(token_text)
+                elif event.get("type") == "error" and event.get("isSubtask"):
+                    # A forwarded sub-task error is meaningful, visible output:
+                    # it must not trip the "completed without output" guard below.
+                    emitted_output = True
+                elif event.get("type") in ("token", "tool_call", "step_finish"):
+                    emitted_output = True
+                    if plan_mode and event.get("type") == "token":
+                        token_text = event.get("content")
+                        if isinstance(token_text, str):
+                            text_buffer.append(token_text)
                 await self._send_event(event)
+
+            if not had_error and not emitted_output:
+                had_error = True
+                error_message = "OpenCode completed without emitting assistant output."
+                self.log.error(
+                    "prompt.no_output",
+                    message_id=message_id,
+                    model=model,
+                    reasoning_effort=reasoning_effort,
+                )
 
             if had_error:
                 outcome = "error"
@@ -887,6 +919,70 @@ class AgentBridge:
             bytes=len(content),
         )
 
+    async def _ensure_opencode_session(self, requested_session_id: str | None = None) -> None:
+        """Ensure an OpenCode session is active before dispatching a prompt.
+
+        Precedence:
+          1. A session id already loaded (from disk on a restore) is
+             authoritative — _load_session_id validated it on connect, so keep it.
+          2. Else, if the control plane asked us to resume a specific session
+             (``opencodeSessionId`` on the prompt), adopt it after validating it
+             exists locally; on any failure fall back to creating a fresh one.
+          3. Else create a fresh session.
+
+        This is what makes a relaunched/restored sandbox continue the prior turn:
+        the control plane replays the stored id, and a restore that carried the
+        session forward adopts it instead of starting over. A first-turn failure
+        has no snapshot, so the dead id fails validation and we create fresh.
+        """
+        if self.opencode_session_id:
+            return
+
+        if requested_session_id and await self._adopt_opencode_session(requested_session_id):
+            return
+
+        await self._create_opencode_session()
+
+    async def _adopt_opencode_session(self, session_id: str) -> bool:
+        """Adopt a control-plane-supplied OpenCode session id after validating it.
+
+        Returns True when the session exists locally and was adopted; False when
+        it is missing/unreachable so the caller can fall back to creating a fresh
+        session (e.g. a first-turn relaunch where this sandbox never held it).
+        """
+        if not self.http_client:
+            return False
+
+        try:
+            resp = await self.http_client.get(
+                f"{self.opencode_base_url}/session/{session_id}",
+                timeout=self.OPENCODE_REQUEST_TIMEOUT,
+            )
+            if resp.status_code != 200:
+                self.log.info(
+                    "opencode.session.adopt_invalid",
+                    opencode_session_id=session_id,
+                    status_code=resp.status_code,
+                )
+                return False
+        except Exception as e:
+            self.log.warn(
+                "opencode.session.adopt_error",
+                opencode_session_id=session_id,
+                exc=e,
+            )
+            return False
+
+        self.opencode_session_id = session_id
+        self._has_sent_prompt_in_session = await self._session_has_user_prompt()
+        await self._save_session_id()
+        self.log.info(
+            "opencode.session.ensure",
+            opencode_session_id=session_id,
+            action="adopted",
+        )
+        return True
+
     async def _create_opencode_session(self) -> None:
         """Create a new OpenCode session."""
         if not self.http_client:
@@ -927,146 +1023,6 @@ class AgentBridge:
                     error_type=type(e).__name__,
                 )
                 await asyncio.sleep(retry_delay_seconds)
-
-    def _normalize_forwardable_session_title(self, title: object) -> str | None:
-        if not isinstance(title, str):
-            return None
-
-        trimmed = title.strip()
-        if not trimmed or self.OPENCODE_DEFAULT_TITLE_RE.match(trimmed):
-            return None
-        return trimmed
-
-    def _session_title_event_once(self, title: object) -> dict[str, str] | None:
-        trimmed = self._normalize_forwardable_session_title(title)
-        if trimmed is None:
-            return None
-        if trimmed == self._last_forwarded_session_title:
-            return None
-
-        self._last_forwarded_session_title = trimmed
-        return {"type": "session_title", "title": trimmed}
-
-    def _session_title_event_from_sse(
-        self, event_type: object, props: dict[str, Any]
-    ) -> dict[str, str] | None:
-        if event_type != "session.updated":
-            return None
-
-        info = props.get("info")
-        if not isinstance(info, dict):
-            return None
-
-        session_id = props.get("sessionID") or info.get("id")
-        if session_id != self.opencode_session_id:
-            return None
-
-        return self._session_title_event_once(info.get("title"))
-
-    def _normalize_forwardable_session_title(self, title: object) -> str | None:
-        if not isinstance(title, str):
-            return None
-
-        trimmed = title.strip()
-        if not trimmed or self.OPENCODE_DEFAULT_TITLE_RE.match(trimmed):
-            return None
-        return trimmed
-
-    def _session_title_event_once(self, title: object) -> dict[str, str] | None:
-        trimmed = self._normalize_forwardable_session_title(title)
-        if trimmed is None:
-            return None
-        if trimmed == self._last_forwarded_session_title:
-            return None
-
-        self._last_forwarded_session_title = trimmed
-        return {"type": "session_title", "title": trimmed}
-
-    def _session_title_event_from_sse(
-        self, event_type: object, props: dict[str, Any]
-    ) -> dict[str, str] | None:
-        if event_type != "session.updated":
-            return None
-
-        info = props.get("info")
-        if not isinstance(info, dict):
-            return None
-
-        session_id = props.get("sessionID") or info.get("id")
-        if session_id != self.opencode_session_id:
-            return None
-
-        return self._session_title_event_once(info.get("title"))
-
-    def _normalize_forwardable_session_title(self, title: object) -> str | None:
-        if not isinstance(title, str):
-            return None
-
-        trimmed = title.strip()
-        if not trimmed or self.OPENCODE_DEFAULT_TITLE_RE.match(trimmed):
-            return None
-        return trimmed
-
-    def _session_title_event_once(self, title: object) -> dict[str, str] | None:
-        trimmed = self._normalize_forwardable_session_title(title)
-        if trimmed is None:
-            return None
-        if trimmed == self._last_forwarded_session_title:
-            return None
-
-        self._last_forwarded_session_title = trimmed
-        return {"type": "session_title", "title": trimmed}
-
-    def _session_title_event_from_sse(
-        self, event_type: object, props: dict[str, Any]
-    ) -> dict[str, str] | None:
-        if event_type != "session.updated":
-            return None
-
-        info = props.get("info")
-        if not isinstance(info, dict):
-            return None
-
-        session_id = props.get("sessionID") or info.get("id")
-        if session_id != self.opencode_session_id:
-            return None
-
-        return self._session_title_event_once(info.get("title"))
-
-    def _normalize_forwardable_session_title(self, title: object) -> str | None:
-        if not isinstance(title, str):
-            return None
-
-        trimmed = title.strip()
-        if not trimmed or self.OPENCODE_DEFAULT_TITLE_RE.match(trimmed):
-            return None
-        return trimmed
-
-    def _session_title_event_once(self, title: object) -> dict[str, str] | None:
-        trimmed = self._normalize_forwardable_session_title(title)
-        if trimmed is None:
-            return None
-        if trimmed == self._last_forwarded_session_title:
-            return None
-
-        self._last_forwarded_session_title = trimmed
-        return {"type": "session_title", "title": trimmed}
-
-    def _session_title_event_from_sse(
-        self, event_type: object, props: dict[str, Any]
-    ) -> dict[str, str] | None:
-        if event_type != "session.updated":
-            return None
-
-        info = props.get("info")
-        if not isinstance(info, dict):
-            return None
-
-        session_id = props.get("sessionID") or info.get("id")
-        if session_id != self.opencode_session_id:
-            return None
-
-        return self._session_title_event_once(info.get("title"))
 
     def _normalize_forwardable_session_title(self, title: object) -> str | None:
         if not isinstance(title, str):
@@ -1339,6 +1295,7 @@ class AgentBridge:
         cumulative_text: dict[str, str] = {}
         emitted_tool_states: set[str] = set()
         allowed_assistant_msg_ids: set[str] = set()
+        user_message_ids: set[str] = {opencode_message_id}
         pending_parts: dict[str, list[tuple[dict[str, Any], Any]]] = {}
         pending_parts_total = 0
         pending_drop_logged = False
@@ -1574,7 +1531,16 @@ class AgentBridge:
                                         role = info.get("role", "")
                                         finish = info.get("finish", "")
 
-                                        parent_matches = parent_id == opencode_message_id
+                                        if role == "user" and oc_msg_id:
+                                            if oc_msg_id not in user_message_ids:
+                                                self.log.info(
+                                                    "bridge.user_message_id_discovered",
+                                                    expected_id=opencode_message_id,
+                                                    actual_id=oc_msg_id,
+                                                )
+                                            user_message_ids.add(oc_msg_id)
+
+                                        parent_matches = parent_id in user_message_ids
                                         is_compaction_summary = info.get("summary") is True
 
                                         self.log.debug(
@@ -1672,6 +1638,7 @@ class AgentBridge:
                                             opencode_message_id,
                                             cumulative_text,
                                             allowed_assistant_msg_ids,
+                                            user_message_ids=user_message_ids,
                                             compaction_occurred=compaction_occurred,
                                         ):
                                             yield final_event
@@ -1696,6 +1663,7 @@ class AgentBridge:
                                             opencode_message_id,
                                             cumulative_text,
                                             allowed_assistant_msg_ids,
+                                            user_message_ids=user_message_ids,
                                             compaction_occurred=compaction_occurred,
                                         ):
                                             yield final_event
@@ -1740,11 +1708,11 @@ class AgentBridge:
                                             message_id=message_id,
                                         )
 
-                        if loop.time() > prompt_start + self.PROMPT_MAX_DURATION:
+                        if loop.time() > prompt_start + self.prompt_max_duration:
                             elapsed = time.time() - start_time
                             self.log.error(
                                 "bridge.prompt_max_duration_timeout",
-                                timeout_ms=int(self.PROMPT_MAX_DURATION * 1000),
+                                timeout_ms=int(self.prompt_max_duration * 1000),
                                 elapsed_ms=int(elapsed * 1000),
                                 message_id=message_id,
                             )
@@ -1754,11 +1722,12 @@ class AgentBridge:
                                 opencode_message_id,
                                 cumulative_text,
                                 allowed_assistant_msg_ids,
+                                user_message_ids=user_message_ids,
                                 compaction_occurred=compaction_occurred,
                             ):
                                 yield final_event
                             raise RuntimeError(
-                                f"Prompt exceeded max duration of {self.PROMPT_MAX_DURATION:.0f}s."
+                                f"Prompt exceeded max duration of {self.prompt_max_duration:.0f}s."
                             )
 
         except TimeoutError:
@@ -1790,6 +1759,7 @@ class AgentBridge:
                 opencode_message_id,
                 cumulative_text,
                 allowed_assistant_msg_ids,
+                user_message_ids=user_message_ids,
                 compaction_occurred=compaction_occurred,
             ):
                 yield final_event
@@ -1813,6 +1783,7 @@ class AgentBridge:
         opencode_message_id: str,
         cumulative_text: dict[str, str],
         tracked_msg_ids: set[str] | None = None,
+        user_message_ids: set[str] | None = None,
         compaction_occurred: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         """Fetch final message state from API to ensure complete text.
@@ -1861,7 +1832,8 @@ class AgentBridge:
                 if role != "assistant":
                     continue
 
-                parent_matches = parent_id == opencode_message_id
+                valid_parent_ids = user_message_ids or {opencode_message_id}
+                parent_matches = parent_id in valid_parent_ids
                 in_tracked_set = tracked_msg_ids and msg_id in tracked_msg_ids
                 is_compaction_summary = info.get("summary") is True
 
@@ -1943,6 +1915,11 @@ class AgentBridge:
                 {
                     "type": "push_error",
                     "error": "No repository found",
+                    # branchName is required by the control-plane push resolver:
+                    # it keys the awaiting promise by branch and drops events
+                    # without it, so a missing branchName here would leave the
+                    # push promise unsettled until its 360s timeout.
+                    "branchName": branch_name,
                     "timestamp": time.time(),
                 }
             )

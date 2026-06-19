@@ -1,0 +1,301 @@
+on:
+  # ── CLI trigger ────────────────────────────────────────────────────────────
+  # Interactive development: run from your terminal and get a live VS Code
+  # endpoint in the browser.
+  #
+  # Minimal usage:
+  #   rwx run .rwx/sandbox.yml \
+  #     --init "slug=alice" \
+  #     --init "REPO_OWNER=acme" \
+  #     --init "REPO_NAME=my-project" \
+  #     --init "CODE_SERVER_PASSWORD=mysecret" \
+  #     --init "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
+  #
+  # VS Code URL (once the sandbox task starts):
+  #   https://{slug}--fountain.r1.rwx.run
+  #
+  # The SESSION_CONFIG env var is auto-constructed from SANDBOX_ID/REPO_OWNER/
+  # REPO_NAME when not supplied — sufficient for dev runs without a live
+  # control plane. For full functionality, deploy the control plane and pass
+  # CONTROL_PLANE_URL + SANDBOX_AUTH_TOKEN so the bridge can connect.
+  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+      # Per-session identifier — becomes part of the VS Code URL and the
+      # sandbox ID. Use your name or branch slug to avoid collisions.
+      slug: dev
+      # Target repository for the agent to clone and work on.
+      REPO_OWNER: ""
+      REPO_NAME: ""
+      # VS Code in-browser IDE password (code-server on :8080).
+      # Set this to activate the app endpoint; omit to skip code-server.
+      CODE_SERVER_PASSWORD: ""
+      # LLM API key. Add more provider-specific keys below as needed.
+      ANTHROPIC_API_KEY: ""
+      # Control plane fields — leave blank for dev runs without a deployed
+      # control plane. The bridge will retry until it can connect or times out.
+      SANDBOX_ID: dev-sandbox
+      CONTROL_PLANE_URL: ""
+      SANDBOX_AUTH_TOKEN: ""
+      SESSION_CONFIG: ""
+      VCS_HOST: github.com
+      VCS_CLONE_USERNAME: x-access-token
+      AGENT_SLACK_NOTIFY_ENABLED: "false"
+
+  # ── Dispatch trigger ───────────────────────────────────────────────────────
+  # Invoked programmatically by RwxSandboxProvider in the control plane
+  # (packages/control-plane/src/sandbox/providers/rwx-provider.ts).
+  # The key is derived from repoOwner-repoName — update if the repo is renamed.
+  dispatch:
+    key: onboardiq-background-agents
+    params:
+      # ── Control plane contract ───────────────────────────────────────────
+      - key: slug
+        required: true
+        description: Open-Inspect session ID (used as sandbox and URL identifier)
+      - key: SANDBOX_ID
+        required: true
+      - key: CONTROL_PLANE_URL
+        required: true
+      - key: SANDBOX_AUTH_TOKEN
+        required: true
+      - key: REPO_OWNER
+        required: true
+      - key: REPO_NAME
+        required: true
+      - key: SESSION_CONFIG
+        required: true
+        description: JSON-encoded SessionConfig (session_id, model, mcp_servers, etc.)
+      - key: VCS_HOST
+        default: github.com
+      - key: VCS_CLONE_USERNAME
+        default: x-access-token
+      - key: CODE_SERVER_PASSWORD
+        default: ""
+        description: >-
+          When set, starts code-server on :8080 and activates the VS Code endpoint.
+          Derived via HMAC in the control plane.
+      - key: AGENT_SLACK_NOTIFY_ENABLED
+        default: "false"
+      # ── LLM provider API keys ────────────────────────────────────────────
+      # These arrive via config.userEnvVars in the control plane.
+      # Add any additional provider keys your deployment uses.
+      - key: ANTHROPIC_API_KEY
+        default: ""
+    init:
+      commit-sha: ${{ event.git.sha }}
+      slug: ${{ event.dispatch.params.slug }}
+      SANDBOX_ID: ${{ event.dispatch.params.SANDBOX_ID }}
+      CONTROL_PLANE_URL: ${{ event.dispatch.params.CONTROL_PLANE_URL }}
+      SANDBOX_AUTH_TOKEN: ${{ event.dispatch.params.SANDBOX_AUTH_TOKEN }}
+      REPO_OWNER: ${{ event.dispatch.params.REPO_OWNER }}
+      REPO_NAME: ${{ event.dispatch.params.REPO_NAME }}
+      SESSION_CONFIG: ${{ event.dispatch.params.SESSION_CONFIG }}
+      VCS_HOST: ${{ event.dispatch.params.VCS_HOST }}
+      VCS_CLONE_USERNAME: ${{ event.dispatch.params.VCS_CLONE_USERNAME }}
+      CODE_SERVER_PASSWORD: ${{ event.dispatch.params.CODE_SERVER_PASSWORD }}
+      AGENT_SLACK_NOTIFY_ENABLED: ${{ event.dispatch.params.AGENT_SLACK_NOTIFY_ENABLED }}
+      ANTHROPIC_API_KEY: ${{ event.dispatch.params.ANTHROPIC_API_KEY }}
+    title: "Open-Inspect ${{ event.dispatch.params.slug }}"
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.2
+
+tasks:
+  # ── Source ────────────────────────────────────────────────────────────────
+  # Clone this repo so the sandbox-runtime Python package can be installed
+  # from packages/sandbox-runtime/. The git ref is the dispatched/CLI SHA.
+
+  - key: code
+    run: |
+      git clone \
+        --depth 100 \
+        "https://x-access-token:${{ github.token }}@github.com/onboardiq/background-agents.git" \
+        .
+      git checkout ${{ init.commit-sha }}
+
+  # ── System packages ───────────────────────────────────────────────────────
+
+  - key: system-packages
+    run: |
+      sudo apt-get update
+      sudo apt-get install -y \
+        git curl build-essential ca-certificates gnupg \
+        openssh-client jq unzip \
+        python3.12-dev python3-pip
+      sudo apt-get clean
+      # Ubuntu 24.04 ships only `python3`; the sandbox-runtime bridge launcher
+      # calls bare `python` to start the bridge subprocess.
+      sudo ln -sf /usr/bin/python3 /usr/local/bin/python
+
+  # ── Node.js 22 ───────────────────────────────────────────────────────────
+  # Matches the Node.js major version in the Modal base image (base.py).
+
+  - key: node
+    use: system-packages
+    run: |
+      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
+      sudo apt-get install -y nodejs
+      node --version
+      npm --version
+
+  # ── OpenCode 1.14.41 + plugin ─────────────────────────────────────────────
+  # Pinned to 1.14.41 — the last release before the Hono→Effect Schema
+  # migration broke SSE event publishing on the legacy /event endpoint.
+  # Newer versions connect and process prompts but stream zero events back
+  # (see OPENCODE_VERSION in packages/modal-infra/src/images/base.py).
+
+  - key: opencode
+    use: node
+    run: |
+      sudo npm install -g opencode-ai@1.14.41
+      sudo npm install -g @opencode-ai/plugin@1.14.41 zod
+      opencode --version || true
+
+  # Pre-stage OpenCode plugin deps into /app/opencode-deps.
+  # At boot, entrypoint._install_tools() copies these into .opencode/ so
+  # OpenCode's Npm.install() finds a pre-built package-lock.json and skips
+  # the slow arborist reify() that would otherwise block the first prompt.
+
+  - key: opencode-deps
+    use: opencode
+    run: |
+      sudo mkdir -p /app/opencode-deps
+      echo '{"name":"opencode-tools","type":"module","dependencies":{"@opencode-ai/plugin":"1.14.41"}}' \
+        | sudo tee /app/opencode-deps/package.json > /dev/null
+      cd /app/opencode-deps && sudo npm install --ignore-scripts --no-audit --no-fund
+
+  # ── code-server ───────────────────────────────────────────────────────────
+  # VS Code in the browser on :8080, served at the {slug} app endpoint.
+  # The supervisor starts code-server only when CODE_SERVER_PASSWORD is set.
+  # Version matches CODE_SERVER_VERSION in packages/modal-infra/src/images/base.py.
+
+  - key: code-server
+    use: system-packages
+    run: |
+      CODE_SERVER_VERSION="4.109.5"
+      curl -fsSL -o /tmp/code-server.deb \
+        "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_amd64.deb"
+      sudo dpkg -i /tmp/code-server.deb
+      rm /tmp/code-server.deb
+      code-server --version
+
+  # ── uv + sandbox-runtime ─────────────────────────────────────────────────
+  # Install uv then install the sandbox-runtime package from the cloned repo.
+  # The entrypoint, bridge, git credential helper, and custom tools all live
+  # in this package (packages/sandbox-runtime/).
+
+  - key: python-tools
+    use: system-packages
+    run: |
+      curl -LsSf https://astral.sh/uv/install.sh | sudo UV_INSTALL_DIR=/usr/local/bin sh
+      uv --version
+
+  - key: sandbox-runtime
+    use: [code, python-tools]
+    run: |
+      sudo /usr/local/bin/uv pip install --system --break-system-packages \
+        ./packages/sandbox-runtime
+      python3 -c "import sandbox_runtime; print('sandbox_runtime OK')"
+    filter:
+      - packages/sandbox-runtime/**
+
+  # ── Sandbox ──────────────────────────────────────────────────────────────
+  # Long-running Open-Inspect coding agent session.
+  #
+  # The supervisor (sandbox_runtime.entrypoint) orchestrates:
+  #   1. Git credential helper setup (tokens fetched live from control plane)
+  #   2. Clone the target repo (REPO_OWNER/REPO_NAME) into /workspace/
+  #   3. Run .openinspect/setup.sh then .openinspect/start.sh (if present)
+  #   4. Start OpenCode server on :4096 (internal; serves the agent)
+  #   5. Start the bridge (WebSocket → CONTROL_PLANE_URL/sessions/{id}/ws)
+  #   6. Start code-server on :8080 when CODE_SERVER_PASSWORD is set
+  #
+  # App endpoint — VS Code in the browser:
+  #   https://{slug}--fountain.r1.rwx.run
+  #
+  # The endpoint is live for the duration of the session (up to 2h). It
+  # proxies to code-server on :8080; returns connection refused if
+  # CODE_SERVER_PASSWORD was not provided (code-server never starts in
+  # that case, but the bridge and OpenCode continue running normally).
+  #
+  # Session-specific env vars are excluded from the cache key so ephemeral
+  # values (tokens, session IDs) don't bust the cached dependency layers.
+
+  - key: sandbox
+    use: [opencode-deps, sandbox-runtime, code-server]
+    agent:
+      cpus: 4
+      memory: 8gb
+    app:
+      endpoint: ${{ init.slug }}
+      port: 8080
+      timeout: 2h
+    run: |
+      # Create /workspace — Modal pre-creates this; RWX does not.
+      sudo mkdir -p /workspace
+      sudo chmod 777 /workspace
+
+      # Pre-create /run/oi so the git credential helper can write its cache.
+      # /run is root-owned (755); the non-root sandbox user can't mkdir there.
+      sudo mkdir -p /run/oi
+      sudo chown "$(id -un)" /run/oi
+
+      # Pre-install the git credential helper with sudo. The supervisor's
+      # Phase 0 writes this at boot but can't write to /usr/local/bin as
+      # a non-root user. Doing it here avoids the non-fatal warning and
+      # ensures git auth against the control plane works from the first clone.
+      printf '%s\n' '#!/bin/sh' \
+        'exec python3 -m sandbox_runtime.credentials.git_credential_helper "$@"' \
+        | sudo tee /usr/local/bin/oi-git-credentials > /dev/null
+      sudo chmod 0755 /usr/local/bin/oi-git-credentials
+      sudo git config --system credential.helper /usr/local/bin/oi-git-credentials
+      sudo git config --system credential.useHttpPath true
+
+      # For CLI dev runs where SESSION_CONFIG wasn't supplied, construct a
+      # minimal valid payload from the other init params so the supervisor
+      # can start without a running control plane.
+      if [ -z "${SESSION_CONFIG}" ]; then
+        export SESSION_CONFIG=$(printf \
+          '{"session_id":"%s","repo_owner":"%s","repo_name":"%s","provider":"anthropic","model":"claude-sonnet-4-6"}' \
+          "${SANDBOX_ID}" "${REPO_OWNER}" "${REPO_NAME}")
+      fi
+
+      exec python3 -m sandbox_runtime.entrypoint
+    env:
+      # Session identity (ephemeral — excluded from cache key)
+      SANDBOX_ID:
+        cache-key: excluded
+        value: ${{ init.SANDBOX_ID }}
+      CONTROL_PLANE_URL:
+        cache-key: excluded
+        value: ${{ init.CONTROL_PLANE_URL }}
+      SANDBOX_AUTH_TOKEN:
+        cache-key: excluded
+        value: ${{ init.SANDBOX_AUTH_TOKEN }}
+      SESSION_CONFIG:
+        cache-key: excluded
+        value: ${{ init.SESSION_CONFIG }}
+      # Target repo
+      REPO_OWNER: ${{ init.REPO_OWNER }}
+      REPO_NAME: ${{ init.REPO_NAME }}
+      VCS_HOST: ${{ init.VCS_HOST }}
+      VCS_CLONE_USERNAME: ${{ init.VCS_CLONE_USERNAME }}
+      # Sidecars
+      CODE_SERVER_PASSWORD:
+        cache-key: excluded
+        value: ${{ init.CODE_SERVER_PASSWORD }}
+      AGENT_SLACK_NOTIFY_ENABLED: ${{ init.AGENT_SLACK_NOTIFY_ENABLED }}
+      # GitHub CLI access
+      GH_TOKEN:
+        cache-key: excluded
+        value: ${{ github.token }}
+      # LLM API keys
+      ANTHROPIC_API_KEY:
+        cache-key: excluded
+        value: ${{ init.ANTHROPIC_API_KEY }}
+      # Runtime
+      PYTHONUNBUFFERED: "1"
+      NODE_ENV: development
+      NODE_PATH: /usr/lib/node_modules

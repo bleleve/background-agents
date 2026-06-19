@@ -46,14 +46,21 @@ A **session** is the core unit of work in Open-Inspect. Each session is:
 ### Session Lifecycle
 
 ```
-Created → Active → Archived
-            ↑
-            └── Can be restored from archive
+Created → Active ──┬─→ Completed            (turn finished cleanly)
+                   ├─→ Failed / Cancelled   (errored or stopped — resumable)
+                   └─→ Archived             (hidden from the list — restorable)
 ```
 
 Sessions start when you create one (via web or Slack). They remain active as long as there's work
-happening or recent activity. You can archive sessions to clean up your list, and restore them later
-if needed.
+happening or recent activity. A turn ends in `completed` (clean), `failed` (errored or timed out),
+or `cancelled` (stopped, or hit the duration cap); you can archive sessions to clean up your list
+and restore them later.
+
+`completed`, `failed`, `cancelled`, and `archived` are the **terminal** statuses
+(`TERMINAL_SESSION_STATUSES` in `@open-inspect/shared`): no prompt dispatches while a session sits
+in one, and entering one reconciles a sandbox still stuck in a boot status down to `stopped` so it
+no longer reads as "starting". A `failed`/`cancelled` session can be resumed (relaunching the
+sandbox if needed); a fresh prompt re-activates any of them.
 
 ### What's Stored in a Session
 
@@ -414,8 +421,12 @@ When you ask the agent to create a PR:
 
 1. Agent pushes the branch using brokered SCM credentials from the sandbox credential helper
 2. Control plane receives the branch name
-3. Control plane creates the PR using _your_ GitHub OAuth token
+3. Control plane creates the PR using _your_ GitHub OAuth token (GitHub logins)
 4. PR appears as created by you, not a bot
+
+If you signed in another way (e.g. Google) you have no GitHub OAuth token, so the control plane
+pushes the branch with the shared GitHub App credentials and returns a manual `pull/new` URL — the
+PR is attributed to the App bot rather than to you.
 
 This maintains proper code review workflows—you can't approve your own PRs.
 

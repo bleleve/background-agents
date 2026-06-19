@@ -40,6 +40,10 @@ const EXPECTED_TUNNEL_PORTS_ENV_VAR = "EXPECTED_TUNNEL_PORTS";
 const DEFAULT_SNAPSHOT_EXPIRATION_MS = 0;
 const BUILD_TIMEOUT_SECONDS = 1800;
 const VERCEL_MAX_SANDBOX_TIMEOUT_MS = 45 * 60 * 1000;
+// Safety buffer so the in-sandbox bridge self-times-out a prompt before Vercel
+// hard-kills the sandbox at VERCEL_MAX_SANDBOX_TIMEOUT_MS — turning an opaque
+// provider kill into a clean execution_complete with a reason.
+const VERCEL_PROMPT_MAX_DURATION_MARGIN_SECONDS = 120;
 const VERCEL_MEMORY_MIB_PER_VCPU = 2048;
 const VERCEL_SUPPORTED_VCPUS: readonly VercelVcpus[] = [1, 2, 4, 8];
 const VERCEL_MAX_VCPUS = VERCEL_SUPPORTED_VCPUS[VERCEL_SUPPORTED_VCPUS.length - 1];
@@ -337,6 +341,25 @@ export class VercelSandboxProvider implements SandboxProvider {
       REPO_NAME: config.repoName,
       SESSION_CONFIG: JSON.stringify(sessionConfig),
     });
+
+    // Vercel hard-kills the sandbox at VERCEL_MAX_SANDBOX_TIMEOUT_MS, which can
+    // be shorter than the requested lifetime. Surface the clamp, and bound the
+    // bridge's prompt timeout below the kill so a long prompt ends with a clean
+    // execution_complete + reason instead of an opaque provider kill. The bridge
+    // reads BRIDGE_PROMPT_MAX_DURATION via _resolve_timeout_seconds (it can only
+    // shorten, never extend, the bridge's built-in PROMPT_MAX_DURATION).
+    const requestedMs = (config.timeoutSeconds ?? DEFAULT_SANDBOX_TIMEOUT_SECONDS) * 1000;
+    const lifetimeMs = resolveVercelTimeoutMs(config.timeoutSeconds);
+    if (requestedMs > lifetimeMs) {
+      log.warn("Vercel sandbox lifetime clamped below requested", {
+        requested_ms: requestedMs,
+        cap_ms: VERCEL_MAX_SANDBOX_TIMEOUT_MS,
+        sandbox_id: config.sandboxId,
+      });
+    }
+    envVars.BRIDGE_PROMPT_MAX_DURATION = String(
+      Math.max(60, Math.floor(lifetimeMs / 1000) - VERCEL_PROMPT_MAX_DURATION_MARGIN_SECONDS)
+    );
 
     this.injectScmEnvVars(envVars);
 

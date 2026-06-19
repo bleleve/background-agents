@@ -86,6 +86,8 @@ export interface SandboxStorage {
   updateSandboxModalObjectId(modalObjectId: string): void;
   /** Update sandbox snapshot image ID */
   updateSandboxSnapshotImageId(sandboxId: string, imageId: string): void;
+  /** Clear the sandbox snapshot image ID (drop the restore pointer) */
+  clearSandboxSnapshotImageId(): void;
   /** Update last activity timestamp */
   updateSandboxLastActivity(timestamp: number): void;
   /** Update last heartbeat timestamp (last sign of life from the sandbox) */
@@ -231,9 +233,20 @@ export interface SlackAgentNotifyLookup {
  * Lightweight callback interface — the manager doesn't know what the callbacks do.
  */
 export interface LifecycleCallbacks {
-  /** Called when the sandbox is being terminated (heartbeat stale, inactivity timeout). */
+  /** Called when the sandbox is being terminated (heartbeat stale, inactivity
+   * timeout, connecting timeout), when the circuit breaker is open so no spawn
+   * is even attempted (`circuit_breaker_open`), or as a one-shot sweep for a
+   * prompt orphaned by an immediate spawn failure (`spawn_failed`). Lets the DO
+   * fail the in-flight or queued-but-undispatched message instead of leaving it
+   * stuck "pending" forever. The DO keeps the session retryable for the
+   * recoverable reasons (circuit_breaker_open, spawn_failed). */
   onSandboxTerminating?: (
-    reason: "connecting_timeout" | "heartbeat_stale" | "inactivity_timeout"
+    reason:
+      | "connecting_timeout"
+      | "heartbeat_stale"
+      | "inactivity_timeout"
+      | "circuit_breaker_open"
+      | "spawn_failed"
   ) => Promise<void>;
 }
 
@@ -306,6 +319,12 @@ export class SandboxLifecycleManager {
         type: "sandbox_error",
         error: `Sandbox spawning temporarily disabled after ${circuitBreakerState.failureCount} failures. Try again in ${Math.ceil((cbDecision.waitTimeMs || 0) / 1000)} seconds.`,
       });
+      // With the breaker now resetting on bridge connect (not spawn initiation),
+      // it can actually open. When it does, no spawn is attempted and no
+      // watchdog is armed, so reconcile the queued-but-undispatched prompt here
+      // — otherwise it would sit "pending" until the breaker window passes and
+      // a new prompt arrives.
+      await this.callbacks.onSandboxTerminating?.("circuit_breaker_open");
       return;
     }
 
@@ -391,6 +410,15 @@ export class SandboxLifecycleManager {
       });
       this.broadcaster.broadcast({ type: "sandbox_status", status: "spawning" });
 
+      // Arm the connecting-timeout watchdog BEFORE the (awaited) provider call.
+      // createSandbox can hang (network/provider stall); if it never returns we
+      // would never reach the post-spawn scheduleAlarm() below, leaving the
+      // sandbox "spawning" forever. evaluateConnectingTimeout() measures from
+      // created_at (set just above) and covers the "spawning" state, so this
+      // fires at created_at + connectingTimeout even if createSandbox hangs.
+      // On a successful connect it is naturally superseded by the inactivity alarm.
+      await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+
       this.log.info("Spawning sandbox", {
         event: "sandbox.spawn",
         expected_sandbox_id: expectedSandboxId,
@@ -404,16 +432,29 @@ export class SandboxLifecycleManager {
       ]);
       const { provider, model: modelId } = this.resolveProviderAndModel(session);
 
-      // Look up pre-built repo image (graceful fallback on failure)
+      // Look up pre-built repo image (graceful fallback on failure).
+      // Images are built on the default branch. When a session targets a
+      // non-default branch (e.g. a PR head), first try an exact branch match,
+      // then fall back to the most recent image regardless of branch so the
+      // sandbox can do a fast git-switch instead of a full cold clone.
       let repoImageId: string | null = null;
       let repoImageSha: string | null = null;
       if (this.repoImageLookup) {
         try {
-          const repoImage = await this.repoImageLookup.getLatestReady(
+          let repoImage = await this.repoImageLookup.getLatestReady(
             session.repo_owner,
             session.repo_name,
-            session.base_branch
+            session.base_branch ?? undefined
           );
+          if (!repoImage) {
+            // No branch-specific image — fall back to any ready image for this
+            // repo (typically the default-branch snapshot). The entrypoint will
+            // do a git fetch + checkout to the target branch on top of it.
+            repoImage = await this.repoImageLookup.getLatestReady(
+              session.repo_owner,
+              session.repo_name
+            );
+          }
           if (repoImage) {
             repoImageId = repoImage.provider_image_id;
             repoImageSha = repoImage.base_sha;
@@ -470,6 +511,11 @@ export class SandboxLifecycleManager {
       if (result.providerObjectId) {
         this.storeAndBroadcastProviderObjectId(result.providerObjectId);
       }
+      // A fresh spawn starts a new sandbox lineage. Drop any snapshot pointer
+      // from the previous lifecycle so that if THIS sandbox dies before taking
+      // its own snapshot, evaluateSpawnDecision falls through to a fresh spawn
+      // instead of restoring stale filesystem state from the old sandbox.
+      this.storage.clearSandboxSnapshotImageId();
       if (result.codeServerUrl && result.codeServerPassword) {
         await this.storeAndBroadcastCodeServer(result.codeServerUrl, result.codeServerPassword);
       }
@@ -491,8 +537,10 @@ export class SandboxLifecycleManager {
       // This alarm is naturally replaced by the inactivity alarm on successful connect.
       await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
 
-      // Reset circuit breaker on successful spawn initiation
-      this.storage.resetCircuitBreaker();
+      // NOTE: the circuit breaker is reset on a genuine bridge connect
+      // (onSandboxConnected), NOT here. createSandbox returning OK does not mean
+      // the sandbox connected — resetting here would zero the failure count
+      // before a connect-never-completes loop could ever open the breaker.
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to spawn sandbox";
       this.storage.setLastSpawnError(errorMessage, Date.now());
@@ -605,6 +653,12 @@ export class SandboxLifecycleManager {
       });
       this.broadcaster.broadcast({ type: "sandbox_status", status: "spawning" });
 
+      // Arm the connecting-timeout watchdog BEFORE the awaited provider call, so
+      // a hung restoreFromSnapshot (the Modal restore HTTP has no client-side
+      // timeout) cannot leave the sandbox pinned at "spawning" forever. Mirrors
+      // doSpawn(); the post-success scheduleAlarm below simply re-arms it.
+      await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+
       this.log.info("Restoring from snapshot", {
         event: "sandbox.restore",
         snapshot_image_id: snapshotImageId,
@@ -654,6 +708,14 @@ export class SandboxLifecycleManager {
         if (result.providerObjectId) {
           this.storeAndBroadcastProviderObjectId(result.providerObjectId);
         }
+        // A successful restore starts a new sandbox lineage (like a fresh
+        // spawn), so drop the consumed snapshot pointer. Otherwise, if the
+        // restored sandbox crashes before taking its own snapshot,
+        // evaluateSpawnDecision would re-restore the same now-stale image
+        // instead of falling back to a fresh spawn. triggerSnapshot() will
+        // repopulate snapshot_image_id once the new sandbox snapshots. Mirrors
+        // the clear in doSpawn().
+        this.storage.clearSandboxSnapshotImageId();
         if (result.codeServerUrl && result.codeServerPassword) {
           await this.storeAndBroadcastCodeServer(result.codeServerUrl, result.codeServerPassword);
         }
@@ -688,6 +750,20 @@ export class SandboxLifecycleManager {
           result.error || "Failed to restore from snapshot",
           Date.now()
         );
+        // Count a restore failure toward the circuit breaker. The restore path
+        // is otherwise exempt from throttling (it bypasses cooldown via the
+        // failed-status branch in evaluateSpawnDecision), so a permanently
+        // un-restorable snapshot would re-trigger restore on every prompt with
+        // no backoff. The breaker (checked before restore dispatch) closes that
+        // loop after the failure threshold.
+        this.storage.incrementCircuitBreakerFailure(Date.now());
+        // A permanent restore failure means the snapshot image is unusable
+        // (GC'd / not found). Drop the pointer so evaluateSpawnDecision falls
+        // through to a fresh spawn next time instead of re-restoring the same
+        // dead image. Transient failures keep the snapshot for a later retry.
+        if (result.errorType !== "transient") {
+          this.storage.clearSandboxSnapshotImageId();
+        }
         this.storage.updateSandboxStatus("failed");
         this.broadcaster.broadcast({
           type: "sandbox_error",
@@ -701,6 +777,13 @@ export class SandboxLifecycleManager {
         error: error instanceof Error ? error : String(error),
         snapshot_image_id: snapshotImageId,
       });
+      // Transient provider errors don't count toward the breaker (mirrors
+      // doSpawn); permanent/unknown errors do, and also drop the snapshot
+      // pointer so a dead image can't loop.
+      if (!(error instanceof SandboxProviderError) || error.errorType === "permanent") {
+        this.storage.incrementCircuitBreakerFailure(Date.now());
+        this.storage.clearSandboxSnapshotImageId();
+      }
       this.storage.updateSandboxStatus("failed");
       this.broadcaster.broadcast({
         type: "sandbox_error",
@@ -741,6 +824,11 @@ export class SandboxLifecycleManager {
       }
       this.broadcaster.broadcast({ type: "sandbox_status", status: "connecting" });
 
+      // Arm the connecting-timeout watchdog BEFORE the awaited provider call so
+      // a hung resume cannot pin the sandbox at "connecting" forever. Mirrors
+      // doSpawn()/restoreFromSnapshot(); re-armed on success below.
+      await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+
       const timeoutSeconds =
         session.spawn_source === "agent" ? CHILD_SANDBOX_TIMEOUT_SECONDS : undefined;
 
@@ -778,10 +866,16 @@ export class SandboxLifecycleManager {
 
       await this.storeAndBroadcastTunnelUrls(result.tunnelUrls);
       await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
-      this.storage.resetCircuitBreaker();
+      // Breaker reset happens on a genuine bridge connect (onSandboxConnected),
+      // not on the resume call returning OK — see doSpawn.
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to resume sandbox";
       this.storage.setLastSpawnError(errorMessage, Date.now());
+      // Count a resume failure toward the breaker (transient errors excepted),
+      // symmetric with doSpawn/restoreFromSnapshot.
+      if (!(error instanceof SandboxProviderError) || error.errorType === "permanent") {
+        this.storage.incrementCircuitBreakerFailure(Date.now());
+      }
       this.storage.updateSandboxStatus("failed");
       this.broadcaster.broadcast({
         type: "sandbox_error",
@@ -949,6 +1043,16 @@ export class SandboxLifecycleManager {
 
     // Skip if sandbox is already in terminal state
     if (sandbox.status === "stopped" || sandbox.status === "failed" || sandbox.status === "stale") {
+      // Orphan sweep: an immediate spawn/restore/resume failure sets status to
+      // "failed" synchronously, so the pre-armed connecting-timeout alarm lands
+      // here and would otherwise be dropped — leaving the queued prompt that
+      // triggered the spawn stuck "pending" forever. Fail it once (the DO keeps
+      // the session retryable for this reason). No-op if no message is stuck, so
+      // it's safe and idempotent; "stopped"/"stale" were already reconciled by
+      // their watchdogs, so this only does work for the immediate-failure case.
+      if (sandbox.status === "failed") {
+        await this.callbacks.onSandboxTerminating?.("spawn_failed");
+      }
       this.log.debug("Alarm: sandbox in terminal state, skipping", {
         sandbox_status: sandbox.status,
       });
@@ -971,7 +1075,20 @@ export class SandboxLifecycleManager {
         timeout_ms: this.config.connectingTimeout.timeoutMs,
       });
       await this.callbacks.onSandboxTerminating?.("connecting_timeout");
-      this.storage.updateSandboxStatus("failed");
+      // A sandbox that never connects is a spawn failure — count it toward the
+      // breaker (the connect-never-completes loop is otherwise invisible to it).
+      this.storage.incrementCircuitBreakerFailure(now);
+      // Clear the in-memory spawn flag: if the provider call hung, doSpawn's
+      // finally never ran, so without this every later spawn attempt would skip
+      // with "spawn already in progress" for the lifetime of this DO instance.
+      this.isSpawningSandbox = false;
+      // For provider-managed-stop providers (e.g. Daytona) the provider object
+      // remains resumable after stopProviderSandbox, so mark it "stopped" — the
+      // resume gate (stopped/stale) then recovers it in place on the next
+      // prompt instead of stranding the work into a cold fresh spawn. Snapshot/
+      // non-persistent providers (Modal/Vercel) stay "failed".
+      const terminalStatus: SandboxStatus = this.usesProviderManagedStop() ? "stopped" : "failed";
+      this.storage.updateSandboxStatus(terminalStatus);
       this.clearSandboxAccessState();
       if (this.canStopProviderSandbox()) {
         try {
@@ -982,21 +1099,29 @@ export class SandboxLifecycleManager {
           });
         }
       }
-      this.broadcaster.broadcast({ type: "sandbox_status", status: "failed" });
+      this.broadcaster.broadcast({ type: "sandbox_status", status: terminalStatus });
       this.broadcaster.broadcast({
         type: "sandbox_error",
-        error:
-          "Sandbox failed to connect within the allowed time. It will be retried on your next message.",
+        error: "Sandbox failed to connect within the allowed time. Resend your prompt to retry.",
       });
       return;
     }
 
-    // Check heartbeat health
-    const heartbeatHealth = evaluateHeartbeatHealth(
-      sandbox.last_heartbeat,
-      this.config.heartbeat,
-      now
-    );
+    // Check heartbeat health.
+    //
+    // Skip while the sandbox is still booting (spawning/connecting): during boot
+    // the in-sandbox supervisor's boot-progress pings are the liveness signal,
+    // recorded as `last_heartbeat`, and the connecting-timeout watchdog (above)
+    // is the sole authority for a stuck boot. Because heartbeat-stale (90s) is a
+    // shorter window than connecting-timeout (120s) and both read the same
+    // `last_heartbeat`, leaving this ungated would let heartbeat-stale always
+    // pre-empt the connecting timeout during a slow boot — marking a
+    // healthy-but-slow boot "stale" (and snapshotting a half-booted sandbox)
+    // instead of honoring the documented 120s connect tolerance.
+    const isBooting = sandbox.status === "spawning" || sandbox.status === "connecting";
+    const heartbeatHealth = isBooting
+      ? { isStale: false as const }
+      : evaluateHeartbeatHealth(sandbox.last_heartbeat, this.config.heartbeat, now);
 
     if (heartbeatHealth.isStale) {
       this.log.warn("Heartbeat stale", {
@@ -1333,5 +1458,11 @@ export class SandboxLifecycleManager {
   onSandboxConnected(): void {
     this.isSpawningSandbox = false;
     this.storage.setLastSpawnError(null, null);
+    // Reset the circuit breaker only on a genuine bridge connect — NOT when the
+    // provider call returned OK. This is what makes the breaker able to open on
+    // a connect-never-completes loop (provider accepts createSandbox but the
+    // bridge never connects); resetting at spawn initiation would zero the
+    // count before the failure is even known.
+    this.storage.resetCircuitBreaker();
   }
 }

@@ -19,6 +19,13 @@ const MODAL_APP_NAME = "open-inspect";
 // Modal's default environment name; unrelated to the git branch named "main".
 const DEFAULT_MODAL_ENVIRONMENT = "main";
 
+// Hard client-side ceiling for the createSandbox / restoreSandbox HTTP calls.
+// Without it a hung Modal request never returns, so the spawn/restore await
+// never settles, the finally that resets the in-memory spawning flag never
+// runs, and the sandbox stays "spawning" forever. Mirrors the AbortController
+// pattern used by the Daytona REST client.
+const MODAL_SANDBOX_REQUEST_TIMEOUT_MS = 120_000;
+
 /**
  * Build the Modal endpoint workspace slug from the raw workspace and environment web suffix.
  */
@@ -66,6 +73,14 @@ export interface CreateSandboxRequest {
   branch?: string;
   codeServerEnabled?: boolean;
   agentSlackNotifyEnabled?: boolean;
+  /**
+   * Generic map of per-tool feature flags. Each entry maps a tool filename
+   * (e.g. "ast-anchor.js") to a boolean; true means the tool is installed in
+   * the sandbox. Keys are converted to AGENT_TOOL_<UPPER_SNAKE> env vars and
+   * read by AGENT_TOOLS_GATED_ON_ENV in entrypoint.py. Takes precedence over
+   * the legacy agentSlackNotifyEnabled for new tools.
+   */
+  agentToolFlags?: Record<string, boolean>;
   mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
   opencodeUserConfig?: string;
@@ -97,6 +112,7 @@ export interface RestoreSandboxRequest {
   branch?: string;
   codeServerEnabled?: boolean;
   agentSlackNotifyEnabled?: boolean;
+  agentToolFlags?: Record<string, boolean>;
   mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
   opencodeUserConfig?: string;
@@ -240,11 +256,15 @@ export class ModalClient {
     let httpStatus: number | undefined;
     let outcome: "success" | "error" = "error";
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), MODAL_SANDBOX_REQUEST_TIMEOUT_MS);
+
     try {
       const headers = await this.getPostHeaders(correlation);
       const response = await fetch(this.createSandboxUrl, {
         method: "POST",
         headers,
+        signal: controller.signal,
         body: JSON.stringify({
           session_id: request.sessionId,
           sandbox_id: request.sandboxId || null, // Use control-plane-generated ID
@@ -263,6 +283,7 @@ export class ModalClient {
           branch: request.branch || null,
           code_server_enabled: request.codeServerEnabled ?? false,
           agent_slack_notify_enabled: request.agentSlackNotifyEnabled ?? false,
+          agent_tool_flags: request.agentToolFlags ?? null,
           mcp_servers: request.mcpServers || null,
           sandbox_settings: request.sandboxSettings ?? null,
           opencode_user_config: request.opencodeUserConfig ?? null,
@@ -302,7 +323,16 @@ export class ModalClient {
         ttydUrl: result.data.ttyd_url,
         tunnelUrls: result.data.tunnel_urls,
       };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new ModalApiError(
+          `Modal createSandbox timed out after ${MODAL_SANDBOX_REQUEST_TIMEOUT_MS}ms`,
+          504
+        );
+      }
+      throw error;
     } finally {
+      clearTimeout(timeoutId);
       log.info("modal.request", {
         event: "modal.request",
         endpoint,
@@ -330,11 +360,15 @@ export class ModalClient {
     let httpStatus: number | undefined;
     let outcome: "success" | "error" = "error";
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), MODAL_SANDBOX_REQUEST_TIMEOUT_MS);
+
     try {
       const headers = await this.getPostHeaders(correlation);
       const response = await fetch(this.restoreSandboxUrl, {
         method: "POST",
         headers,
+        signal: controller.signal,
         body: JSON.stringify({
           snapshot_image_id: request.snapshotImageId,
           session_config: buildSessionConfig(request),
@@ -345,6 +379,7 @@ export class ModalClient {
           timeout_seconds: request.timeoutSeconds || null,
           code_server_enabled: request.codeServerEnabled ?? false,
           agent_slack_notify_enabled: request.agentSlackNotifyEnabled ?? false,
+          agent_tool_flags: request.agentToolFlags ?? null,
           sandbox_settings: request.sandboxSettings ?? null,
           opencode_user_config: request.opencodeUserConfig ?? null,
         }),
@@ -380,7 +415,16 @@ export class ModalClient {
         ttydUrl: result.data?.ttyd_url,
         tunnelUrls: result.data?.tunnel_urls,
       };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new ModalApiError(
+          `Modal restoreSandbox timed out after ${MODAL_SANDBOX_REQUEST_TIMEOUT_MS}ms`,
+          504
+        );
+      }
+      throw error;
     } finally {
+      clearTimeout(timeoutId);
       log.info("modal.request", {
         event: "modal.request",
         endpoint,

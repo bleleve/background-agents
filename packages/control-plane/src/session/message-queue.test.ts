@@ -94,6 +94,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
     getProcessingMessage: vi.fn(() => null as { id: string } | null),
     getNextPendingMessage: vi.fn(() => null as MessageRow | null),
     updateMessageToProcessing: vi.fn(),
+    revertMessageToPending: vi.fn(),
     getParticipantById: vi.fn(() => createParticipant()),
     updateParticipantCoalesce: vi.fn(),
     updateParticipantRole: vi.fn(),
@@ -116,6 +117,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
   const wsManager = {
     getSandboxSocket: vi.fn(() => null as WebSocket | null),
     send: vi.fn(() => true),
+    clearSandboxSocket: vi.fn(),
   };
 
   const participantService = {
@@ -133,6 +135,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
   const reconcileSessionStatusAfterExecution = vi.fn(async (_success: boolean) => {});
   const updateLastActivity = vi.fn();
   const waitUntil = vi.fn();
+  const getSession = vi.fn(() => createSession());
 
   const queue = new SessionMessageQueue({
     env: {} as Env,
@@ -151,7 +154,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
     scmProvider: "github",
     getClientInfo: options?.getClientInfo ?? (() => createClientInfo()),
     validateReasoningEffort: vi.fn(() => null),
-    getSession: vi.fn(() => createSession()),
+    getSession,
     updateLastActivity,
     spawnSandbox,
     broadcast,
@@ -170,6 +173,7 @@ function buildQueue(options?: { getClientInfo?: (ws: WebSocket) => ClientInfo | 
     setSessionStatus,
     reconcileSessionStatusAfterExecution,
     waitUntil,
+    getSession,
   };
 }
 
@@ -247,6 +251,26 @@ describe("SessionMessageQueue", () => {
     expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: true });
   });
 
+  it("rolls the message back to pending and respawns when the prompt send fails", async () => {
+    const h = buildQueue();
+    const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage({ id: "msg-x" }));
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+    h.wsManager.send.mockReturnValue(false); // delivery fails
+
+    await h.queue.processMessageQueue();
+
+    // Optimistic processing commit is rolled back, not left stuck.
+    expect(h.repository.updateMessageToProcessing).toHaveBeenCalledWith(
+      "msg-x",
+      expect.any(Number)
+    );
+    expect(h.repository.revertMessageToPending).toHaveBeenCalledWith("msg-x");
+    expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });
+    expect(h.wsManager.clearSandboxSocket).toHaveBeenCalled();
+    expect(h.spawnSandbox).toHaveBeenCalled();
+  });
+
   it("omits resumeContext when no plan is saved", async () => {
     const h = buildQueue();
     const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
@@ -291,6 +315,40 @@ describe("SessionMessageQueue", () => {
     });
   });
 
+  it("carries the stored opencodeSessionId on the prompt command so the sandbox can resume", async () => {
+    const h = buildQueue();
+    const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage());
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+    h.getSession.mockReturnValue(createSession({ opencode_session_id: "oc-42" }));
+
+    await h.queue.processMessageQueue();
+
+    const promptCall = h.wsManager.send.mock.calls.find(
+      (call: unknown[]) => (call[1] as { type?: string } | undefined)?.type === "prompt"
+    ) as unknown[] | undefined;
+    expect(promptCall).toBeDefined();
+    const command = promptCall![1] as { opencodeSessionId?: string };
+    expect(command.opencodeSessionId).toBe("oc-42");
+  });
+
+  it("omits opencodeSessionId when the session has none stored", async () => {
+    const h = buildQueue();
+    const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage());
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+    h.getSession.mockReturnValue(createSession({ opencode_session_id: null }));
+
+    await h.queue.processMessageQueue();
+
+    const promptCall = h.wsManager.send.mock.calls.find(
+      (call: unknown[]) => (call[1] as { type?: string } | undefined)?.type === "prompt"
+    ) as unknown[] | undefined;
+    expect(promptCall).toBeDefined();
+    const command = promptCall![1] as { opencodeSessionId?: string };
+    expect(command.opencodeSessionId).toBeUndefined();
+  });
+
   it("marks processing message failed and broadcasts synthetic completion on stop", async () => {
     const h = buildQueue();
     const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
@@ -302,7 +360,8 @@ describe("SessionMessageQueue", () => {
     expect(h.repository.updateMessageCompletion).toHaveBeenCalledWith(
       "msg-9",
       "failed",
-      expect.any(Number)
+      expect.any(Number),
+      "Execution was stopped"
     );
     expect(h.repository.upsertExecutionCompleteEvent).toHaveBeenCalledWith(
       "msg-9",
@@ -312,7 +371,8 @@ describe("SessionMessageQueue", () => {
     expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });
     expect(h.wsManager.send).toHaveBeenCalledWith(sandboxWs, { type: "stop" });
     expect(h.waitUntil).toHaveBeenCalledTimes(1);
-    expect(h.reconcileSessionStatusAfterExecution).toHaveBeenCalledWith(false);
+    // A stop is a cancellation, not a failure.
+    expect(h.reconcileSessionStatusAfterExecution).toHaveBeenCalledWith(false, true);
   });
 
   it("suppresses session status reconcile when stopExecution is called with suppress flag", async () => {
@@ -321,6 +381,51 @@ describe("SessionMessageQueue", () => {
 
     await h.queue.stopExecution({ suppressStatusReconcile: true });
 
+    expect(h.reconcileSessionStatusAfterExecution).not.toHaveBeenCalled();
+  });
+
+  it("fails all queued pending messages with a cancelled completion when failPending is set", async () => {
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue(null);
+    // Two queued prompts, then the queue drains.
+    h.repository.getNextPendingMessage
+      .mockReturnValueOnce(createMessage({ id: "p1" }))
+      .mockReturnValueOnce(createMessage({ id: "p2" }))
+      .mockReturnValue(null);
+
+    await h.queue.stopExecution({ suppressStatusReconcile: true, failPending: true });
+
+    for (const id of ["p1", "p2"]) {
+      expect(h.repository.updateMessageCompletion).toHaveBeenCalledWith(
+        id,
+        "failed",
+        expect.any(Number),
+        "Execution was cancelled"
+      );
+      expect(h.repository.upsertExecutionCompleteEvent).toHaveBeenCalledWith(
+        id,
+        expect.objectContaining({ type: "execution_complete", success: false, cancelled: true }),
+        expect.any(Number)
+      );
+    }
+  });
+
+  it("keeps the session active (no reconcile) when failing a stuck message with keepSessionActive", async () => {
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue(null);
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage({ id: "msg-orphan" }));
+
+    await h.queue.failStuckProcessingMessage("spawn_failed", { keepSessionActive: true });
+
+    // The stuck turn is ended (message failed + completion callback) ...
+    expect(h.repository.updateMessageCompletion).toHaveBeenCalledWith(
+      "msg-orphan",
+      "failed",
+      expect.any(Number),
+      "Sandbox never became ready, so the prompt did not run: the sandbox failed to start"
+    );
+    expect(h.callbackService.notifyComplete).toHaveBeenCalled();
+    // ... but the session is left retryable, not reconciled to failed.
     expect(h.reconcileSessionStatusAfterExecution).not.toHaveBeenCalled();
   });
 
@@ -334,7 +439,7 @@ describe("SessionMessageQueue", () => {
     expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
       "msg-timeout",
       false,
-      "Execution interrupted: sandbox stopped due to inactivity"
+      "Execution interrupted while the agent was running: the sandbox stopped due to inactivity"
     );
     // A timeout is a genuine failure, not a deliberate stop — it must NOT be
     // flagged cancelled (the flow renders it red, not neutral).
@@ -354,7 +459,7 @@ describe("SessionMessageQueue", () => {
     expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
       "msg-generic",
       false,
-      "Execution interrupted: sandbox_crashed"
+      "Execution interrupted while the agent was running: sandbox_crashed"
     );
   });
 
@@ -372,6 +477,50 @@ describe("SessionMessageQueue", () => {
       false,
       "Execution interrupted: sandbox crashed unexpectedly"
     );
+  });
+
+  it("fails a queued (pending) message when none is processing — orphan watchdog", async () => {
+    const h = buildQueue();
+    // No message in flight, but a prompt was enqueued and never dispatched
+    // because the sandbox failed to connect. Without this fallback the session
+    // would hang as "active"/"created" forever.
+    h.repository.getProcessingMessage.mockReturnValue(null);
+    h.repository.getNextPendingMessage.mockReturnValue(createMessage({ id: "msg-pending" }));
+
+    await h.queue.failStuckProcessingMessage("connecting_timeout");
+
+    expect(h.reconcileSessionStatusAfterExecution).toHaveBeenCalledWith(false);
+    expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
+      "msg-pending",
+      false,
+      "Sandbox never became ready, so the prompt did not run: the sandbox failed to connect in time"
+    );
+  });
+
+  it("distinguishes a mid-execution interruption from a prompt that never ran", async () => {
+    // Same connecting_timeout reason, but a processing message means the agent
+    // had already started — so it must NOT be reported as "never ran".
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue({ id: "msg-running" });
+
+    await h.queue.failStuckProcessingMessage("connecting_timeout");
+
+    expect(h.callbackService.notifyComplete).toHaveBeenCalledWith(
+      "msg-running",
+      false,
+      "Execution interrupted while the agent was running: the sandbox failed to connect in time"
+    );
+  });
+
+  it("no-ops when neither a processing nor a pending message exists", async () => {
+    const h = buildQueue();
+    h.repository.getProcessingMessage.mockReturnValue(null);
+    h.repository.getNextPendingMessage.mockReturnValue(null);
+
+    await h.queue.failStuckProcessingMessage("connecting_timeout");
+
+    expect(h.reconcileSessionStatusAfterExecution).not.toHaveBeenCalled();
+    expect(h.callbackService.notifyComplete).not.toHaveBeenCalled();
   });
 
   describe("enqueuePromptFromApi", () => {

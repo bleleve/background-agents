@@ -37,8 +37,18 @@ setup instructions.
 | Model ID                | Display name | Description   | Reasoning efforts | Default effort |
 | ----------------------- | ------------ | ------------- | ----------------- | -------------- |
 | `opencode/kimi-k2.5`    | Kimi K2.5    | Moonshot AI   | Not supported     | N/A            |
+| `opencode/kimi-k2.6`    | Kimi K2.6    | Moonshot AI   | Not supported     | N/A            |
 | `opencode/minimax-m2.5` | MiniMax M2.5 | MiniMax       | Not supported     | N/A            |
+| `opencode/qwen3.7-max`  | Qwen3.7 Max  | Alibaba Cloud | Not supported     | N/A            |
 | `opencode/glm-5`        | GLM 5        | Z.ai 744B MoE | Not supported     | N/A            |
+| `opencode/glm-5.1`      | GLM 5.1      | Z.ai          | Not supported     | N/A            |
+
+## Cloudflare Workers AI
+
+| Model ID                                              | Display name | Description           | Reasoning efforts | Default effort |
+| ----------------------------------------------------- | ------------ | --------------------- | ----------------- | -------------- |
+| `cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code` | Kimi K2.7    | Cloudflare Workers AI | Not supported     | N/A            |
+| `cloudflare-workers-ai/@cf/zai-org/glm-5.2`           | GLM 5.2      | Cloudflare Workers AI | Not supported     | N/A            |
 
 ## DeepSeek
 

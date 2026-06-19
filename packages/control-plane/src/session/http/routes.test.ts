@@ -22,6 +22,7 @@ describe("createSessionInternalRoutes", () => {
       listArtifacts: noopHandler(),
       listMessages: noopHandler(),
       createPr: noopHandler(),
+      updatePrState: noopHandler(),
       wsToken: noopHandler(),
       updateTitle: noopHandler(),
       archive: noopHandler(),
@@ -40,6 +41,7 @@ describe("createSessionInternalRoutes", () => {
       listPlans: noopHandler(),
       approvePlan: noopHandler(),
       rejectPlan: noopHandler(),
+      supersede: noopHandler(),
     });
 
     const methodPathSet = new Set(routes.map((route) => `${route.method} ${route.path}`));
@@ -59,6 +61,7 @@ describe("createSessionInternalRoutes", () => {
         `GET ${SessionInternalPaths.artifacts}`,
         `GET ${SessionInternalPaths.messages}`,
         `POST ${SessionInternalPaths.createPr}`,
+        `POST ${SessionInternalPaths.updatePrState}`,
         `POST ${SessionInternalPaths.wsToken}`,
         `POST ${SessionInternalPaths.updateTitle}`,
         `POST ${SessionInternalPaths.archive}`,
@@ -77,6 +80,7 @@ describe("createSessionInternalRoutes", () => {
         `GET ${SessionInternalPaths.plans}`,
         `POST ${SessionInternalPaths.planApprove}`,
         `POST ${SessionInternalPaths.planReject}`,
+        `POST ${SessionInternalPaths.supersede}`,
       ])
     );
   });

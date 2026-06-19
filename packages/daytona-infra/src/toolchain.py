@@ -56,6 +56,8 @@ def build_base_image(repo_root: Path) -> Image:
             "npm install -g oxlint@latest",
             "oxlint --version",
             "npm install -g typescript-language-server@5.3.0",
+            # web-tree-sitter + grammars for ast-anchor / validate-suggestion tools.
+            "npm install -g web-tree-sitter@^0.25.10 tree-sitter-typescript tree-sitter-ruby",
             f"curl -fsSL -o /tmp/rtk.tar.gz "
             f"https://github.com/rtk-ai/rtk/releases/download/v{RTK_VERSION}/rtk-x86_64-unknown-linux-musl.tar.gz",
             "tar -xzf /tmp/rtk.tar.gz -C /usr/local/bin rtk",

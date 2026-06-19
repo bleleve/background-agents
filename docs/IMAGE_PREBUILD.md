@@ -121,8 +121,13 @@ Check the error message shown in the Images settings page. Common causes:
 - **Setup script errors** — Your `scripts/.openinspect/setup.sh` is failing. Test it locally or
   check the script for commands that might not work in the sandbox environment (Debian Linux with
   Node.js, Python, and common dev tools).
-- **Timeout** — Builds have a 30-minute limit. If your setup takes longer, look for ways to optimize
-  it (e.g., use faster package managers, reduce dependencies).
+- **Setup timeout** — `scripts/.openinspect/setup.sh` has a 30-minute limit. If it takes longer,
+  speed it up (faster package managers, fewer dependencies).
+- **Snapshot timeout** — After setup runs, the resulting filesystem is captured as a snapshot, which
+  has its own time limit. Very large images (huge `node_modules`, many baked Docker images, large
+  caches) can fail here with `Timed out waiting for image to be created`, even though setup itself
+  succeeded. Reduce the image footprint — prune caches and avoid baking large artifacts you don't
+  need at runtime. (Operators can also raise the ceiling via `IMAGE_SNAPSHOT_TIMEOUT_SECONDS`.)
 
 The system automatically retries on the next scheduled run, so transient failures (network issues,
 temporary service outages) resolve themselves.

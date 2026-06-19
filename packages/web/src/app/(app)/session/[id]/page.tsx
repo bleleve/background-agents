@@ -28,6 +28,12 @@ import { PlanApprovalBanner } from "@/components/plan-approval-banner";
 import { copyToClipboard, formatModelNameLower } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { shouldWarmForPrompt } from "@/lib/sandbox-warming";
+import { deriveCanRelaunchSandbox } from "@/lib/relaunch-gating";
+import {
+  BOOTING_SANDBOX_STATUSES,
+  RESUMABLE_SESSION_STATUSES,
+  resolveDisplaySandboxStatus,
+} from "@/components/sidebar/sandbox-statuses";
 import { archiveSession } from "@/lib/archive-session";
 import {
   isArchivedSessionListKey,
@@ -43,6 +49,7 @@ import {
   parseReviewSessionPrNumber,
   type ModelCategory,
   type PlanArtifact,
+  type SandboxStatus,
 } from "@open-inspect/shared";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
 import { ReasoningEffortPills } from "@/components/reasoning-effort-pills";
@@ -553,13 +560,38 @@ function SessionContent({
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isRelaunching, setIsRelaunching] = useState(false);
 
-  // A dead sandbox (stopped/failed/stale) can be brought back without sending a
-  // prompt. Hidden while a turn is processing or once the sandbox is live again;
-  // the resulting sandbox_status broadcasts drive the indicator from there.
+  // The composer "Resume" button targets an *interrupted* session — `failed` or
+  // `cancelled` (the turn errored, was stopped, or hit the duration cap). It
+  // resumes that turn whether the sandbox is down (relaunch the sandbox, then
+  // resume) or still live (resume in place on the connected sandbox, no
+  // respawn). The discriminator is the SESSION status, not the sandbox status:
+  // an interrupted turn often leaves the sandbox `stopped`, but a stopped *turn*
+  // can leave the sandbox `ready`. A non-interrupted session whose sandbox went
+  // idle is recovered via the sidebar "Restart" link instead (plain spawn, no
+  // resume). Hidden while processing or mid-transition; see deriveCanRelaunchSandbox.
   const sandboxStatus = sessionState?.sandboxStatus;
-  const canRelaunchSandbox =
+  const sessionStatus = sessionState?.status;
+  // Status to *show*: a terminal session never has a sandbox worth booting, so a
+  // boot status pinned on it (stale "spawning" etc.) is collapsed to "stopped"
+  // to avoid a phantom "Starting sandbox…". Gating logic below keeps the raw
+  // status. See resolveDisplaySandboxStatus.
+  const displaySandboxStatus = resolveDisplaySandboxStatus(sandboxStatus, sessionStatus);
+  const canRelaunchSandbox = deriveCanRelaunchSandbox({
+    sandboxStatus,
+    sessionStatus,
+    isProcessing,
+  });
+  const sessionIsResumable = !!sessionStatus && RESUMABLE_SESSION_STATUSES.has(sessionStatus);
+
+  // Warm-on-type applies only to a stopped/idle sandbox of a non-interrupted
+  // session: typing a real follow-up pre-warms it so it's ready by submit,
+  // mirroring the new-session prompt's warm-on-type. An interrupted (failed/
+  // cancelled) session must be recovered through the explicit Resume button,
+  // never silently on a keystroke.
+  const canWarmSandbox =
     !isProcessing &&
-    (sandboxStatus === "stopped" || sandboxStatus === "failed" || sandboxStatus === "stale");
+    !sessionIsResumable &&
+    (sandboxStatus === "stopped" || sandboxStatus === "stale");
 
   const handleRelaunchSandbox = useCallback(async () => {
     setIsRelaunching(true);
@@ -578,20 +610,14 @@ function SessionContent({
     }
   }, [sessionId]);
 
-  // Warm a stopped/idle sandbox once a follow-up shows real intent, so it's
-  // ready by submit — mirrors the new-session prompt's warm-on-type. The guard
-  // ref keeps it to one relaunch per down-cycle: canRelaunchSandbox can briefly
-  // stay true between the relaunch POST resolving and the sandbox_status
-  // broadcast arriving, so we must dedupe rather than rely on status alone.
+  // The guard ref keeps warming to one relaunch per down-cycle: canWarmSandbox
+  // can briefly stay true between the relaunch POST resolving and the
+  // sandbox_status broadcast arriving, so we must dedupe rather than rely on
+  // status alone.
   const warmRequestedRef = useRef(false);
   useEffect(() => {
-    // Sandbox is live (or coming up) again — allow the next stop→type cycle to warm.
-    if (
-      sandboxStatus &&
-      sandboxStatus !== "stopped" &&
-      sandboxStatus !== "failed" &&
-      sandboxStatus !== "stale"
-    ) {
+    // Sandbox left the stopped/stale idle state — allow the next idle→type cycle to warm.
+    if (sandboxStatus && sandboxStatus !== "stopped" && sandboxStatus !== "stale") {
       warmRequestedRef.current = false;
     }
   }, [sandboxStatus]);
@@ -600,7 +626,7 @@ function SessionContent({
     handleInputChange(e);
     if (
       shouldWarmForPrompt(e.target.value) &&
-      canRelaunchSandbox &&
+      canWarmSandbox &&
       !isRelaunching &&
       !warmRequestedRef.current
     ) {
@@ -874,6 +900,7 @@ function SessionContent({
                     })
                   )}
                   {isProcessing && <ThinkingIndicator />}
+                  {!isProcessing && <SandboxStatusIndicator status={displaySandboxStatus} />}
 
                   <div ref={messagesEndRef} />
                 </div>
@@ -899,6 +926,7 @@ function SessionContent({
           participants={participants}
           events={events}
           artifacts={artifacts}
+          isProcessing={isProcessing}
           terminalOpen={terminalOpen}
           onToggleTerminal={toggleTerminal}
           onOpenMedia={setSelectedMediaArtifactId}
@@ -916,6 +944,7 @@ function SessionContent({
           participants={participants}
           events={events}
           artifacts={artifacts}
+          isProcessing={isProcessing}
           terminalOpen={terminalOpen}
           onToggleTerminal={toggleTerminal}
           onOpenMedia={setSelectedMediaArtifactId}
@@ -997,8 +1026,8 @@ function SessionContent({
                     onClick={handleRelaunchSandbox}
                     disabled={isRelaunching}
                     className="p-2 text-warning hover:bg-warning-muted disabled:opacity-30 disabled:cursor-not-allowed transition"
-                    title="Relaunch sandbox"
-                    aria-label="Relaunch sandbox"
+                    title="Resume"
+                    aria-label="Resume the interrupted turn (relaunches the sandbox if it is down)"
                   >
                     <RefreshIcon className={`w-5 h-5${isRelaunching ? " animate-spin" : ""}`} />
                   </button>
@@ -1122,6 +1151,25 @@ function ThinkingIndicator() {
     <div className="bg-card p-4 flex items-center gap-2">
       <span className="inline-block w-2 h-2 bg-accent rounded-full animate-pulse" />
       <span className="text-sm text-muted-foreground">Thinking...</span>
+    </div>
+  );
+}
+
+/**
+ * Shows that the sandbox is starting while it boots, so the message area isn't
+ * blank between sending a prompt and the agent starting. Mirrors
+ * ThinkingIndicator but in blue, and hands off to "Thinking..." once the agent
+ * starts (isProcessing). Deliberately one generic label rather than a per-state
+ * message: the user just needs to know the sandbox is coming up, not which
+ * micro-phase it's in. Ready/running/snapshotting and terminal sandbox states
+ * (stopped/failed/stale) render nothing here.
+ */
+function SandboxStatusIndicator({ status }: { status?: SandboxStatus | null }) {
+  if (!status || !BOOTING_SANDBOX_STATUSES.has(status)) return null;
+  return (
+    <div className="bg-card p-4 flex items-center gap-2">
+      <span className="inline-block w-2 h-2 bg-info rounded-full animate-pulse" />
+      <span className="text-sm text-muted-foreground">Starting sandbox...</span>
     </div>
   );
 }

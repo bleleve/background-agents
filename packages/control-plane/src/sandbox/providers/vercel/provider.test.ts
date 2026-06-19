@@ -252,6 +252,18 @@ describe("VercelSandboxProvider", () => {
     );
   });
 
+  it("propagates a bridge prompt cap below the Vercel sandbox lifetime", async () => {
+    const client = createMockClient();
+    const provider = new VercelSandboxProvider(client, providerConfig);
+
+    await provider.createSandbox({ ...baseCreateConfig, timeoutSeconds: 60 * 60 });
+
+    const env = vi.mocked(client.createSandbox).mock.calls[0][0].env;
+    // 45-min cap (2700s) minus the 120s safety margin so the bridge self-stops
+    // before Vercel hard-kills the sandbox.
+    expect(env?.BRIDGE_PROMPT_MAX_DURATION).toBe("2580");
+  });
+
   it("maps sandbox CPU and memory settings to Vercel vCPU resources", async () => {
     const client = createMockClient();
     const provider = new VercelSandboxProvider(client, providerConfig);

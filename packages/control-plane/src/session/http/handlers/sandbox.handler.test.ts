@@ -279,7 +279,9 @@ describe("createSandboxHandler", () => {
     expect(await response.json()).toEqual({ valid: false, error: "Sandbox stopped" });
     expect(log.warn).toHaveBeenCalledWith(
       "Sandbox token verification failed: sandbox is stopped/stale",
-      { status: "stopped" }
+      {
+        status: "stopped",
+      }
     );
   });
 
@@ -299,7 +301,9 @@ describe("createSandboxHandler", () => {
     expect(await response.json()).toEqual({ valid: false, error: "Sandbox stopped" });
     expect(log.warn).toHaveBeenCalledWith(
       "Sandbox token verification failed: sandbox is stopped/stale",
-      { status: "stale" }
+      {
+        status: "stale",
+      }
     );
   });
 
@@ -498,6 +502,19 @@ describe("createSandboxHandler", () => {
     const { handler, getSandbox, log } = createHandler();
     getSandbox.mockReturnValue({
       tunnel_urls: JSON.stringify(["3000", "5000"]),
+    } as unknown as SandboxRow);
+
+    const response = await handler.tunnelUrls();
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Invalid stored tunnel URLs" });
+    expect(log.warn).toHaveBeenCalled();
+  });
+
+  it("returns 500 when a stored tunnel URL value is not a string", async () => {
+    const { handler, getSandbox, log } = createHandler();
+    getSandbox.mockReturnValue({
+      tunnel_urls: JSON.stringify({ "3000": "https://a.example", "5000": 5000 }),
     } as unknown as SandboxRow);
 
     const response = await handler.tunnelUrls();

@@ -1,11 +1,16 @@
 "use client";
 
 import { useEffect, useState, type RefObject } from "react";
+import type { SandboxStatus } from "@open-inspect/shared";
 import { useSidebarContext } from "@/components/sidebar-layout";
 import { Button } from "@/components/ui/button";
 import { SidebarIcon } from "@/components/ui/icons";
 import type { useSessionSocket } from "@/hooks/use-session-socket";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
+import {
+  BOOTING_SANDBOX_STATUSES,
+  resolveDisplaySandboxStatus,
+} from "@/components/sidebar/sandbox-statuses";
 
 type SessionSocketState = ReturnType<typeof useSessionSocket>;
 
@@ -93,6 +98,14 @@ export function SessionHeader({
     if (!isRenaming) setTitle(sessionState?.title ?? fallbackSessionInfo.title ?? "");
   }, [fallbackSessionInfo.title, sessionState?.title, isRenaming]);
 
+  // A terminal session never has a sandbox worth booting, so collapse a stale
+  // boot status (e.g. a pinned "spawning") to "stopped" before display — no
+  // phantom "Sandbox: spawning" / warming dot. See resolveDisplaySandboxStatus.
+  const displaySandboxStatus = resolveDisplaySandboxStatus(
+    sessionState?.sandboxStatus,
+    sessionState?.status
+  );
+
   return (
     <header className="border-b border-border-muted flex-shrink-0">
       <div className="px-4 py-3 flex items-center justify-between">
@@ -163,13 +176,13 @@ export function SessionHeader({
             <CombinedStatusDot
               connected={connected}
               connecting={connecting}
-              sandboxStatus={sessionState?.sandboxStatus}
+              sandboxStatus={displaySandboxStatus}
             />
           </div>
           <div className="hidden md:contents">
             <ConnectionStatus connected={connected} connecting={connecting} />
             <SandboxStatus
-              status={sessionState?.sandboxStatus}
+              status={displaySandboxStatus}
               dashboardUrl={sessionState?.sandboxDashboardUrl}
             />
             <ParticipantsList participants={participants} />
@@ -217,7 +230,7 @@ export function SandboxStatus({
   status,
   dashboardUrl,
 }: {
-  status?: string;
+  status?: SandboxStatus | null;
   dashboardUrl?: string | null;
 }) {
   if (!status) return null;
@@ -226,9 +239,11 @@ export function SandboxStatus({
     pending: "text-muted-foreground",
     warming: "text-warning",
     spawning: "text-warning",
+    connecting: "text-warning",
     syncing: "text-accent",
     ready: "text-success",
     running: "text-accent",
+    snapshotting: "text-accent",
     stopped: "text-muted-foreground",
     stale: "text-muted-foreground",
     failed: "text-destructive",
@@ -264,7 +279,7 @@ export function CombinedStatusDot({
 }: {
   connected: boolean;
   connecting: boolean;
-  sandboxStatus?: string;
+  sandboxStatus?: SandboxStatus | null;
 }) {
   let color: string;
   let pulse = false;
@@ -280,7 +295,7 @@ export function CombinedStatusDot({
   } else if (sandboxStatus === "failed") {
     color = "bg-destructive";
     label = `Connected \u00b7 Sandbox: ${sandboxStatus}`;
-  } else if (["pending", "warming", "spawning", "syncing"].includes(sandboxStatus || "")) {
+  } else if (sandboxStatus && BOOTING_SANDBOX_STATUSES.has(sandboxStatus)) {
     color = "bg-warning";
     label = `Connected \u00b7 Sandbox: ${sandboxStatus}`;
   } else {

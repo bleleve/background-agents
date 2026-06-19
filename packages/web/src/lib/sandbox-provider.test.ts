@@ -53,6 +53,15 @@ describe("sandbox-provider", () => {
     expect(supportsRepoImages()).toBe(false);
   });
 
+  it("accepts rwx and disables repo images", async () => {
+    process.env.NEXT_PUBLIC_SANDBOX_PROVIDER = "rwx";
+
+    const { getPublicSandboxProvider, supportsRepoImages } = await loadProvider();
+
+    expect(getPublicSandboxProvider()).toBe("rwx");
+    expect(supportsRepoImages()).toBe(false);
+  });
+
   it("throws for unsupported providers", async () => {
     process.env.NEXT_PUBLIC_SANDBOX_PROVIDER = "fly";
 

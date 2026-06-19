@@ -5,12 +5,9 @@
   ],
   "df39f65c-9334-49aa-846a-00f6dd320fd5": [
     { "owner": "onboardiq", "name": "fountain-ai", "label": "fountain-ai" },
-    { "owner": "onboardiq", "name": "megalith", "label": "megalith" },
-    { "owner": "onboardiq", "name": "dent", "label": "dent" },
-    { "owner": "onboardiq", "name": "monolith", "label": "monolith" },
     { "owner": "onboardiq", "name": "sourcery", "label": "sourcery" },
     { "owner": "onboardiq", "name": "wheregologin", "label": "wheregologin" },
-    { "owner": "onboardiq", "name": "enterprise-wave" }
+    { "owner": "onboardiq", "name": "megalith" }
   ],
   "333d78ef-d08b-4199-8761-ac8594c5e80a": [
     { "owner": "onboardiq", "name": "megalith", "label": "megalith" },
@@ -39,9 +36,6 @@
   "8cd17929-a187-453d-bb97-298b89292cc5": [
     { "owner": "onboardiq", "name": "megalith", "label": "megalith" },
     { "owner": "onboardiq", "name": "fountain-ai", "label": "fountain-ai" },
-    { "owner": "onboardiq", "name": "enterprise-wave", "label": "enterprise-wave" },
-    { "owner": "onboardiq", "name": "dent", "label": "dent" },
-    { "owner": "onboardiq", "name": "monolith", "label": "monolith" },
     { "owner": "onboardiq", "name": "sourcery", "label": "sourcery" },
     { "owner": "onboardiq", "name": "wheregologin", "label": "wheregologin" },
     { "owner": "onboardiq", "name": "wx-system" }
@@ -76,17 +70,13 @@
   "a65f6ac1-4e44-4934-9f15-5b1a77ee5eb1": [
     { "owner": "onboardiq", "name": "megalith", "label": "megalith" },
     { "owner": "onboardiq", "name": "wx-system", "label": "wx-system" },
-    { "owner": "onboardiq", "name": "monolith", "label": "monolith" },
     { "owner": "onboardiq", "name": "fountain-ai" }
   ],
   "55af9edb-3fdc-4613-ac1b-d025e75f9777": [
-    { "owner": "onboardiq", "name": "megalith", "label": "megalith" },
     { "owner": "onboardiq", "name": "wx-system", "label": "wx-system" },
     { "owner": "onboardiq", "name": "fountain-ai", "label": "fountain-ai" },
-    { "owner": "onboardiq", "name": "enterprise-wave", "label": "enterprise-wave" },
-    { "owner": "onboardiq", "name": "dent", "label": "dent" },
     { "owner": "onboardiq", "name": "sourcery", "label": "sourcery" },
     { "owner": "onboardiq", "name": "wheregologin", "label": "wheregologin" },
-    { "owner": "onboardiq", "name": "monolith" }
+    { "owner": "onboardiq", "name": "megalith" }
   ]
 }

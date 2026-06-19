@@ -90,43 +90,47 @@ Wide events use `outcome` to indicate result:
 
 #### Repo Image Builds (`component: "router"`)
 
-| Event                                    | Level | Key Fields                                                                        | Description                                                                |
-| ---------------------------------------- | ----- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `repo_image.build_triggered`             | info  | `build_id`, `repo_owner`, `repo_name`, `trace_id`, `request_id`                   | Repo image build accepted by the active backend                            |
-| `repo_image.build_complete_received`     | info  | `build_id`, `provider_session_id`, `base_sha`, `trace_id`, `request_id`           | Vercel runtime reported success before snapshot                            |
-| `repo_image.vercel_snapshot_start`       | info  | `build_id`, `provider_session_id`, `trace_id`, `request_id`                       | Control plane started snapshotting Vercel build                            |
-| `repo_image.build_complete`              | info  | `build_id`, `provider_image_id`, `replaced_image_id`, `trace_id`                  | Repo image marked ready                                                    |
-| `repo_image.build_failed`                | info  | `build_id`, `error_message`, `trace_id`, `request_id`                             | Runtime reported a failed repo image build                                 |
-| `repo_image.callback_auth_failed`        | warn  | `build_id`, `provider_session_id`, `trace_id`, `request_id`                       | Repo image callback had invalid auth, replay, or session binding           |
-| `repo_image.vercel_snapshot_failed`      | error | `build_id`, `provider_session_id`, `error`, `duration_ms`, `trace_id`             | Vercel success callback arrived but snapshot did not produce an image      |
-| `repo_image.vercel_snapshot_error`       | error | `build_id`, `provider_session_id`, `error`, `duration_ms`, `trace_id`             | Vercel completion path threw before ready state                            |
-| `repo_image.vercel_snapshot_not_applied` | warn  | `build_id`, `provider_session_id`, `provider_image_id`, `duration_ms`, `trace_id` | Vercel snapshot succeeded after the build row stopped accepting completion |
-| `repo_image.trigger_mark_failed_error`   | warn  | `build_id`, `error`, `trace_id`, `request_id`                                     | Build trigger failed and the route could not mark the build failed         |
-| `repo_image.trigger_error`               | error | `repo_owner`, `repo_name`, `error`, `trace_id`, `request_id`                      | Manual or scheduled build trigger failed                                   |
+| Event                                    | Level | Key Fields                                                                                                 | Description                                                                                             |
+| ---------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `repo_image.build_triggered`             | info  | `build_id`, `repo_owner`, `repo_name`, `trace_id`, `request_id`                                            | Repo image build accepted by the active backend                                                         |
+| `repo_image.build_complete_received`     | info  | `build_id`, `provider_session_id`, `base_sha`, `trace_id`, `request_id`                                    | Vercel runtime reported success before snapshot                                                         |
+| `repo_image.vercel_snapshot_start`       | info  | `build_id`, `provider_session_id`, `trace_id`, `request_id`                                                | Control plane started snapshotting Vercel build                                                         |
+| `repo_image.build_complete`              | info  | `build_id`, `provider_image_id`, `replaced_image_id`, `trace_id`                                           | Repo image marked ready                                                                                 |
+| `repo_image.build_failed`                | info  | `build_id`, `error_message`, `trace_id`, `request_id`                                                      | Runtime reported a failed repo image build                                                              |
+| `repo_image.callback_auth_failed`        | warn  | `build_id`, `provider_session_id`, `trace_id`, `request_id`                                                | Repo image callback had invalid auth, replay, or session binding                                        |
+| `repo_image.vercel_snapshot_failed`      | error | `build_id`, `provider_session_id`, `error`, `duration_ms`, `trace_id`                                      | Vercel success callback arrived but snapshot did not produce an image                                   |
+| `repo_image.vercel_snapshot_error`       | error | `build_id`, `provider_session_id`, `error`, `duration_ms`, `trace_id`                                      | Vercel completion path threw before ready state                                                         |
+| `repo_image.vercel_snapshot_not_applied` | warn  | `build_id`, `provider_session_id`, `provider_image_id`, `duration_ms`, `trace_id`                          | Vercel snapshot succeeded after the build row stopped accepting completion                              |
+| `repo_image.trigger_mark_failed_error`   | warn  | `build_id`, `error`, `trace_id`, `request_id`                                                              | Build trigger failed and the route could not mark the build failed                                      |
+| `repo_image.trigger_error`               | error | `repo_owner`, `repo_name`, `error`, `trace_id`, `request_id`                                               | Manual or scheduled build trigger failed                                                                |
+| `repo_image.repeated_build_failures`     | warn  | `repo_owner`, `repo_name`, `base_branch`, `consecutive_failures`, `latest_error`, `request_id`, `trace_id` | A repo's builds keep failing (≥3 since the last ready image) — no fresh image, every session cold-boots |
+| `repo_image.failure_streak_check_error`  | warn  | `build_id`, `error`, `request_id`, `trace_id`                                                              | Best-effort failure-streak check errored; the build was still marked failed                             |
 
 #### Session Durable Object (`component: "session-do"`)
 
-| Event             | Level      | Key Fields                                                                                                     | Description                    |
-| ----------------- | ---------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `do.request`      | info       | `http_method`, `http_path`, `http_status`, `duration_ms`, `outcome`                                            | One per DO internal route call |
-| `ws.connect`      | info, warn | `ws_type` (sandbox\|client), `outcome`, `reject_reason`, `sandbox_id`, `participant_id`, `duration_ms`         | WebSocket lifecycle            |
-| `prompt.enqueue`  | info       | `message_id`, `source`, `author_id`, `user_id`, `model`, `content_length`, `has_attachments`, `queue_position` | Message queued                 |
-| `prompt.dispatch` | info       | `message_id`, `outcome`, `reason`, `model`, `has_sandbox_ws`, `queue_wait_ms`                                  | Message sent to sandbox        |
-| `prompt.complete` | info, warn | `message_id`, `outcome`, `total_duration_ms`, `processing_duration_ms`, `queue_duration_ms`                    | Prompt run finished            |
+| Event             | Level      | Key Fields                                                                                                                                                 | Description                    |
+| ----------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `do.request`      | info       | `http_method`, `http_path`, `http_status`, `duration_ms`, `outcome`                                                                                        | One per DO internal route call |
+| `ws.connect`      | info, warn | `ws_type` (sandbox\|client), `outcome`, `reject_reason`, `sandbox_id`, `participant_id`, `duration_ms`                                                     | WebSocket lifecycle            |
+| `prompt.enqueue`  | info       | `message_id`, `source`, `author_id`, `user_id`, `model`, `content_length`, `has_attachments`, `queue_position`                                             | Message queued                 |
+| `prompt.dispatch` | info       | `message_id`, `outcome` (`sent`\|`send_failed`\|`deferred`), `reason` (when `deferred`), `model`, `has_sandbox_ws`, `sandbox_ready_state`, `queue_wait_ms` | Message sent to sandbox        |
+| `prompt.complete` | info, warn | `message_id`, `outcome`, `total_duration_ms`, `processing_duration_ms`, `queue_duration_ms`                                                                | Prompt run finished            |
 
 #### Lifecycle Manager (`component: "lifecycle-manager"`)
 
-| Event                     | Level | Key Fields                                       | Description                |
-| ------------------------- | ----- | ------------------------------------------------ | -------------------------- |
-| `sandbox.spawn`           | info  | `expected_sandbox_id`, `repo_owner`, `repo_name` | Spawn attempt started      |
-| `sandbox.spawned`         | info  | `sandbox_id`, `provider_object_id`               | Spawn succeeded            |
-| `sandbox.spawn_failed`    | error | `error`                                          | Spawn failed               |
-| `sandbox.restore`         | info  | `snapshot_image_id`                              | Restore attempt started    |
-| `sandbox.restored`        | info  | `sandbox_id`, `provider_object_id`               | Restore succeeded          |
-| `sandbox.snapshot`        | info  | `reason`, `provider_object_id`                   | Snapshot attempt started   |
-| `sandbox.snapshot_saved`  | info  | `image_id`, `reason`                             | Snapshot saved             |
-| `sandbox.heartbeat_stale` | warn  | `last_heartbeat_ms`, `threshold_ms`              | Heartbeat missed           |
-| `sandbox.timeout`         | info  | `last_activity`, `timeout_ms`                    | Inactivity timeout reached |
+| Event                          | Level | Key Fields                                       | Description                                                  |
+| ------------------------------ | ----- | ------------------------------------------------ | ------------------------------------------------------------ |
+| `sandbox.spawn`                | info  | `expected_sandbox_id`, `repo_owner`, `repo_name` | Spawn attempt started                                        |
+| `sandbox.spawned`              | info  | `sandbox_id`, `provider_object_id`               | Spawn succeeded                                              |
+| `sandbox.spawn_failed`         | error | `error`                                          | Spawn failed                                                 |
+| `sandbox.restore`              | info  | `snapshot_image_id`                              | Restore attempt started                                      |
+| `sandbox.restored`             | info  | `sandbox_id`, `provider_object_id`               | Restore succeeded                                            |
+| `sandbox.snapshot`             | info  | `reason`, `provider_object_id`                   | Snapshot attempt started                                     |
+| `sandbox.snapshot_saved`       | info  | `image_id`, `reason`                             | Snapshot saved                                               |
+| `sandbox.heartbeat_stale`      | warn  | `last_heartbeat_ms`, `threshold_ms`              | Heartbeat missed                                             |
+| `sandbox.connecting_timeout`   | warn  | `elapsed_ms`, `timeout_ms`                       | Bridge never connected in time                               |
+| `sandbox.circuit_breaker_open` | warn  | `failure_count`, `wait_time_ms`                  | Spawn blocked by the circuit breaker after repeated failures |
+| `sandbox.timeout`              | info  | `last_activity`, `timeout_ms`                    | Inactivity timeout reached                                   |
 
 #### Provider Clients
 
@@ -261,7 +265,8 @@ service="control-plane" msg="prompt.complete" message_id="<MSG_ID>"
 
 Key fields to check:
 
-- `prompt.dispatch` → `outcome` and `reason` (was a sandbox connected?)
+- `prompt.dispatch` → `outcome` (`sent`/`send_failed`/`deferred`), `has_sandbox_ws`,
+  `sandbox_ready_state` (was a sandbox connected and was the socket open?)
 - `prompt.run` → `outcome` and `duration_ms` (did it succeed? how long?)
 - `prompt.complete` → `total_duration_ms` (end-to-end time)
 

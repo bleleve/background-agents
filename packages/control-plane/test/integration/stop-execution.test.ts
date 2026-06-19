@@ -375,5 +375,7 @@ describe("POST /internal/stop", () => {
 
     clientWs.close();
     if (sandboxWs) sandboxWs.close();
+    // Let workerd flush pending onUserConsoleLog RPCs before environment teardown.
+    await new Promise((resolve) => setTimeout(resolve, 100));
   });
 });

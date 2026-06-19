@@ -311,6 +311,60 @@ class TestSSEStreaming:
         assert token_events[0]["content"] == "Hello"
 
     @pytest.mark.asyncio
+    async def test_tracks_actual_user_message_id_when_opencode_regenerates_it(
+        self, bridge: AgentBridge, opencode_message_id: str
+    ):
+        """Should accept assistant parts parented to OpenCode's actual user message ID."""
+        http_client = bridge.http_client
+        actual_user_message_id = "msg_actual_user"
+
+        http_client.sse_events = [
+            create_sse_event("server.connected", {}),
+            create_sse_event(
+                "message.updated",
+                {
+                    "info": {
+                        "id": actual_user_message_id,
+                        "role": "user",
+                        "sessionID": "oc-session-123",
+                    }
+                },
+            ),
+            create_sse_event(
+                "message.updated",
+                {
+                    "info": {
+                        "id": "oc-msg-1",
+                        "role": "assistant",
+                        "sessionID": "oc-session-123",
+                        "parentID": actual_user_message_id,
+                    }
+                },
+            ),
+            create_sse_event(
+                "message.part.updated",
+                {
+                    "part": {
+                        "type": "text",
+                        "id": "part-1",
+                        "sessionID": "oc-session-123",
+                        "messageID": "oc-msg-1",
+                        "text": "Hello via actual parent",
+                    }
+                },
+            ),
+            create_sse_event("session.idle", {"sessionID": "oc-session-123"}),
+        ]
+
+        events = []
+        async for event in bridge._stream_opencode_response_sse("cp-msg-1", "Test prompt"):
+            events.append(event)
+
+        token_events = [e for e in events if e["type"] == "token"]
+        assert len(token_events) == 1
+        assert token_events[0]["content"] == "Hello via actual parent"
+
+    @pytest.mark.asyncio
     async def test_tool_events(self, bridge: AgentBridge, opencode_message_id: str):
         """Should emit tool events correctly."""
         http_client = bridge.http_client
@@ -709,6 +763,32 @@ class TestSSEStreaming:
         # Event should have control plane's messageId
         assert events[0]["messageId"] == "cp-message-from-control-plane"
         assert events[0]["messageId"] != "oc-internal-msg-id"
+
+    @pytest.mark.asyncio
+    async def test_handle_prompt_fails_when_opencode_emits_no_output(self, bridge: AgentBridge):
+        """Should not report success when OpenCode idles without assistant output."""
+        bridge._configure_git_identity = AsyncMock()
+        bridge._send_event = AsyncMock()
+        http_client = bridge.http_client
+        http_client.sse_events = [
+            create_sse_event("server.connected", {}),
+            create_sse_event("session.idle", {"sessionID": "oc-session-123"}),
+        ]
+
+        await bridge._handle_prompt(
+            {
+                "messageId": "cp-msg-1",
+                "content": "Test prompt",
+                "model": "anthropic/claude-haiku-4-5",
+            }
+        )
+
+        sent_events = [call.args[0] for call in bridge._send_event.await_args_list]
+        complete = sent_events[-1]
+        assert complete["type"] == "execution_complete"
+        assert complete["messageId"] == "cp-msg-1"
+        assert complete["success"] is False
+        assert complete["error"] == "OpenCode completed without emitting assistant output."
 
 
 class TestFetchFinalMessageState:
@@ -1336,7 +1416,7 @@ class TestPromptMaxDuration:
         )
         bridge.opencode_session_id = "oc-session-123"
         bridge.sse_inactivity_timeout = 2.0
-        bridge.PROMPT_MAX_DURATION = 0.25
+        bridge.prompt_max_duration = 0.25
 
         sse_response = DelayedMockSSEResponse(
             [
@@ -1697,6 +1777,60 @@ class TestSubtaskStreaming:
         token_events = [e for e in events if e["type"] == "token"]
         assert len(token_events) == 1
         assert token_events[0]["content"] == "Recovered from sub-task error"
+
+    @pytest.mark.asyncio
+    async def test_subtask_error_does_not_fail_parent_turn(
+        self, bridge: AgentBridge, opencode_message_id: str, monkeypatch
+    ):
+        """A child-session error is forwarded but must NOT mark the parent turn
+        failed: execution_complete should still report success=True."""
+        sent_events: list[dict] = []
+
+        async def _capture(event):
+            sent_events.append(event)
+
+        async def _noop(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(bridge, "_send_event", _capture)
+        monkeypatch.setattr(bridge, "_configure_git_identity", _noop)
+
+        http_client = bridge.http_client
+        http_client.sse_events = [
+            create_sse_event("server.connected", {}),
+            create_sse_event(
+                "message.updated",
+                {
+                    "info": {
+                        "id": "oc-msg-1",
+                        "role": "assistant",
+                        "sessionID": "oc-session-123",
+                        "parentID": opencode_message_id,
+                    }
+                },
+            ),
+            create_sse_event(
+                "session.created",
+                {"info": {"id": "child-1", "parentID": "oc-session-123"}},
+            ),
+            create_sse_event(
+                "session.error",
+                {"sessionID": "child-1", "error": {"data": {"message": "Sub-task failed"}}},
+            ),
+            create_sse_event("session.idle", {"sessionID": "oc-session-123"}),
+        ]
+
+        await bridge._handle_prompt({"messageId": "cp-msg-1", "content": "Test prompt"})
+
+        completes = [e for e in sent_events if e["type"] == "execution_complete"]
+        assert len(completes) == 1
+        assert completes[0]["success"] is True
+        assert "error" not in completes[0]
+
+        # The sub-task error is still forwarded to the client for visibility.
+        errors = [e for e in sent_events if e["type"] == "error"]
+        assert len(errors) == 1
+        assert errors[0]["isSubtask"] is True
 
     @pytest.mark.asyncio
     async def test_child_message_buffering_race_condition(

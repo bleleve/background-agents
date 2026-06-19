@@ -19,9 +19,10 @@ resource "null_resource" "control_plane_build" {
 module "control_plane_worker" {
   source = "./modules/cloudflare-worker"
 
-  account_id  = var.cloudflare_account_id
-  worker_name = "open-inspect-control-plane-${local.name_suffix}"
-  script_path = local.control_plane_script_path
+  account_id       = var.cloudflare_account_id
+  worker_name      = "open-inspect-control-plane-${local.name_suffix}"
+  worker_subdomain = var.cloudflare_worker_subdomain
+  script_path      = local.control_plane_script_path
 
   kv_namespaces = [
     {
@@ -124,6 +125,12 @@ module "control_plane_worker" {
     # token can authorize chat.postMessage from agent tool calls.
     length(var.slack_bot_token) > 0 ? [
       { name = "SLACK_BOT_TOKEN", value = var.slack_bot_token },
+    ] : [],
+    length(var.rwx_access_token) > 0 ? [
+      { name = "RWX_ACCESS_TOKEN", value = var.rwx_access_token },
+    ] : [],
+    length(var.rwx_org_slug) > 0 ? [
+      { name = "RWX_ORG_SLUG", value = var.rwx_org_slug },
     ] : []
   )
 

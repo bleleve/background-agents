@@ -68,7 +68,7 @@ export interface PullRequestOpenedPayload {
     html_url: string;
     state: string;
     user: { login: string };
-    head: { ref: string; sha: string };
+    head: { ref: string; sha: string; repo?: { full_name: string } };
     base: { ref: string };
     draft: boolean;
     labels?: Array<{ name: string }>;
@@ -87,7 +87,7 @@ export interface PullRequestLabeledPayload {
     html_url: string;
     state: string;
     user: { login: string };
-    head: { ref: string; sha: string };
+    head: { ref: string; sha: string; repo?: { full_name: string } };
     base: { ref: string };
     draft: boolean;
     labels?: Array<{ name: string }>;
@@ -105,7 +105,7 @@ export interface ReviewRequestedPayload {
     html_url: string;
     state: string;
     user: { login: string };
-    head: { ref: string; sha: string };
+    head: { ref: string; sha: string; repo?: { full_name: string } };
     base: { ref: string };
     labels?: Array<{ name: string }>;
   };
@@ -140,7 +140,7 @@ export interface ReviewCommentPayload {
     title: string;
     html_url: string;
     state: string;
-    head: { ref: string; sha: string };
+    head: { ref: string; sha: string; repo?: { full_name: string } };
     base: { ref: string };
     labels?: Array<{ name: string }>;
   };
@@ -190,4 +190,23 @@ export interface PullRequestReviewPayload {
   pull_request: { number: number; state: string };
   repository: { owner: { login: string }; name: string; private: boolean };
   sender: { login: string; id: number };
+}
+
+export interface PullRequestStateChangedPayload {
+  action: "closed" | "reopened";
+  pull_request: {
+    number: number;
+    title: string;
+    body: string | null;
+    html_url: string;
+    state: string;
+    merged?: boolean;
+    draft?: boolean;
+    user: { login: string };
+    head: { ref: string; sha: string; repo?: { full_name: string } };
+    base: { ref: string };
+    labels?: Array<{ name: string }>;
+  };
+  repository: { owner: { login: string }; name: string; private: boolean };
+  sender?: { login: string; id: number; avatar_url: string };
 }

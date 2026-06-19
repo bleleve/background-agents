@@ -3,6 +3,18 @@ import { Hono } from "hono";
 import { computeHmacHex } from "@open-inspect/shared";
 import { callbacksRouter } from "./callbacks";
 import type { Env } from "./types";
+import type * as ExtractorModule from "./completion/extractor";
+
+// The completion handler builds its failure message from the extracted agent
+// response. Stub the extractor so the "empty response + !success" failure
+// branch (which renders the Retry button) fires without a control-plane fetch.
+const { mockExtractAgentResponse } = vi.hoisted(() => ({
+  mockExtractAgentResponse: vi.fn(),
+}));
+vi.mock("./completion/extractor", async (importOriginal) => ({
+  ...(await importOriginal<typeof ExtractorModule>()),
+  extractAgentResponse: mockExtractAgentResponse,
+}));
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
@@ -242,5 +254,56 @@ describe("POST /callbacks/tool_call", () => {
       })
     );
     await flushWaitUntil(ctx);
+  });
+});
+
+describe("POST /callbacks/complete — failure message", () => {
+  async function postComplete(payload: unknown, env = makeEnv(), ctx = makeCtx()) {
+    const response = await makeApp().fetch(
+      new Request("http://localhost/callbacks/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-trace-id": "trace-1" },
+        body: JSON.stringify(payload),
+      }),
+      env,
+      ctx
+    );
+    return { response, env, ctx };
+  }
+
+  it("offers a Retry button carrying the session id when the agent fails with no output", async () => {
+    mockExtractAgentResponse.mockResolvedValue({
+      textContent: "",
+      toolCalls: [],
+      artifacts: [],
+      success: false,
+      error: "boom",
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    const payload = await signPayload({
+      sessionId: "session-1",
+      messageId: "msg-1",
+      success: false,
+      timestamp: 1778900000000,
+      context: { source: "slack", channel: "C123", threadTs: "111.222" },
+    });
+
+    const { response, ctx } = await postComplete(payload);
+    expect(response.status).toBe(200);
+    await flushWaitUntil(ctx);
+
+    const postCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).endsWith("/api/chat.postMessage")
+    );
+    expect(postCall).toBeTruthy();
+    const body = JSON.parse(String((postCall?.[1] as RequestInit).body)) as {
+      blocks: Array<{ type: string; elements?: Array<Record<string, unknown>> }>;
+    };
+    const actions = body.blocks.find((b) => b.type === "actions");
+    const retryButton = actions?.elements?.find((e) => e.action_id === "relaunch_sandbox");
+    expect(retryButton).toMatchObject({ action_id: "relaunch_sandbox", value: "session-1" });
   });
 });

@@ -36,6 +36,10 @@ import {
 
 const logger = createLogger("router:repo-images");
 const DEFAULT_IMAGE_BUILD_BRANCH = "main";
+// Builds run on a ~30 min cadence, so 3 consecutive failures means a repo has had
+// no fresh image for ~1.5h and every session is cold-booting the full setup.sh.
+// Emitting a distinct log event at this point gives ops a hook for alerting.
+const REPEATED_BUILD_FAILURE_ALERT_THRESHOLD = 3;
 const VERCEL_CALLBACK_TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
 const VERCEL_CALLBACK_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -576,6 +580,31 @@ async function handleBuildFailed(
       request_id: ctx.request_id,
       trace_id: ctx.trace_id,
     });
+
+    // Best-effort: surface repos whose builds keep failing. A persistent failure
+    // streak means no fresh image, so every session falls back to a full cold
+    // boot. Never let this turn a successful markFailed into a 500.
+    try {
+      const streak = await store.countFailuresSinceLastReady(buildId, backend);
+      if (streak && streak.failureCount >= REPEATED_BUILD_FAILURE_ALERT_THRESHOLD) {
+        logger.warn("repo_image.repeated_build_failures", {
+          repo_owner: streak.repoOwner,
+          repo_name: streak.repoName,
+          base_branch: streak.baseBranch,
+          consecutive_failures: streak.failureCount,
+          latest_error: body.error,
+          request_id: ctx.request_id,
+          trace_id: ctx.trace_id,
+        });
+      }
+    } catch (streakError) {
+      logger.warn("repo_image.failure_streak_check_error", {
+        build_id: buildId,
+        error: streakError instanceof Error ? streakError.message : String(streakError),
+        request_id: ctx.request_id,
+        trace_id: ctx.trace_id,
+      });
+    }
 
     return json({ ok: true });
   } catch (e) {

@@ -3,6 +3,11 @@ locals {
   use_modal_backend   = var.sandbox_provider == "modal"
   use_daytona_backend = var.sandbox_provider == "daytona"
 
+  # Google login is enabled only when both OAuth credentials are configured.
+  # Drives the build-time NEXT_PUBLIC_GOOGLE_ENABLED flag (sign-in button) and
+  # mirrors the server-side conditional GoogleProvider in packages/web/src/lib/auth.ts.
+  google_enabled = trimspace(var.google_client_id) != "" && trimspace(var.google_client_secret) != ""
+
   # URLs for cross-service configuration
   control_plane_host = "open-inspect-control-plane-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev"
   control_plane_url  = "https://${local.control_plane_host}"

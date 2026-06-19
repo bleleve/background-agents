@@ -13,6 +13,7 @@ import {
   evaluateConnectingTimeout,
   evaluateWarmDecision,
   evaluateExecutionTimeout,
+  reconcileTerminalSandboxStatus,
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   DEFAULT_SPAWN_CONFIG,
   DEFAULT_INACTIVITY_CONFIG,
@@ -969,8 +970,15 @@ describe("evaluateWarmDecision", () => {
 
 describe("evaluateExecutionTimeout", () => {
   const config: ExecutionTimeoutConfig = {
-    timeoutMs: DEFAULT_EXECUTION_TIMEOUT_MS, // 90 minutes
+    timeoutMs: DEFAULT_EXECUTION_TIMEOUT_MS,
   };
+
+  it("must exceed the bridge's PROMPT_MAX_DURATION so it never preempts it", () => {
+    // The bridge's per-prompt cap is 90 min (sandbox-runtime/bridge.py). The
+    // control-plane timeout must be strictly greater so it only fires when the
+    // bridge is dead, never on a healthy long-running prompt.
+    expect(DEFAULT_EXECUTION_TIMEOUT_MS).toBeGreaterThan(90 * 60 * 1000);
+  });
 
   it("returns not timed out within threshold", () => {
     const now = Date.now();
@@ -1011,5 +1019,24 @@ describe("evaluateExecutionTimeout", () => {
 
     expect(result.isTimedOut).toBe(true);
     expect(result.elapsedMs).toBe(6000);
+  });
+});
+
+describe("reconcileTerminalSandboxStatus", () => {
+  it("collapses every transient boot status to stopped", () => {
+    for (const status of ["pending", "spawning", "connecting", "warming", "syncing"] as const) {
+      expect(reconcileTerminalSandboxStatus(status)).toBe("stopped");
+    }
+  });
+
+  it("leaves a live sandbox untouched (no change)", () => {
+    expect(reconcileTerminalSandboxStatus("ready")).toBeNull();
+    expect(reconcileTerminalSandboxStatus("running")).toBeNull();
+  });
+
+  it("leaves an already-down or snapshotting sandbox untouched", () => {
+    for (const status of ["stopped", "failed", "stale", "snapshotting"] as const) {
+      expect(reconcileTerminalSandboxStatus(status)).toBeNull();
+    }
   });
 });

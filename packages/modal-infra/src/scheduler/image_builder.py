@@ -370,8 +370,30 @@ async def build_repo_image(
 # Scheduler: cron-based rebuild logic
 # ---------------------------------------------------------------------------
 
-# Stale build threshold: builds older than this are marked failed
-STALE_BUILD_THRESHOLD_SECONDS = 2100  # 35 minutes
+# Headroom kept above the worst-case healthy build before the scheduler reaps an
+# in-flight build as stale. The threshold itself is derived at call time (see
+# _resolve_stale_threshold_seconds) from the build + snapshot timeouts, so raising
+# the snapshot timeout via IMAGE_SNAPSHOT_TIMEOUT_SECONDS automatically widens the
+# stale window instead of stranding a healthy build mid-flight.
+STALE_BUILD_HEADROOM_SECONDS = 300  # 5 minutes
+
+
+def _resolve_stale_threshold_seconds() -> int:
+    """Max age for a 'building' row before the scheduler sweep marks it failed.
+
+    Kept strictly above the worst-case healthy build = build-sandbox lifetime
+    (BUILD_TIMEOUT_SECONDS) + filesystem snapshot timeout, so a slow-but-progressing
+    build is never reaped mid-flight regardless of IMAGE_SNAPSHOT_TIMEOUT_SECONDS.
+    Defaults to BUILD_TIMEOUT_SECONDS + DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS
+    + STALE_BUILD_HEADROOM_SECONDS. Guarded by test_stale_threshold_* invariants.
+    """
+    # Deferred import: manager constructs the Modal base image at module load.
+    from ..sandbox.manager import BUILD_TIMEOUT_SECONDS, _resolve_snapshot_timeout_seconds
+
+    return (
+        BUILD_TIMEOUT_SECONDS + _resolve_snapshot_timeout_seconds() + STALE_BUILD_HEADROOM_SECONDS
+    )
+
 
 # Cleanup threshold: failed builds older than this are deleted
 FAILED_BUILD_CLEANUP_SECONDS = 86400  # 24 hours
@@ -623,7 +645,7 @@ async def rebuild_repo_images():
         try:
             result = await _api_post(
                 f"{control_plane_url}/repo-images/mark-stale",
-                {"max_age_seconds": STALE_BUILD_THRESHOLD_SECONDS},
+                {"max_age_seconds": _resolve_stale_threshold_seconds()},
             )
             stale_count = result.get("markedFailed", 0)
             if stale_count:

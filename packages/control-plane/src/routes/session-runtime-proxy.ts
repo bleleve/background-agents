@@ -106,6 +106,33 @@ async function handleCreatePR(
   });
 }
 
+const VALID_PR_STATES = new Set(["open", "closed", "merged", "draft"]);
+
+async function handleUpdatePrState(
+  request: Request,
+  _env: Env,
+  match: RegExpMatchArray,
+  ctx: SessionRouteContext
+): Promise<Response> {
+  const sessionId = getSessionId(match);
+  if (sessionId instanceof Response) return sessionId;
+
+  const body = await parseJsonBody<unknown>(request);
+  if (body instanceof Response) return body;
+  if (!isObjectBody(body)) return error("JSON body must be an object");
+
+  const state = body.state;
+  if (typeof state !== "string" || !VALID_PR_STATES.has(state)) {
+    return error("state must be one of open, closed, merged, draft");
+  }
+
+  return ctx.sessionRuntime.fetch(sessionId, SessionInternalPaths.updatePrState, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state }),
+  });
+}
+
 async function handleUpdateSessionTitle(
   request: Request,
   _env: Env,
@@ -155,6 +182,23 @@ async function handleArchiveSession(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ userId }),
+  });
+}
+
+async function handleSupersede(
+  request: Request,
+  _env: Env,
+  match: RegExpMatchArray,
+  ctx: SessionRouteContext
+): Promise<Response> {
+  const sessionId = getSessionId(match);
+  if (sessionId instanceof Response) return sessionId;
+
+  const body = await request.text().catch(() => "{}");
+  return ctx.sessionRuntime.fetch(sessionId, SessionInternalPaths.supersede, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
   });
 }
 
@@ -233,6 +277,11 @@ export const sessionRuntimeProxyRoutes: Route[] = [
     pattern: parsePattern("/sessions/:id/pr"),
     handler: handleCreatePR,
   }),
+  sessionRoute({
+    method: "POST",
+    pattern: parsePattern("/sessions/:id/pr-state"),
+    handler: handleUpdatePrState,
+  }),
   simpleProxyRoute({
     method: "POST",
     routePath: "/sessions/:id/openai-token-refresh",
@@ -265,5 +314,10 @@ export const sessionRuntimeProxyRoutes: Route[] = [
     method: "POST",
     pattern: parsePattern("/sessions/:id/unarchive"),
     handler: handleUnarchiveSession,
+  }),
+  sessionRoute({
+    method: "POST",
+    pattern: parsePattern("/sessions/:id/supersede"),
+    handler: handleSupersede,
   }),
 ];

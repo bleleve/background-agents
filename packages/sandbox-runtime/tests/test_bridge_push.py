@@ -121,6 +121,38 @@ async def test_handle_push_sends_unknown_error_when_stderr_is_empty(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_handle_push_no_repository_includes_branch_name(tmp_path: Path):
+    # repo_path has no */.git under it, so _handle_push hits the no-repository
+    # early-exit. The control-plane push resolver keys the awaiting promise by
+    # branchName and silently drops events without it, so this payload must
+    # still carry branchName — otherwise the push promise hangs until its 360s
+    # timeout instead of rejecting immediately.
+    bridge = AgentBridge(
+        sandbox_id="test-sandbox",
+        session_id="test-session",
+        control_plane_url="http://localhost:8787",
+        auth_token="test-token",
+    )
+    bridge.repo_path = tmp_path  # empty: no */.git
+    bridge._send_event = AsyncMock()
+
+    with patch(
+        "sandbox_runtime.bridge.asyncio.create_subprocess_exec",
+        AsyncMock(side_effect=AssertionError("must not push when no repo exists")),
+    ):
+        await bridge._handle_push(_push_command())
+
+    bridge._send_event.assert_awaited_once()
+    await_args = bridge._send_event.await_args
+    assert await_args is not None
+    event = await_args.args[0]
+    assert event["type"] == "push_error"
+    assert event["error"] == "No repository found"
+    assert event["branchName"] == "feature/test"
+    assert isinstance(event["timestamp"], float)
+
+
+@pytest.mark.asyncio
 async def test_handle_push_timeout_terminates_process_and_sends_error(tmp_path: Path):
     bridge = _create_bridge(tmp_path)
     bridge._send_event = AsyncMock()

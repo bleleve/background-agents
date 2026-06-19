@@ -49,8 +49,16 @@ KUBECTL_VERSION = "v1.35.0"
 DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 
 # Cache buster - change this to force Modal image rebuild
-# v71: keep opencode-ai pinned and add ffmpeg for MP4 browser recordings
-CACHE_BUSTER = "v78-gh-formal-review-guard"
+# v82: fix hook timeout hang when start.sh spawns background processes
+# v83: pre-migrate OpenCode DB at build time so first session boot doesn't
+#      block on it and trip the heartbeat watchdog
+# v84: offload synchronous tool/skill/plugin install in start_opencode off the
+#      event loop so the boot-progress loop keeps pinging during a slow boot
+# v85: bridge PROMPT_MAX_DURATION resolvable from env (providers with a shorter
+#      sandbox lifetime, e.g. Vercel, can lower it so the bridge self-stops first)
+# v86: bridge adopts a control-plane-supplied opencodeSessionId on prompt so a
+#      relaunched/restored sandbox resumes the prior OpenCode session
+CACHE_BUSTER = "v86-bridge-resume-opencode-session"
 
 # Base image with all development tools
 base_image = (
@@ -230,6 +238,9 @@ base_image = (
         "npm install -g oxlint@latest",
         "oxlint --version",
         "npm install -g typescript-language-server@5.3.0",
+        # web-tree-sitter (WASM) + grammars for ast-anchor / validate-suggestion tools.
+        # Pinned for ABI stability; grammars ship prebuilt .wasm files (no native compile).
+        "npm install -g web-tree-sitter@^0.25.10 tree-sitter-typescript tree-sitter-ruby",
         # Langfuse OpenCode plugin (loaded when LANGFUSE_* env vars are provided)
         "npm install -g opencode-plugin-langfuse@latest",
     )
@@ -238,10 +249,13 @@ base_image = (
     # OpenCode's Npm.install() finds package-lock.json in sync and skips
     # the slow arborist reify() call (2-22s) that would otherwise block
     # the first prompt and exceed the bridge's HTTP timeout.
+    # opencode-plugin-langfuse is included here so its transitive deps are
+    # in the lockfile — without this, OpenCode reifies langfuse at session
+    # creation time, hitting npm registry and causing intermittent ReadTimeout.
     .run_commands(
         "mkdir -p /app/opencode-deps",
         'echo \'{"name":"opencode-tools","type":"module",'
-        '"dependencies":{"@opencode-ai/plugin":"*"}}\''
+        '"dependencies":{"@opencode-ai/plugin":"*","opencode-plugin-langfuse":"latest"}}\''
         " > /app/opencode-deps/package.json",
         "cd /app/opencode-deps && npm install --ignore-scripts --no-audit --no-fund",
     )

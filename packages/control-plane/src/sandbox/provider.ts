@@ -71,6 +71,12 @@ export interface CreateSandboxConfig {
    * control-plane endpoint.
    */
   agentSlackNotifyEnabled?: boolean;
+  /**
+   * Generic per-tool feature flags. Keys are tool filenames (e.g. "ast-anchor.js");
+   * true means the tool is installed. Passed to the sandbox as env vars consumed by
+   * AGENT_TOOLS_GATED_ON_ENV in entrypoint.py.
+   */
+  agentToolFlags?: Record<string, boolean>;
   /** MCP servers to inject into the agent session */
   mcpServers?: McpServerConfig[];
   /** Sandbox settings (tunnel ports, etc.) resolved from integration settings */
@@ -137,6 +143,8 @@ export interface RestoreConfig {
   codeServerEnabled?: boolean;
   /** Resolved fresh on each restore — see CreateSandboxConfig. */
   agentSlackNotifyEnabled?: boolean;
+  /** Generic per-tool feature flags — see CreateSandboxConfig. */
+  agentToolFlags?: Record<string, boolean>;
   /** Sandbox settings (tunnel ports, etc.) resolved from integration settings */
   sandboxSettings?: SandboxSettings;
   /** User-supplied OpenCode config JSON string (deep-merged on top of system config in sandbox) */
@@ -155,6 +163,16 @@ export interface RestoreResult {
   providerObjectId?: string;
   /** Error message if failed */
   error?: string;
+  /**
+   * Failure classification when `success` is false.
+   * - "permanent": the snapshot image is unusable (e.g. GC'd / not found), so a
+   *   retry against the same image is futile — the caller should drop the
+   *   snapshot pointer and fall back to a fresh spawn.
+   * - "transient": a recoverable error (network / provider blip) — retrying the
+   *   same image later may succeed; keep the snapshot pointer.
+   * Omitted when unknown (treated conservatively as permanent by the caller).
+   */
+  errorType?: SandboxErrorType;
   /** Code-server tunnel URL (if available) */
   codeServerUrl?: string;
   /** Code-server password (if available) */
