@@ -617,12 +617,11 @@ export class SessionDO extends DurableObject<Env> {
         dispatchPreview: async () => {
           const session = this.getSession();
           if (!session) throw new Error("Session not found");
-          if (!session.branch_name) throw new Error("Session has no branch yet");
           const sessionId = this.getPublicSessionId(session);
           await dispatchPreview(this.env, {
             repoOwner: session.repo_owner,
             repoName: session.repo_name,
-            branchName: session.branch_name,
+            branchName: session.branch_name ?? session.base_branch,
             slug: sessionId,
             sessionId,
           });
@@ -760,12 +759,11 @@ export class SessionDO extends DurableObject<Env> {
         dispatchPreview: async () => {
           const session = this.getSession();
           if (!session) throw new Error("Session not found");
-          if (!session.branch_name) throw new Error("Session has no branch yet");
           const sessionId = this.getPublicSessionId(session);
           await dispatchPreview(this.env, {
             repoOwner: session.repo_owner,
             repoName: session.repo_name,
-            branchName: session.branch_name,
+            branchName: session.branch_name ?? session.base_branch,
             slug: sessionId,
             sessionId,
           });
