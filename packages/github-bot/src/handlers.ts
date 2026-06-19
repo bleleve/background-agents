@@ -1057,7 +1057,7 @@ export async function handlePullRequestLabeled(
   const repoFullName = `${owner}/${repoName}`.toLowerCase();
 
   if (isPreviewLabel(label.name)) {
-    return dispatchPullRequestPreview(env, payload, traceId);
+    return dispatchPullRequestPreview(env, payload, traceId, "github_label_added");
   }
 
   if (!isAskForReviewLabel(label.name)) {
@@ -1167,13 +1167,14 @@ export async function handlePullRequestSynchronized(
   if (!payload.pull_request.labels?.some((label) => isPreviewLabel(label.name))) {
     return { outcome: "skipped", skip_reason: "preview_not_enabled" };
   }
-  return dispatchPullRequestPreview(env, payload, traceId);
+  return dispatchPullRequestPreview(env, payload, traceId, "github_synchronized");
 }
 
 async function dispatchPullRequestPreview(
   env: Env,
   payload: Pick<PullRequestLabeledPayload, "pull_request" | "repository">,
-  traceId: string
+  traceId: string,
+  reason: string
 ): Promise<HandlerResult> {
   const { pull_request: pr, repository: repo } = payload;
   const owner = repo.owner.login;
@@ -1190,7 +1191,7 @@ async function dispatchPullRequestPreview(
         {
           method: "POST",
           headers,
-          body: JSON.stringify({ enabled: true, commitSha: pr.head.sha }),
+          body: JSON.stringify({ enabled: true, commitSha: pr.head.sha, reason }),
         }
       )
     : await env.CONTROL_PLANE.fetch("https://internal/previews/dispatch", {
@@ -1201,6 +1202,7 @@ async function dispatchPullRequestPreview(
           repoName,
           branchName: pr.head.ref,
           slug: `${repoName}-${pr.number}`,
+          reason,
         }),
       });
   if (!response.ok) {

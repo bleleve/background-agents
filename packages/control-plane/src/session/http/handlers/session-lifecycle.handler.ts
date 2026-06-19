@@ -101,7 +101,7 @@ export interface SessionLifecycleHandlerDeps {
    * the agent.
    */
   createSystemMessage: (content: string) => void;
-  dispatchPreview: () => Promise<{ runUrl: string }>;
+  dispatchPreview: (reason?: string) => Promise<{ runUrl: string }>;
   broadcastArtifactCreated: (artifact: SessionArtifact) => void;
   broadcast: (message: { type: "preview_mode"; enabled: boolean }) => void;
 }
@@ -286,7 +286,7 @@ export function createSessionLifecycleHandler(
       const session = deps.getSession();
       if (!session) return Response.json({ error: "Session not found" }, { status: 404 });
 
-      let body: { enabled?: boolean; userId?: string };
+      let body: { enabled?: boolean; userId?: string; reason?: string };
       try {
         body = (await request.json()) as typeof body;
       } catch {
@@ -302,7 +302,7 @@ export function createSessionLifecycleHandler(
       let runUrl: string | undefined;
       if (body.enabled) {
         try {
-          ({ runUrl } = await deps.dispatchPreview());
+          ({ runUrl } = await deps.dispatchPreview(body.reason));
         } catch (error) {
           deps.getLog().error("preview.dispatch_failed", {
             error: error instanceof Error ? error : String(error),

@@ -614,7 +614,7 @@ export class SessionDO extends DurableObject<Env> {
         getSandboxSocket: () => this.wsManager.getSandboxSocket(),
         sendToSandbox: (ws, message) => this.wsManager.send(ws, message),
         updateSandboxStatus: (status) => this.updateSandboxStatus(status),
-        dispatchPreview: async () => {
+        dispatchPreview: async (reason?: string) => {
           const session = this.getSession();
           if (!session) throw new Error("Session not found");
           const sessionId = this.getPublicSessionId(session);
@@ -624,6 +624,7 @@ export class SessionDO extends DurableObject<Env> {
             branchName: session.branch_name ?? session.base_branch,
             slug: sessionId,
             sessionId,
+            reason,
           });
         },
         broadcastArtifactCreated: (artifact) => {
@@ -759,7 +760,7 @@ export class SessionDO extends DurableObject<Env> {
         updateLastActivity: (timestamp) => this.updateLastActivity(timestamp),
         scheduleInactivityCheck: () => this.scheduleInactivityCheck(),
         processMessageQueue: () => this.messageQueue.processMessageQueue(),
-        dispatchPreview: async () => {
+        dispatchPreview: async (reason: string) => {
           const session = this.getSession();
           if (!session) throw new Error("Session not found");
           const sessionId = this.getPublicSessionId(session);
@@ -769,6 +770,7 @@ export class SessionDO extends DurableObject<Env> {
             branchName: session.branch_name ?? session.base_branch,
             slug: sessionId,
             sessionId,
+            reason,
           });
         },
       });

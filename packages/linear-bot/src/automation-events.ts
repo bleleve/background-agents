@@ -33,7 +33,7 @@ async function enablePreviewForExistingSession(
       {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify({ enabled: true }),
+        body: JSON.stringify({ enabled: true, reason: "linear_label_added" }),
       }
     );
 

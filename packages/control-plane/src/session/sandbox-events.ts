@@ -30,7 +30,7 @@ interface SessionSandboxEventProcessorDeps {
   updateLastActivity: (timestamp: number) => void;
   scheduleInactivityCheck: () => Promise<void>;
   processMessageQueue: () => Promise<void>;
-  dispatchPreview: () => Promise<unknown>;
+  dispatchPreview: (reason: string) => Promise<unknown>;
 }
 
 /** Event types that require delivery acknowledgement. */
@@ -72,7 +72,7 @@ export class SessionSandboxEventProcessor {
       if (event.commitSha) {
         this.deps.repository.updateSessionCurrentSha(event.commitSha);
       }
-      await this.dispatchPreviewIfNeeded();
+      await this.dispatchPreviewIfNeeded("sandbox_ready");
       // Re-store the tunnel URLs the sandbox reports on (re)connect. A transient
       // connecting/heartbeat timeout can clear the stored URLs while the sandbox
       // is still alive (its Modal tunnels stay valid); the bridge re-reports the
@@ -229,7 +229,7 @@ export class SessionSandboxEventProcessor {
       if (event.commitSha) {
         this.deps.repository.updateSessionCurrentSha(event.commitSha);
       }
-      await this.dispatchPreviewIfNeeded();
+      await this.dispatchPreviewIfNeeded("execution_complete");
       const completionMessageId = messageId;
       if (messageId) {
         this.deps.repository.upsertExecutionCompleteEvent(messageId, event, now);
@@ -329,7 +329,7 @@ export class SessionSandboxEventProcessor {
     }
 
     if (event.type === "push_complete") {
-      await this.dispatchPreviewIfNeeded();
+      await this.dispatchPreviewIfNeeded("push_complete");
     }
 
     this.deps.broadcast({ type: "sandbox_event", event });
@@ -426,11 +426,11 @@ export class SessionSandboxEventProcessor {
     }
   }
 
-  private async dispatchPreviewIfNeeded(): Promise<void> {
+  private async dispatchPreviewIfNeeded(reason: string): Promise<void> {
     const session = this.deps.repository.getSession();
     if (!session || session.preview_enabled !== 1) return;
     try {
-      await this.deps.dispatchPreview();
+      await this.deps.dispatchPreview(reason);
     } catch (error) {
       this.deps.log.error("preview.dispatch_failed", {
         error: error instanceof Error ? error : String(error),

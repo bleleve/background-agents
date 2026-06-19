@@ -105,7 +105,7 @@ describe("SessionSandboxEventProcessor", () => {
       commitSha: "2".repeat(40),
     });
 
-    expect(h.dispatchPreview).toHaveBeenCalled();
+    expect(h.dispatchPreview).toHaveBeenCalledWith("execution_complete");
   });
 
   it("dispatches a preview immediately on push_complete when preview is enabled", async () => {
@@ -122,7 +122,7 @@ describe("SessionSandboxEventProcessor", () => {
       timestamp: 1000,
     });
 
-    expect(h.dispatchPreview).toHaveBeenCalled();
+    expect(h.dispatchPreview).toHaveBeenCalledWith("push_complete");
   });
 
   it("does not dispatch a preview when preview mode is disabled", async () => {

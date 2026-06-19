@@ -176,7 +176,7 @@ describe("handleLinearIssueEvent", () => {
         "https://internal/sessions/session-existing/preview",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({ enabled: true }),
+          body: JSON.stringify({ enabled: true, reason: "linear_label_added" }),
         })
       );
       expect(fetcher.fetch).toHaveBeenNthCalledWith(
@@ -208,7 +208,9 @@ describe("handleLinearIssueEvent", () => {
       expect(fetcher.fetch).toHaveBeenCalledOnce();
       expect(fetcher.fetch).toHaveBeenCalledWith(
         "https://internal/sessions/session-existing/preview",
-        expect.objectContaining({ body: JSON.stringify({ enabled: true }) })
+        expect.objectContaining({
+          body: JSON.stringify({ enabled: true, reason: "linear_label_added" }),
+        })
       );
     });
 

@@ -20,6 +20,7 @@ export async function dispatchPreview(
     branchName: string;
     slug: string;
     sessionId?: string;
+    reason?: string;
   }
 ): Promise<DispatchPreviewResult> {
   if (!env.RWX_ACCESS_TOKEN) throw new Error("RWX_ACCESS_TOKEN is required for preview dispatches");
@@ -29,10 +30,13 @@ export async function dispatchPreview(
     baseUrl: env.RWX_BASE_URL,
   });
 
+  const params: Record<string, string> = { slug: input.slug };
+  if (input.reason) params["reason"] = input.reason;
+
   const result = await client.createDispatch({
     key: `${input.repoOwner}-${input.repoName}`,
     ref: input.branchName,
-    params: { slug: input.slug },
+    params,
     title: input.sessionId ? `Preview for Reef session ${input.sessionId}` : undefined,
   });
   log.info("preview.dispatched", { ...input, dispatch_id: result.dispatch_id });

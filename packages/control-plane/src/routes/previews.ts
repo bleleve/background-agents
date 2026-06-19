@@ -11,6 +11,7 @@ export const previewRoutes: Route[] = [
         repoName?: string;
         branchName?: string;
         slug?: string;
+        reason?: string;
       }>(request);
       if (body instanceof Response) return body;
       if (!body.repoOwner || !body.repoName || !body.branchName || !body.slug) {
@@ -22,6 +23,7 @@ export const previewRoutes: Route[] = [
           repoName: body.repoName.toLowerCase(),
           branchName: body.branchName,
           slug: body.slug,
+          reason: body.reason,
         });
         return json({ dispatchId, runUrl }, 202);
       } catch (cause) {
