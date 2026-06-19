@@ -9,6 +9,7 @@ import { normalizeLinearEvent } from "@open-inspect/shared";
 import { buildInternalAuthHeaders } from "./utils/internal";
 import { getProjectRepoMapping, getTeamRepoMapping, lookupIssueSession } from "./kv-store";
 import { createLogger } from "./logger";
+import { postIssueComment } from "./utils/linear-client";
 
 const log = createLogger("automation-events");
 
@@ -44,11 +45,19 @@ async function enablePreviewForExistingSession(
         status: response.status,
       });
     } else {
+      const result = (await response.json()) as { rwxRunUrl?: string };
       log.info("automation_events.preview_enabled", {
         issue_id: payload.data.id,
         issue_identifier: payload.data.identifier,
         session_id: existingSession.sessionId,
       });
+      if (result.rwxRunUrl && env.LINEAR_API_KEY) {
+        await postIssueComment(
+          env.LINEAR_API_KEY,
+          payload.data.id,
+          `[hire preview](${result.rwxRunUrl})`
+        );
+      }
     }
   } catch (err) {
     log.warn("automation_events.preview_enable_error", {

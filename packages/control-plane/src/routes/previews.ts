@@ -17,13 +17,13 @@ export const previewRoutes: Route[] = [
         return error("repoOwner, repoName, branchName, and slug are required");
       }
       try {
-        const dispatchId = await dispatchPreview(env, {
+        const { dispatchId, runUrl } = await dispatchPreview(env, {
           repoOwner: body.repoOwner.toLowerCase(),
           repoName: body.repoName.toLowerCase(),
           branchName: body.branchName,
           slug: body.slug,
         });
-        return json({ dispatchId }, 202);
+        return json({ dispatchId, runUrl }, 202);
       } catch (cause) {
         return error(cause instanceof Error ? cause.message : "Preview dispatch failed", 502);
       }

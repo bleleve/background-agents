@@ -27,6 +27,7 @@ import {
   postReaction,
   checkSenderPermission,
   dismissPullRequestReview,
+  createIssueComment,
 } from "./github-auth";
 import {
   buildCodeReviewPrompt,
@@ -1204,6 +1205,25 @@ async function dispatchPullRequestPreview(
       });
   if (!response.ok) {
     throw new Error(`Preview dispatch failed: ${response.status} ${await response.text()}`);
+  }
+  const result = (await response.json()) as { rwxRunUrl?: string; runUrl?: string };
+  const runUrl = result.rwxRunUrl ?? result.runUrl;
+  if (runUrl) {
+    const userAgent = resolveAppName(env);
+    const token = await generateInstallationToken({
+      appId: env.GITHUB_APP_ID,
+      privateKey: env.GITHUB_APP_PRIVATE_KEY,
+      installationId: env.GITHUB_APP_INSTALLATION_ID,
+      userAgent,
+    });
+    await createIssueComment(
+      token,
+      owner,
+      repoName,
+      pr.number,
+      `[hire preview](${runUrl})`,
+      userAgent
+    );
   }
   return {
     outcome: "processed",
