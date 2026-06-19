@@ -30,7 +30,7 @@ interface SessionSandboxEventProcessorDeps {
   updateLastActivity: (timestamp: number) => void;
   scheduleInactivityCheck: () => Promise<void>;
   processMessageQueue: () => Promise<void>;
-  dispatchPreview: (commitSha: string) => Promise<void>;
+  dispatchPreview: () => Promise<void>;
 }
 
 /** Event types that require delivery acknowledgement. */
@@ -71,8 +71,8 @@ export class SessionSandboxEventProcessor {
     if (event.type === "ready") {
       if (event.commitSha) {
         this.deps.repository.updateSessionCurrentSha(event.commitSha);
-        await this.dispatchPreviewIfNeeded(event.commitSha);
       }
+      await this.dispatchPreviewIfNeeded();
       // Re-store the tunnel URLs the sandbox reports on (re)connect. A transient
       // connecting/heartbeat timeout can clear the stored URLs while the sandbox
       // is still alive (its Modal tunnels stay valid); the bridge re-reports the
@@ -228,8 +228,8 @@ export class SessionSandboxEventProcessor {
     if (event.type === "execution_complete") {
       if (event.commitSha) {
         this.deps.repository.updateSessionCurrentSha(event.commitSha);
-        await this.dispatchPreviewIfNeeded(event.commitSha);
       }
+      await this.dispatchPreviewIfNeeded();
       const completionMessageId = messageId;
       if (messageId) {
         this.deps.repository.upsertExecutionCompleteEvent(messageId, event, now);
@@ -422,17 +422,13 @@ export class SessionSandboxEventProcessor {
     }
   }
 
-  private async dispatchPreviewIfNeeded(commitSha: string): Promise<void> {
+  private async dispatchPreviewIfNeeded(): Promise<void> {
     const session = this.deps.repository.getSession();
-    if (!session || session.preview_enabled !== 1 || session.preview_dispatched_sha === commitSha) {
-      return;
-    }
+    if (!session || session.preview_enabled !== 1) return;
     try {
-      await this.deps.dispatchPreview(commitSha);
-      this.deps.repository.updatePreviewDispatchedSha(commitSha);
+      await this.deps.dispatchPreview();
     } catch (error) {
       this.deps.log.error("preview.dispatch_failed", {
-        commit_sha: commitSha,
         error: error instanceof Error ? error : String(error),
       });
     }

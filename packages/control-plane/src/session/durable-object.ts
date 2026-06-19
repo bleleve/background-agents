@@ -614,14 +614,15 @@ export class SessionDO extends DurableObject<Env> {
         getSandboxSocket: () => this.wsManager.getSandboxSocket(),
         sendToSandbox: (ws, message) => this.wsManager.send(ws, message),
         updateSandboxStatus: (status) => this.updateSandboxStatus(status),
-        dispatchPreview: async (commitSha) => {
+        dispatchPreview: async () => {
           const session = this.getSession();
           if (!session) throw new Error("Session not found");
+          if (!session.branch_name) throw new Error("Session has no branch yet");
           const sessionId = this.getPublicSessionId(session);
           await dispatchPreview(this.env, {
             repoOwner: session.repo_owner,
             repoName: session.repo_name,
-            commitSha,
+            branchName: session.branch_name,
             slug: sessionId,
             sessionId,
           });
@@ -756,14 +757,15 @@ export class SessionDO extends DurableObject<Env> {
         updateLastActivity: (timestamp) => this.updateLastActivity(timestamp),
         scheduleInactivityCheck: () => this.scheduleInactivityCheck(),
         processMessageQueue: () => this.messageQueue.processMessageQueue(),
-        dispatchPreview: async (commitSha) => {
+        dispatchPreview: async () => {
           const session = this.getSession();
           if (!session) throw new Error("Session not found");
+          if (!session.branch_name) throw new Error("Session has no branch yet");
           const sessionId = this.getPublicSessionId(session);
           await dispatchPreview(this.env, {
             repoOwner: session.repo_owner,
             repoName: session.repo_name,
-            commitSha,
+            branchName: session.branch_name,
             slug: sessionId,
             sessionId,
           });

@@ -4,7 +4,7 @@ import { dispatchPreview } from "./preview-dispatch";
 describe("dispatchPreview", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("uses the repository key, commit SHA, and caller-provided slug", async () => {
+  it("uses the repository key, branch ref, and caller-provided slug", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({ dispatch_id: "dispatch-1" }, { status: 201 })
     );
@@ -14,7 +14,7 @@ describe("dispatchPreview", () => {
       dispatchPreview({ RWX_ACCESS_TOKEN: "token" } as never, {
         repoOwner: "onboardiq",
         repoName: "background-agents",
-        commitSha: "a".repeat(40),
+        branchName: "my-feature-branch",
         slug: "stable-preview-slug",
         sessionId: "session-1",
       })
@@ -26,7 +26,8 @@ describe("dispatchPreview", () => {
         method: "POST",
         body: JSON.stringify({
           key: "onboardiq-background-agents",
-          params: { "commit-sha": "a".repeat(40), slug: "stable-preview-slug" },
+          ref: "my-feature-branch",
+          params: { slug: "stable-preview-slug" },
           title: "Preview for Reef session session-1",
         }),
       })

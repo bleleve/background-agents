@@ -9,19 +9,18 @@ export const previewRoutes: Route[] = [
       const body = await parseJsonBody<{
         repoOwner?: string;
         repoName?: string;
-        commitSha?: string;
+        branchName?: string;
         slug?: string;
       }>(request);
       if (body instanceof Response) return body;
-      if (!body.repoOwner || !body.repoName || !body.commitSha || !body.slug) {
-        return error("repoOwner, repoName, commitSha, and slug are required");
+      if (!body.repoOwner || !body.repoName || !body.branchName || !body.slug) {
+        return error("repoOwner, repoName, branchName, and slug are required");
       }
-      if (!/^[0-9a-f]{40}$/i.test(body.commitSha)) return error("Invalid commitSha");
       try {
         const dispatchId = await dispatchPreview(env, {
           repoOwner: body.repoOwner.toLowerCase(),
           repoName: body.repoName.toLowerCase(),
-          commitSha: body.commitSha,
+          branchName: body.branchName,
           slug: body.slug,
         });
         return json({ dispatchId }, 202);

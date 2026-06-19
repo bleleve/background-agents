@@ -9,7 +9,7 @@ export async function dispatchPreview(
   input: {
     repoOwner: string;
     repoName: string;
-    commitSha: string;
+    branchName: string;
     slug: string;
     sessionId?: string;
   }
@@ -21,7 +21,8 @@ export async function dispatchPreview(
     baseUrl: env.RWX_BASE_URL,
   }).createDispatch({
     key: `${input.repoOwner}-${input.repoName}`,
-    params: { "commit-sha": input.commitSha, slug: input.slug },
+    ref: input.branchName,
+    params: { slug: input.slug },
     title: input.sessionId ? `Preview for Reef session ${input.sessionId}` : undefined,
   });
   log.info("preview.dispatched", { ...input, dispatch_id: result.dispatch_id });

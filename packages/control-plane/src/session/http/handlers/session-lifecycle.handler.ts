@@ -58,10 +58,7 @@ export interface SessionLifecycleHandlerDeps {
     SessionRepository,
     "upsertSession" | "createSandbox" | "createParticipant" | "createArtifact" | "createMessage"
   > &
-    Pick<
-      SessionRepository,
-      "updatePreviewEnabled" | "updateSessionCurrentSha" | "updatePreviewDispatchedSha"
-    >;
+    Pick<SessionRepository, "updatePreviewEnabled">;
   getDurableObjectId: () => string;
   tokenEncryptionKey?: string;
   encryptToken: (token: string, encryptionKey: string) => Promise<string>;
@@ -104,7 +101,7 @@ export interface SessionLifecycleHandlerDeps {
    * the agent.
    */
   createSystemMessage: (content: string) => void;
-  dispatchPreview: (commitSha: string) => Promise<void>;
+  dispatchPreview: () => Promise<void>;
   broadcast: (message: { type: "preview_mode"; enabled: boolean }) => void;
 }
 
@@ -288,7 +285,7 @@ export function createSessionLifecycleHandler(
       const session = deps.getSession();
       if (!session) return Response.json({ error: "Session not found" }, { status: 404 });
 
-      let body: { enabled?: boolean; commitSha?: string; userId?: string };
+      let body: { enabled?: boolean; userId?: string };
       try {
         body = (await request.json()) as typeof body;
       } catch {
@@ -297,31 +294,23 @@ export function createSessionLifecycleHandler(
       if (typeof body.enabled !== "boolean") {
         return Response.json({ error: "enabled must be a boolean" }, { status: 400 });
       }
-      if (body.commitSha !== undefined && !/^[0-9a-f]{40}$/i.test(body.commitSha)) {
-        return Response.json({ error: "commitSha must be a full Git SHA" }, { status: 400 });
-      }
       if (body.userId && !deps.getParticipantByUserId(body.userId)) {
         return Response.json({ error: "Not authorized to update preview mode" }, { status: 403 });
       }
 
-      if (body.commitSha) deps.repository.updateSessionCurrentSha(body.commitSha);
-      const sha = body.commitSha ?? session.current_sha;
-
-      if (body.enabled && sha && sha !== session.preview_dispatched_sha) {
+      if (body.enabled) {
         try {
-          await deps.dispatchPreview(sha);
-          deps.repository.updatePreviewDispatchedSha(sha);
+          await deps.dispatchPreview();
         } catch (error) {
           deps.getLog().error("preview.dispatch_failed", {
             error: error instanceof Error ? error : String(error),
-            commit_sha: sha,
           });
           return Response.json({ error: "Failed to dispatch preview" }, { status: 502 });
         }
       }
       deps.repository.updatePreviewEnabled(body.enabled, deps.now());
       deps.broadcast({ type: "preview_mode", enabled: body.enabled });
-      return Response.json({ enabled: body.enabled, dispatchedSha: sha ?? null });
+      return Response.json({ enabled: body.enabled });
     },
 
     async updateTitle(request: Request): Promise<Response> {
