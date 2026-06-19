@@ -42,8 +42,6 @@ interface SessionRightSidebarProps {
 
 export type SessionRightSidebarContentProps = SessionRightSidebarProps;
 
-const buildPreviewUrl = (slug: string) => `https://hire-${slug}--fountain.r1.rwx.run`;
-
 export function SessionRightSidebarContent({
   sessionId,
   sessionState,
@@ -58,6 +56,7 @@ export function SessionRightSidebarContent({
   const [previewOn, setPreviewOn] = useState(sessionState?.previewEnabled ?? false);
   const [isUpdatingPreview, setIsUpdatingPreview] = useState(false);
   const [rwxRunUrl, setRwxRunUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
     setPreviewOn(sessionState?.previewEnabled ?? false);
@@ -90,8 +89,9 @@ export function SessionRightSidebarContent({
       if (!response.ok) {
         setPreviewOn(!enabled);
         toast.error(data.error || "Failed to update preview");
-      } else if (data.runUrl) {
-        setRwxRunUrl(data.runUrl);
+      } else {
+        setRwxRunUrl(data.runUrl ?? null);
+        setPreviewUrl(data.previewUrls?.hire ?? null);
       }
     } catch {
       setPreviewOn(!enabled);
@@ -232,9 +232,9 @@ export function SessionRightSidebarContent({
             <span className="font-medium">Preview</span>
           </div>
           <div className="flex items-center gap-2">
-            {previewOn && (
+            {previewOn && previewUrl && (
               <a
-                href={buildPreviewUrl(sessionId)}
+                href={previewUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-1 text-muted-foreground hover:text-foreground transition"

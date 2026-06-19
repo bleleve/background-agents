@@ -23,9 +23,12 @@ function createProcessor() {
         null as {
           opencode_session_id: string | null;
           preview_enabled?: number;
+          current_sha?: string | null;
+          preview_dispatched_sha?: string | null;
         } | null
     ),
     updateOpencodeSessionId: vi.fn(),
+    updatePreviewDispatchedSha: vi.fn(),
   };
 
   const callbackService = {
@@ -95,6 +98,8 @@ describe("SessionSandboxEventProcessor", () => {
     h.repository.getSession.mockReturnValue({
       opencode_session_id: null,
       preview_enabled: 1,
+      current_sha: "2".repeat(40),
+      preview_dispatched_sha: null,
     });
     await h.processor.processSandboxEvent({
       type: "execution_complete",
@@ -113,16 +118,43 @@ describe("SessionSandboxEventProcessor", () => {
     h.repository.getSession.mockReturnValue({
       opencode_session_id: null,
       preview_enabled: 1,
+      current_sha: null,
+      preview_dispatched_sha: null,
     });
 
     await h.processor.processSandboxEvent({
       type: "push_complete",
       branchName: "my-feature-branch",
+      commitSha: "3".repeat(40),
       sandboxId: "sb-1",
       timestamp: 1000,
     });
 
     expect(h.dispatchPreview).toHaveBeenCalledWith("push_complete");
+    expect(h.repository.updatePreviewDispatchedSha).toHaveBeenCalledWith("3".repeat(40));
+  });
+
+  it("does not dispatch a preview twice for the same commit", async () => {
+    const h = createProcessor();
+    const sha = "4".repeat(40);
+    h.repository.getSession.mockReturnValue({
+      opencode_session_id: null,
+      preview_enabled: 1,
+      current_sha: sha,
+      preview_dispatched_sha: sha,
+    });
+
+    await h.processor.processSandboxEvent({
+      type: "execution_complete",
+      messageId: "message-1",
+      success: true,
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      commitSha: sha,
+    });
+
+    expect(h.dispatchPreview).not.toHaveBeenCalled();
+    expect(h.repository.updatePreviewDispatchedSha).not.toHaveBeenCalled();
   });
 
   it("does not dispatch a preview when preview mode is disabled", async () => {
@@ -130,6 +162,8 @@ describe("SessionSandboxEventProcessor", () => {
     h.repository.getSession.mockReturnValue({
       opencode_session_id: null,
       preview_enabled: 0,
+      current_sha: null,
+      preview_dispatched_sha: null,
     });
 
     await h.processor.processSandboxEvent({

@@ -58,7 +58,7 @@ export interface SessionLifecycleHandlerDeps {
     SessionRepository,
     "upsertSession" | "createSandbox" | "createParticipant" | "createArtifact" | "createMessage"
   > &
-    Pick<SessionRepository, "updatePreviewEnabled">;
+    Pick<SessionRepository, "updatePreviewEnabled" | "updatePreviewDispatchedSha">;
   getDurableObjectId: () => string;
   tokenEncryptionKey?: string;
   encryptToken: (token: string, encryptionKey: string) => Promise<string>;
@@ -315,6 +315,9 @@ export function createSessionLifecycleHandler(
       }
       const now = deps.now();
       deps.repository.updatePreviewEnabled(body.enabled, now);
+      if (body.enabled && session.current_sha) {
+        deps.repository.updatePreviewDispatchedSha(session.current_sha);
+      }
       if (runUrl) {
         const artifactId = deps.generateId();
         const artifact: SessionArtifact = {

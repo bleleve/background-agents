@@ -49,6 +49,7 @@ const CRITICAL_EVENT_TYPES: ReadonlySet<string> = new Set([
 
 export class SessionSandboxEventProcessor {
   private pendingPushResolvers = new Map<string, PushResolver>();
+  private previewDispatchesInFlight = new Set<string>();
 
   constructor(private readonly deps: SessionSandboxEventProcessorDeps) {}
 
@@ -229,7 +230,7 @@ export class SessionSandboxEventProcessor {
       if (event.commitSha) {
         this.deps.repository.updateSessionCurrentSha(event.commitSha);
       }
-      await this.dispatchPreviewIfNeeded("execution_complete");
+      this.deps.ctx.waitUntil(this.dispatchPreviewIfNeeded("execution_complete", event.commitSha));
       const completionMessageId = messageId;
       if (messageId) {
         this.deps.repository.upsertExecutionCompleteEvent(messageId, event, now);
@@ -329,7 +330,10 @@ export class SessionSandboxEventProcessor {
     }
 
     if (event.type === "push_complete") {
-      await this.dispatchPreviewIfNeeded("push_complete");
+      if (event.commitSha) {
+        this.deps.repository.updateSessionCurrentSha(event.commitSha);
+      }
+      await this.dispatchPreviewIfNeeded("push_complete", event.commitSha);
     }
 
     this.deps.broadcast({ type: "sandbox_event", event });
@@ -426,15 +430,28 @@ export class SessionSandboxEventProcessor {
     }
   }
 
-  private async dispatchPreviewIfNeeded(reason: string): Promise<void> {
+  private async dispatchPreviewIfNeeded(reason: string, commitSha?: string): Promise<void> {
     const session = this.deps.repository.getSession();
     if (!session || session.preview_enabled !== 1) return;
+    const sha = commitSha ?? session.current_sha;
+    if (
+      sha &&
+      (session.preview_dispatched_sha === sha || this.previewDispatchesInFlight.has(sha))
+    ) {
+      return;
+    }
+    if (sha) this.previewDispatchesInFlight.add(sha);
     try {
       await this.deps.dispatchPreview(reason);
+      if (sha) {
+        this.deps.repository.updatePreviewDispatchedSha(sha);
+      }
     } catch (error) {
       this.deps.log.error("preview.dispatch_failed", {
         error: error instanceof Error ? error : String(error),
       });
+    } finally {
+      if (sha) this.previewDispatchesInFlight.delete(sha);
     }
   }
 

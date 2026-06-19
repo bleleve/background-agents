@@ -2093,10 +2093,12 @@ class AgentBridge:
                 )
             else:
                 self.log.info("git.push_complete", branch_name=branch_name)
+                commit_sha = await self._get_head_sha()
                 await self._send_event(
                     {
                         "type": "push_complete",
                         "branchName": branch_name,
+                        **({"commitSha": commit_sha} if commit_sha else {}),
                         "timestamp": time.time(),
                     }
                 )

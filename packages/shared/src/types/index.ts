@@ -383,6 +383,7 @@ export type SandboxEvent =
   | {
       type: "push_complete";
       branchName: string;
+      commitSha?: string;
       sandboxId?: string;
       timestamp: number;
     }

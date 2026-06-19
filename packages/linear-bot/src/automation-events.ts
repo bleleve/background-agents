@@ -17,11 +17,31 @@ function hasPreviewLabel(payload: LinearWebhookPayload): boolean {
   return payload.data.labels?.some((label) => label.name.toLowerCase() === "preview") ?? false;
 }
 
+function wasPreviewLabelAdded(payload: LinearWebhookPayload): boolean {
+  if (payload.action !== "update" || !hasPreviewLabel(payload)) return false;
+
+  const previousLabels = payload.updatedFrom?.labels;
+  if (!Array.isArray(previousLabels)) return false;
+
+  const previewLabel = payload.data.labels?.find((label) => label.name.toLowerCase() === "preview");
+  return !previousLabels.some((label) => {
+    if (typeof label === "string") {
+      return label === previewLabel?.id || label.toLowerCase() === "preview";
+    }
+    if (!label || typeof label !== "object") return false;
+    const previous = label as { id?: unknown; name?: unknown };
+    return (
+      previous.id === previewLabel?.id ||
+      (typeof previous.name === "string" && previous.name.toLowerCase() === "preview")
+    );
+  });
+}
+
 async function enablePreviewForExistingSession(
   payload: LinearWebhookPayload,
   env: Env
 ): Promise<void> {
-  if (payload.action !== "update" || !hasPreviewLabel(payload)) return;
+  if (!wasPreviewLabelAdded(payload)) return;
 
   const existingSession = await lookupIssueSession(env, payload.data.id);
   if (!existingSession) return;

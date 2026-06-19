@@ -10,6 +10,7 @@ export const previewRoutes: Route[] = [
         repoOwner?: string;
         repoName?: string;
         branchName?: string;
+        commitSha?: string;
         slug?: string;
         reason?: string;
       }>(request);
@@ -22,6 +23,7 @@ export const previewRoutes: Route[] = [
           repoOwner: body.repoOwner.toLowerCase(),
           repoName: body.repoName.toLowerCase(),
           branchName: body.branchName,
+          commitSha: body.commitSha,
           slug: body.slug,
           reason: body.reason,
         });

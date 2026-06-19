@@ -1201,6 +1201,7 @@ async function dispatchPullRequestPreview(
           repoOwner: owner,
           repoName,
           branchName: pr.head.ref,
+          commitSha: pr.head.sha,
           slug: `${repoName}-${pr.number}`,
           reason,
         }),

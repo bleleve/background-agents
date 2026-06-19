@@ -49,6 +49,7 @@ def _fake_process(returncode: int | None, communicate_result: tuple[bytes, bytes
 async def test_handle_push_sends_push_complete_on_success(tmp_path: Path):
     bridge = _create_bridge(tmp_path)
     bridge._send_event = AsyncMock()
+    bridge._get_head_sha = AsyncMock(return_value="abc123")
     process = _fake_process(returncode=0)
 
     with patch(
@@ -62,6 +63,7 @@ async def test_handle_push_sends_push_complete_on_success(tmp_path: Path):
     event = await_args.args[0]
     assert event["type"] == "push_complete"
     assert event["branchName"] == "feature/test"
+    assert event["commitSha"] == "abc123"
     assert isinstance(event["timestamp"], float)
     process.terminate.assert_not_called()
     process.kill.assert_not_called()

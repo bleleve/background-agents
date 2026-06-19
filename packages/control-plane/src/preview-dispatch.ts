@@ -20,6 +20,7 @@ export async function dispatchPreview(
     repoOwner: string;
     repoName: string;
     branchName: string;
+    commitSha?: string;
     slug: string;
     sessionId?: string;
     reason?: string;
@@ -41,7 +42,7 @@ export async function dispatchPreview(
 
   const result = await client.createDispatch({
     key: `${input.repoOwner}-${input.repoName}`,
-    ref: input.branchName,
+    ref: input.commitSha ?? input.branchName,
     params,
     title: input.sessionId ? `Preview for Reef session ${input.sessionId}` : undefined,
   });

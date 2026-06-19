@@ -145,6 +145,7 @@ describe("handleLinearIssueEvent", () => {
       const updatePayload: LinearWebhookPayload = {
         ...baseCreatePayload,
         action: "update",
+        updatedFrom: { labels: baseCreatePayload.data.labels },
         data: {
           ...baseCreatePayload.data,
           labels: [
@@ -190,6 +191,7 @@ describe("handleLinearIssueEvent", () => {
       const updatePayload: LinearWebhookPayload = {
         ...baseCreatePayload,
         action: "update",
+        updatedFrom: { labels: baseCreatePayload.data.labels },
         data: {
           ...baseCreatePayload.data,
           project: undefined,
@@ -211,6 +213,29 @@ describe("handleLinearIssueEvent", () => {
         expect.objectContaining({
           body: JSON.stringify({ enabled: true, reason: "linear_label_added" }),
         })
+      );
+    });
+
+    it("does not enable preview for an unrelated update when the label already exists", async () => {
+      const labels = [{ id: "label-preview", name: "preview", color: "#00ff00" }];
+      const updatePayload: LinearWebhookPayload = {
+        ...baseCreatePayload,
+        action: "update",
+        updatedFrom: { title: "Old title" },
+        data: { ...baseCreatePayload.data, labels },
+      };
+      const kv = createFakeKV({
+        "config:project-repos": JSON.stringify(projectRepoMapping),
+        "issue:issue-abc": JSON.stringify({ sessionId: "session-existing" }),
+      });
+      const fetcher = createFakeFetcher(200);
+
+      await handleLinearIssueEvent(updatePayload, makeEnv(kv, fetcher));
+
+      expect(fetcher.fetch).toHaveBeenCalledOnce();
+      expect(fetcher.fetch).toHaveBeenCalledWith(
+        "https://internal/internal/linear-event",
+        expect.objectContaining({ method: "POST" })
       );
     });
 
