@@ -328,6 +328,10 @@ export class SessionSandboxEventProcessor {
       this.handlePushEvent(event);
     }
 
+    if (event.type === "push_complete") {
+      await this.dispatchPreviewIfNeeded();
+    }
+
     this.deps.broadcast({ type: "sandbox_event", event });
 
     if (CRITICAL_EVENT_TYPES.has(event.type)) {

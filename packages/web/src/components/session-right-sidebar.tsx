@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CollapsibleSection,
   ParticipantsSection,
@@ -19,8 +19,9 @@ import {
 } from "./sidebar/sandbox-statuses";
 import { resolvePreviewDisplay } from "./sidebar/preview-display";
 import { ChildSessionsSection } from "./sidebar/child-sessions-section";
-import { TerminalIcon, LinkIcon, RefreshIcon } from "@/components/ui/icons";
+import { GlobeIcon, TerminalIcon, LinkIcon, RefreshIcon } from "@/components/ui/icons";
 import { buildAuthenticatedUrl } from "@/lib/urls";
+import { toast } from "sonner";
 import { extractLatestTasks } from "@/lib/tasks";
 import { extractChangedFiles } from "@/lib/files";
 import type { Artifact, SandboxEvent } from "@/types/session";
@@ -41,6 +42,8 @@ interface SessionRightSidebarProps {
 
 export type SessionRightSidebarContentProps = SessionRightSidebarProps;
 
+const PREVIEW_URL = "https://hire-slug--fountain.r1.rwx.run";
+
 export function SessionRightSidebarContent({
   sessionId,
   sessionState,
@@ -52,6 +55,35 @@ export function SessionRightSidebarContent({
   onToggleTerminal,
   onOpenMedia,
 }: SessionRightSidebarContentProps) {
+  const [previewOn, setPreviewOn] = useState(sessionState?.previewEnabled ?? false);
+  const [isUpdatingPreview, setIsUpdatingPreview] = useState(false);
+
+  useEffect(() => {
+    setPreviewOn(sessionState?.previewEnabled ?? false);
+  }, [sessionState?.previewEnabled]);
+
+  const handlePreviewToggle = async () => {
+    const enabled = !previewOn;
+    setPreviewOn(enabled);
+    setIsUpdatingPreview(true);
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setPreviewOn(!enabled);
+        toast.error(data.error || "Failed to update preview");
+      }
+    } catch {
+      setPreviewOn(!enabled);
+      toast.error("Failed to update preview");
+    } finally {
+      setIsUpdatingPreview(false);
+    }
+  };
   const tasks = useMemo(() => extractLatestTasks(events), [events]);
   const filesChanged = useMemo(() => extractChangedFiles(events), [events]);
   const mediaArtifacts = useMemo(
@@ -175,6 +207,36 @@ export function SessionRightSidebarContent({
           </div>
         </div>
       )}
+
+      {/* Preview mode toggle */}
+      <div className="px-4 py-4 border-b border-border-muted">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <GlobeIcon className="h-4 w-4" />
+            <span className="font-medium">Preview</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {previewOn && (
+              <a
+                href={PREVIEW_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1 text-muted-foreground hover:text-foreground transition"
+                title="Open preview"
+              >
+                <LinkIcon className="h-3.5 w-3.5" />
+              </a>
+            )}
+            <button
+              onClick={handlePreviewToggle}
+              disabled={isUpdatingPreview || !sessionId}
+              className="text-xs text-accent hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isUpdatingPreview ? "Updating…" : previewOn ? "On" : "Off"}
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Preview + Restart. The "Restart" link sits on the right of the Preview
           row (like the Terminal "Show" action) for a dead-idle sandbox; with no

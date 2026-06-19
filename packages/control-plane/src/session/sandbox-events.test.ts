@@ -108,6 +108,23 @@ describe("SessionSandboxEventProcessor", () => {
     expect(h.dispatchPreview).toHaveBeenCalled();
   });
 
+  it("dispatches a preview immediately on push_complete when preview is enabled", async () => {
+    const h = createProcessor();
+    h.repository.getSession.mockReturnValue({
+      opencode_session_id: null,
+      preview_enabled: 1,
+    });
+
+    await h.processor.processSandboxEvent({
+      type: "push_complete",
+      branchName: "my-feature-branch",
+      sandboxId: "sb-1",
+      timestamp: 1000,
+    });
+
+    expect(h.dispatchPreview).toHaveBeenCalled();
+  });
+
   it("does not dispatch a preview when preview mode is disabled", async () => {
     const h = createProcessor();
     h.repository.getSession.mockReturnValue({

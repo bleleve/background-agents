@@ -683,6 +683,17 @@ class AgentBridge:
             "</user_message>", "<\\/user_message>"
         )
 
+    # Appended to every implementation turn so the agent pushes its commits
+    # before ending the turn, which triggers an immediate preview dispatch for
+    # sessions with preview enabled.
+    _PUSH_TURN_INSTRUCTION = (
+        "<system_instruction>\n"
+        "After completing all changes for this turn, push your commits to the remote "
+        "branch before finishing. Use git push so the latest work is immediately "
+        "available on the remote.\n"
+        "</system_instruction>"
+    )
+
     @staticmethod
     def _build_resume_preamble(resume_context: dict[str, Any]) -> str | None:
         """Build a restate-and-confirm preamble from a resume context payload.
@@ -799,6 +810,7 @@ class AgentBridge:
                 preamble_kind = "resume"
             else:
                 preamble_kind = "none"
+            content = f"{content}\n\n{self._PUSH_TURN_INSTRUCTION}"
 
         self.log.info(
             "prompt.start",

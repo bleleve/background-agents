@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArchiveSessionDialog } from "@/components/archive-session-dialog";
@@ -37,7 +37,6 @@ interface ActionBarProps {
    * the "Re-run review" action is disabled to avoid racing an in-flight review.
    */
   isProcessing?: boolean;
-  previewEnabled?: boolean;
   onArchive?: () => void | Promise<void>;
   onUnarchive?: () => void | Promise<void>;
 }
@@ -48,7 +47,6 @@ export function ActionBar({
   artifacts,
   reviewPrNumber,
   isProcessing = false,
-  previewEnabled = false,
   onArchive,
   onUnarchive,
 }: ActionBarProps) {
@@ -56,11 +54,6 @@ export function ActionBar({
   const [isArchiving, setIsArchiving] = useState(false);
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
   const [isRerunningReview, setIsRerunningReview] = useState(false);
-  const [previewOn, setPreviewOn] = useState(previewEnabled);
-  const [isUpdatingPreview, setIsUpdatingPreview] = useState(false);
-
-  useEffect(() => setPreviewOn(previewEnabled), [previewEnabled]);
-
   const prArtifact = artifacts.find((a) => a.type === "pr");
   const previewArtifact = artifacts.find((a) => a.type === "preview");
   const mediaCount = artifacts.filter(
@@ -127,46 +120,9 @@ export function ActionBar({
     toast.success("Link copied to clipboard");
   };
 
-  const handlePreviewToggle = async () => {
-    const enabled = !previewOn;
-    setPreviewOn(enabled);
-    setIsUpdatingPreview(true);
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}/preview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        setPreviewOn(!enabled);
-        toast.error(data.error || "Failed to update preview");
-      }
-    } catch {
-      setPreviewOn(!enabled);
-      toast.error("Failed to update preview");
-    } finally {
-      setIsUpdatingPreview(false);
-    }
-  };
-
   return (
     <>
       <div className="flex flex-wrap items-stretch gap-2">
-        <Button
-          variant={previewOn ? "primary" : "outline"}
-          size="sm"
-          className="gap-1.5"
-          onClick={handlePreviewToggle}
-          disabled={isUpdatingPreview || !sessionId}
-          aria-pressed={previewOn}
-        >
-          <GlobeIcon className="w-4 h-4" />
-          <span>
-            {isUpdatingPreview ? "Updating preview…" : `Preview ${previewOn ? "on" : "off"}`}
-          </span>
-        </Button>
-
         {/* View Preview */}
         {previewUrl && (
           <Button variant="outline" size="sm" className="gap-1.5" asChild>
