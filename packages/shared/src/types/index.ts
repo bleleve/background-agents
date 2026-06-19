@@ -87,7 +87,7 @@ export type MessageSource =
   | "github"
   | "automation"
   | "system";
-export type ArtifactType = "pr" | "screenshot" | "video" | "preview" | "branch";
+export type ArtifactType = "pr" | "screenshot" | "video" | "preview" | "branch" | "link";
 export type EventType =
   | "heartbeat"
   | "token"

@@ -115,7 +115,8 @@ function createHandler() {
   const updateSandboxStatus = vi.fn();
 
   const createSystemMessage = vi.fn();
-  const dispatchPreview = vi.fn(async () => {});
+  const dispatchPreview = vi.fn(async () => ({ runUrl: "https://cloud.rwx.com/mint/org/runs/1" }));
+  const broadcastArtifactCreated = vi.fn();
   const broadcast = vi.fn();
 
   const handler = createSessionLifecycleHandler({
@@ -140,6 +141,7 @@ function createHandler() {
     updateSandboxStatus,
     createSystemMessage,
     dispatchPreview,
+    broadcastArtifactCreated,
     broadcast,
   });
 

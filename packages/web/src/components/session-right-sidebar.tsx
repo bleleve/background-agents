@@ -57,10 +57,20 @@ export function SessionRightSidebarContent({
 }: SessionRightSidebarContentProps) {
   const [previewOn, setPreviewOn] = useState(sessionState?.previewEnabled ?? false);
   const [isUpdatingPreview, setIsUpdatingPreview] = useState(false);
+  const [rwxRunUrl, setRwxRunUrl] = useState<string | null>(null);
 
   useEffect(() => {
     setPreviewOn(sessionState?.previewEnabled ?? false);
   }, [sessionState?.previewEnabled]);
+
+  useEffect(() => {
+    const linkArtifact = artifacts.find(
+      (a) =>
+        a.type === "link" &&
+        (a.metadata as Record<string, unknown> | undefined)?.label === "RWX Run URL"
+    );
+    if (linkArtifact?.url) setRwxRunUrl(linkArtifact.url);
+  }, [artifacts]);
 
   const handlePreviewToggle = async () => {
     const enabled = !previewOn;
@@ -72,10 +82,15 @@ export function SessionRightSidebarContent({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        rwxRunUrl?: string;
+      };
       if (!response.ok) {
         setPreviewOn(!enabled);
         toast.error(data.error || "Failed to update preview");
+      } else if (data.rwxRunUrl) {
+        setRwxRunUrl(data.rwxRunUrl);
       }
     } catch {
       setPreviewOn(!enabled);
@@ -236,6 +251,19 @@ export function SessionRightSidebarContent({
             </button>
           </div>
         </div>
+        {rwxRunUrl && (
+          <div className="mt-2">
+            <a
+              href={rwxRunUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-xs text-accent hover:underline"
+            >
+              <LinkIcon className="h-3 w-3" />
+              RWX Run URL
+            </a>
+          </div>
+        )}
       </div>
 
       {/* Preview + Restart. The "Restart" link sits on the right of the Preview

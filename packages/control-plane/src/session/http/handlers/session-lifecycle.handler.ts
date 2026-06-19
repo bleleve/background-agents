@@ -1,6 +1,6 @@
 import type { Logger } from "../../../logger";
 import type { ParticipantRow, SandboxRow, SessionRow } from "../../types";
-import type { SandboxSettings } from "@open-inspect/shared";
+import type { SandboxSettings, SessionArtifact } from "@open-inspect/shared";
 import { TERMINAL_SESSION_STATUSES } from "@open-inspect/shared";
 import type { SandboxStatus, SessionStatus, SpawnSource } from "../../../types";
 import type { SessionRepository } from "../../repository";
@@ -101,7 +101,8 @@ export interface SessionLifecycleHandlerDeps {
    * the agent.
    */
   createSystemMessage: (content: string) => void;
-  dispatchPreview: () => Promise<void>;
+  dispatchPreview: () => Promise<{ runUrl: string }>;
+  broadcastArtifactCreated: (artifact: SessionArtifact) => void;
   broadcast: (message: { type: "preview_mode"; enabled: boolean }) => void;
 }
 
@@ -298,9 +299,10 @@ export function createSessionLifecycleHandler(
         return Response.json({ error: "Not authorized to update preview mode" }, { status: 403 });
       }
 
+      let runUrl: string | undefined;
       if (body.enabled) {
         try {
-          await deps.dispatchPreview();
+          ({ runUrl } = await deps.dispatchPreview());
         } catch (error) {
           deps.getLog().error("preview.dispatch_failed", {
             error: error instanceof Error ? error : String(error),
@@ -308,9 +310,31 @@ export function createSessionLifecycleHandler(
           return Response.json({ error: "Failed to dispatch preview" }, { status: 502 });
         }
       }
-      deps.repository.updatePreviewEnabled(body.enabled, deps.now());
+      const now = deps.now();
+      deps.repository.updatePreviewEnabled(body.enabled, now);
+      if (runUrl) {
+        const artifactId = deps.generateId();
+        const artifact: SessionArtifact = {
+          id: artifactId,
+          type: "link",
+          url: runUrl,
+          metadata: { label: "RWX Run URL" },
+          createdAt: now,
+        };
+        deps.repository.createArtifact({
+          id: artifactId,
+          type: "link",
+          url: runUrl,
+          metadata: JSON.stringify({ label: "RWX Run URL" }),
+          createdAt: now,
+        });
+        deps.broadcastArtifactCreated(artifact);
+      }
       deps.broadcast({ type: "preview_mode", enabled: body.enabled });
-      return Response.json({ enabled: body.enabled });
+      return Response.json({
+        enabled: body.enabled,
+        ...(runUrl ? { rwxRunUrl: runUrl, rwxRunLabel: "RWX Run URL" } : {}),
+      });
     },
 
     async updateTitle(request: Request): Promise<Response> {

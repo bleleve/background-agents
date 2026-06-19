@@ -30,7 +30,7 @@ interface SessionSandboxEventProcessorDeps {
   updateLastActivity: (timestamp: number) => void;
   scheduleInactivityCheck: () => Promise<void>;
   processMessageQueue: () => Promise<void>;
-  dispatchPreview: () => Promise<void>;
+  dispatchPreview: () => Promise<unknown>;
 }
 
 /** Event types that require delivery acknowledgement. */
