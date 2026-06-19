@@ -11,6 +11,7 @@ import type {
   Env,
   PullRequestOpenedPayload,
   PullRequestLabeledPayload,
+  PullRequestSynchronizedPayload,
   PullRequestStateChangedPayload,
   ReviewRequestedPayload,
   IssueCommentPayload,
@@ -41,6 +42,7 @@ import {
   extractReviewModelFromLabels,
   hasPlanLabel,
   isAskForReviewLabel,
+  isPreviewLabel,
   type GitHubLabel,
 } from "./label-resolution";
 
@@ -1053,6 +1055,10 @@ export async function handlePullRequestLabeled(
   const repoName = repo.name;
   const repoFullName = `${owner}/${repoName}`.toLowerCase();
 
+  if (isPreviewLabel(label.name)) {
+    return dispatchPullRequestPreview(env, payload, traceId);
+  }
+
   if (!isAskForReviewLabel(label.name)) {
     log.debug("handler.not_review_label", { trace_id: traceId, label: label.name });
     return { outcome: "skipped", skip_reason: "not_review_label" };
@@ -1145,6 +1151,66 @@ export async function handlePullRequestLabeled(
     existingSessionId,
     meta,
   });
+}
+
+/**
+ * Re-dispatch a labeled PR preview at its newest head. Standalone PR previews use
+ * a deterministic slug so every synchronize event addresses the same sandbox.
+ */
+export async function handlePullRequestSynchronized(
+  env: Env,
+  _log: Logger,
+  payload: PullRequestSynchronizedPayload,
+  traceId: string
+): Promise<HandlerResult> {
+  if (!payload.pull_request.labels?.some((label) => isPreviewLabel(label.name))) {
+    return { outcome: "skipped", skip_reason: "preview_not_enabled" };
+  }
+  return dispatchPullRequestPreview(env, payload, traceId);
+}
+
+async function dispatchPullRequestPreview(
+  env: Env,
+  payload: Pick<PullRequestLabeledPayload, "pull_request" | "repository">,
+  traceId: string
+): Promise<HandlerResult> {
+  const { pull_request: pr, repository: repo } = payload;
+  const owner = repo.owner.login;
+  const repoName = repo.name;
+  const repoFullName = `${owner}/${repoName}`.toLowerCase();
+  const sessionId =
+    extractSessionIdFromBranch(pr.head.ref) ??
+    (await lookupPrSession(env, repoFullName, pr.number)) ??
+    (await lookupReviewSession(env, repoFullName, pr.number));
+  const headers = await getAuthHeaders(env, traceId);
+  const response = sessionId
+    ? await env.CONTROL_PLANE.fetch(
+        `https://internal/sessions/${encodeURIComponent(sessionId)}/preview`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ enabled: true, commitSha: pr.head.sha }),
+        }
+      )
+    : await env.CONTROL_PLANE.fetch("https://internal/previews/dispatch", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          repoOwner: owner,
+          repoName,
+          commitSha: pr.head.sha,
+          slug: `${repoName}-${pr.number}`,
+        }),
+      });
+  if (!response.ok) {
+    throw new Error(`Preview dispatch failed: ${response.status} ${await response.text()}`);
+  }
+  return {
+    outcome: "processed",
+    session_id: sessionId ?? "",
+    message_id: "",
+    handler_action: "preview_dispatch",
+  };
 }
 
 /** Body of an internal `POST /internal/reviews` request (from the web UI). */

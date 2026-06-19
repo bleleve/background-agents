@@ -18,7 +18,15 @@ function createProcessor() {
     ),
     updateSandboxGitSyncStatus: vi.fn(),
     updateSessionCurrentSha: vi.fn(),
-    getSession: vi.fn(() => null as { opencode_session_id: string | null } | null),
+    updatePreviewDispatchedSha: vi.fn(),
+    getSession: vi.fn(
+      () =>
+        null as {
+          opencode_session_id: string | null;
+          preview_enabled?: number;
+          preview_dispatched_sha?: string | null;
+        } | null
+    ),
     updateOpencodeSessionId: vi.fn(),
   };
 
@@ -41,6 +49,7 @@ function createProcessor() {
   const getIsProcessing = vi.fn(() => false);
   const applySessionTitleUpdate = vi.fn((title: string) => ({ ok: true as const, title }));
   const waitUntil = vi.fn();
+  const dispatchPreview = vi.fn(async (_sha: string) => {});
 
   const processor = new SessionSandboxEventProcessor({
     ctx: { waitUntil } as unknown as DurableObjectState,
@@ -62,6 +71,7 @@ function createProcessor() {
     updateLastActivity,
     scheduleInactivityCheck,
     processMessageQueue,
+    dispatchPreview,
   });
 
   return {
@@ -77,10 +87,74 @@ function createProcessor() {
     updateLastActivity,
     applySessionTitleUpdate,
     waitUntil,
+    dispatchPreview,
   };
 }
 
 describe("SessionSandboxEventProcessor", () => {
+  it("dispatches an enabled preview when a completed turn reports a new HEAD", async () => {
+    const h = createProcessor();
+    h.repository.getSession.mockReturnValue({
+      opencode_session_id: null,
+      preview_enabled: 1,
+      preview_dispatched_sha: "1".repeat(40),
+    });
+    await h.processor.processSandboxEvent({
+      type: "execution_complete",
+      messageId: "message-1",
+      success: true,
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      commitSha: "2".repeat(40),
+    });
+
+    expect(h.dispatchPreview).toHaveBeenCalledWith("2".repeat(40));
+    expect(h.repository.updatePreviewDispatchedSha).toHaveBeenCalledWith("2".repeat(40));
+  });
+
+  it("does not redispatch a completed turn when preview mode is disabled", async () => {
+    const h = createProcessor();
+    h.repository.getSession.mockReturnValue({
+      opencode_session_id: null,
+      preview_enabled: 0,
+      preview_dispatched_sha: "1".repeat(40),
+    });
+
+    await h.processor.processSandboxEvent({
+      type: "execution_complete",
+      messageId: "message-1",
+      success: true,
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      commitSha: "2".repeat(40),
+    });
+
+    expect(h.repository.updateSessionCurrentSha).toHaveBeenCalledWith("2".repeat(40));
+    expect(h.dispatchPreview).not.toHaveBeenCalled();
+  });
+
+  it("does not redispatch a completed turn when HEAD was already dispatched", async () => {
+    const h = createProcessor();
+    const sha = "2".repeat(40);
+    h.repository.getSession.mockReturnValue({
+      opencode_session_id: null,
+      preview_enabled: 1,
+      preview_dispatched_sha: sha,
+    });
+
+    await h.processor.processSandboxEvent({
+      type: "execution_complete",
+      messageId: "message-1",
+      success: true,
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      commitSha: sha,
+    });
+
+    expect(h.dispatchPreview).not.toHaveBeenCalled();
+    expect(h.repository.updatePreviewDispatchedSha).not.toHaveBeenCalled();
+  });
+
   it("updates heartbeat without broadcasting", async () => {
     const h = createProcessor();
     const event: SandboxEvent = {

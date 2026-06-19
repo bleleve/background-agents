@@ -114,6 +114,7 @@ import {
 } from "./http/handlers/participants.handler";
 import { MessageService } from "./services/message.service";
 import { createAlarmHandler, type AlarmHandler } from "./alarm/handler";
+import { dispatchPreview } from "../preview-dispatch";
 
 /**
  * Recursively merge two plain objects, with override winning for non-dict values.
@@ -232,6 +233,7 @@ export class SessionDO extends DurableObject<Env> {
     updatePrState: (request) => this.prStateHandler.updatePrState(request),
     wsToken: (request) => this.wsTokenHandler.generateWsToken(request),
     updateTitle: (request) => this.sessionLifecycleHandler.updateTitle(request),
+    updatePreview: (request) => this.sessionLifecycleHandler.updatePreview(request),
     archive: (request) => this.sessionLifecycleHandler.archive(request),
     unarchive: (request) => this.sessionLifecycleHandler.unarchive(request),
     supersede: (request) => this.sessionLifecycleHandler.supersede(request),
@@ -612,6 +614,19 @@ export class SessionDO extends DurableObject<Env> {
         getSandboxSocket: () => this.wsManager.getSandboxSocket(),
         sendToSandbox: (ws, message) => this.wsManager.send(ws, message),
         updateSandboxStatus: (status) => this.updateSandboxStatus(status),
+        dispatchPreview: async (commitSha) => {
+          const session = this.getSession();
+          if (!session) throw new Error("Session not found");
+          const sessionId = this.getPublicSessionId(session);
+          await dispatchPreview(this.env, {
+            repoOwner: session.repo_owner,
+            repoName: session.repo_name,
+            commitSha,
+            slug: sessionId,
+            sessionId,
+          });
+        },
+        broadcast: (message) => this.broadcast(message),
         notifySessionLifecycle: ({ event, actorAuthorId, actorDisplayName }) => {
           // Fire-and-forget cross-channel notification. Reaches the
           // originating bot (Slack/Linear) via the session's most recent
@@ -741,6 +756,18 @@ export class SessionDO extends DurableObject<Env> {
         updateLastActivity: (timestamp) => this.updateLastActivity(timestamp),
         scheduleInactivityCheck: () => this.scheduleInactivityCheck(),
         processMessageQueue: () => this.messageQueue.processMessageQueue(),
+        dispatchPreview: async (commitSha) => {
+          const session = this.getSession();
+          if (!session) throw new Error("Session not found");
+          const sessionId = this.getPublicSessionId(session);
+          await dispatchPreview(this.env, {
+            repoOwner: session.repo_owner,
+            repoName: session.repo_name,
+            commitSha,
+            slug: sessionId,
+            sessionId,
+          });
+        },
       });
     }
 
@@ -2203,6 +2230,7 @@ export class SessionDO extends DurableObject<Env> {
           }
         : null,
       sandboxDashboardUrl: this.getSandboxDashboardUrl(sandbox?.modal_object_id),
+      previewEnabled: session?.preview_enabled === 1,
     };
   }
 

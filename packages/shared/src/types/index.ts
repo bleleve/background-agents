@@ -368,6 +368,7 @@ export type SandboxEvent =
       error?: string;
       sandboxId: string;
       timestamp: number;
+      commitSha?: string;
     }
   | {
       type: "artifact";
@@ -406,6 +407,7 @@ export type SandboxEvent =
       // /workspace/.tunnels.env. Lets the control plane restore the preview
       // links if a transient timeout cleared them while the sandbox was alive.
       tunnelUrls?: Record<string, string>;
+      commitSha?: string;
       timestamp: number;
     }
   | {
@@ -497,6 +499,7 @@ export type ServerMessage =
   | { type: "ttyd_info"; url: string; token: string }
   | { type: "tunnel_urls"; urls: Record<string, string> }
   | { type: "sandbox_dashboard_url"; url: string }
+  | { type: "preview_mode"; enabled: boolean }
   | { type: "error"; code: string; message: string };
 
 // Session state sent to clients
@@ -529,6 +532,7 @@ export interface SessionState {
   planCostSnapshot?: number | null;
   currentPlan?: PlanArtifact | null;
   sandboxDashboardUrl?: string | null;
+  previewEnabled?: boolean;
 }
 
 // Participant presence info
@@ -760,6 +764,7 @@ export interface CreateSessionRequest {
    * DEFAULT_PLAN_MODEL.
    */
   planModel?: string;
+  previewEnabled?: boolean;
 }
 
 export interface CreateSessionResponse {

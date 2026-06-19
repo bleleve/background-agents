@@ -2,7 +2,7 @@
 /// <reference types="@testing-library/jest-dom" />
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { ActionBar } from "./action-bar";
 
@@ -14,9 +14,24 @@ expect.extend(matchers);
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe("ActionBar", () => {
+  it("toggles preview mode for the session", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ enabled: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ActionBar sessionId="session-1" sessionStatus="active" artifacts={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview off" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Preview on" })).toBePressed());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session-1/preview",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ enabled: true }) })
+    );
+  });
+
   it("renders View PR for hydrated PR artifacts", () => {
     render(
       <ActionBar

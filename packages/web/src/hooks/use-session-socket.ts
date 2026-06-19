@@ -454,6 +454,10 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
           setSessionState((prev) => (prev ? { ...prev, sandboxDashboardUrl: data.url } : null));
           break;
 
+        case "preview_mode":
+          setSessionState((prev) => (prev ? { ...prev, previewEnabled: data.enabled } : null));
+          break;
+
         case "sandbox_ready":
           setSessionState((prev) => (prev ? { ...prev, sandboxStatus: "ready" } : null));
           break;

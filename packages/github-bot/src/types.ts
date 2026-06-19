@@ -96,6 +96,13 @@ export interface PullRequestLabeledPayload {
   sender: { login: string; id: number; avatar_url: string };
 }
 
+export interface PullRequestSynchronizedPayload {
+  action: "synchronize";
+  pull_request: PullRequestLabeledPayload["pull_request"];
+  repository: PullRequestLabeledPayload["repository"];
+  sender: PullRequestLabeledPayload["sender"];
+}
+
 export interface ReviewRequestedPayload {
   action: "review_requested";
   pull_request: {

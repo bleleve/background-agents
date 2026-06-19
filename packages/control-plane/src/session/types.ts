@@ -44,6 +44,8 @@ export interface SessionRow {
   plan_approval_status: PlanApprovalStatus | null;
   plan_model: string | null; // Model used for planning turns (NULL when plan_mode=0)
   plan_cost_snapshot: number | null; // total_cost captured at plan approval; NULL until then
+  preview_enabled?: number;
+  preview_dispatched_sha?: string | null;
   created_at: number;
   updated_at: number;
 }

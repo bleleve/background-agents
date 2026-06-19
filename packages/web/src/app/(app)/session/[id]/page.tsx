@@ -973,6 +973,7 @@ function SessionContent({
               artifacts={artifacts}
               reviewPrNumber={parseReviewSessionPrNumber(sessionState?.title)}
               isProcessing={isProcessing}
+              previewEnabled={sessionState?.previewEnabled ?? false}
               onArchive={handleArchive}
               onUnarchive={handleUnarchive}
             />

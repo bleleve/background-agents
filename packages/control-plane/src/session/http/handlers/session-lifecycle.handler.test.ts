@@ -86,6 +86,9 @@ function createHandler() {
     createParticipant: vi.fn(),
     createArtifact: vi.fn(),
     createMessage: vi.fn(),
+    updatePreviewEnabled: vi.fn(),
+    updateSessionCurrentSha: vi.fn(),
+    updatePreviewDispatchedSha: vi.fn(),
   };
   const getDurableObjectId = vi.fn(() => "session-do-id");
   const encryptToken = vi.fn();
@@ -112,6 +115,8 @@ function createHandler() {
   const updateSandboxStatus = vi.fn();
 
   const createSystemMessage = vi.fn();
+  const dispatchPreview = vi.fn(async () => {});
+  const broadcast = vi.fn();
 
   const handler = createSessionLifecycleHandler({
     repository,
@@ -134,6 +139,8 @@ function createHandler() {
     sendToSandbox,
     updateSandboxStatus,
     createSystemMessage,
+    dispatchPreview,
+    broadcast,
   });
 
   return {
@@ -407,6 +414,7 @@ describe("createSessionLifecycleHandler", () => {
       baseSha: "base-sha",
       currentSha: "head-sha",
       opencodeSessionId: "oc-1",
+      previewEnabled: false,
       status: "active",
       model: "anthropic/claude-haiku-4-5",
       reasoningEffort: "high",

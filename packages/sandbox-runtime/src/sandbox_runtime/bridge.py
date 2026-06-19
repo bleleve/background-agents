@@ -368,6 +368,25 @@ class AgentBridge:
             self.log.debug("bridge.tunnel_urls_read_failed", exc=e)
         return urls
 
+    async def _get_head_sha(self) -> str | None:
+        """Return the checked-out repository HEAD without blocking the event loop."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(self.repo_path),
+                "rev-parse",
+                "HEAD",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            sha = stdout.decode().strip()
+            return sha if proc.returncode == 0 and len(sha) == 40 else None
+        except Exception as e:
+            self.log.debug("bridge.head_sha_failed", exc=e)
+            return None
+
     async def _connect_and_run(self) -> None:
         """Connect to control plane and handle messages.
 
@@ -400,6 +419,9 @@ class AgentBridge:
                 tunnel_urls = self._read_tunnel_urls()
                 if tunnel_urls:
                     ready_event["tunnelUrls"] = tunnel_urls
+                commit_sha = await self._get_head_sha()
+                if commit_sha:
+                    ready_event["commitSha"] = commit_sha
                 await self._send_event(ready_event)
 
                 just_flushed = await self._flush_event_buffer()
@@ -856,11 +878,13 @@ class AgentBridge:
                             message_id=message_id,
                         )
 
+            commit_sha = await self._get_head_sha()
             await self._send_event(
                 {
                     "type": "execution_complete",
                     "messageId": message_id,
                     "success": not had_error,
+                    **({"commitSha": commit_sha} if commit_sha else {}),
                     **({"error": error_message} if error_message else {}),
                 }
             )
@@ -868,11 +892,13 @@ class AgentBridge:
         except Exception as e:
             outcome = "error"
             self.log.error("prompt.error", exc=e, message_id=message_id)
+            commit_sha = await self._get_head_sha()
             await self._send_event(
                 {
                     "type": "execution_complete",
                     "messageId": message_id,
                     "success": False,
+                    **({"commitSha": commit_sha} if commit_sha else {}),
                     "error": str(e),
                 }
             )

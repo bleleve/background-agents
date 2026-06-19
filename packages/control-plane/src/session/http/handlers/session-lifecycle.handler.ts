@@ -50,13 +50,18 @@ interface InitRequest {
   sandboxSettings?: SandboxSettings;
   planMode?: boolean;
   planModel?: string | null;
+  previewEnabled?: boolean;
 }
 
 export interface SessionLifecycleHandlerDeps {
   repository: Pick<
     SessionRepository,
     "upsertSession" | "createSandbox" | "createParticipant" | "createArtifact" | "createMessage"
-  >;
+  > &
+    Pick<
+      SessionRepository,
+      "updatePreviewEnabled" | "updateSessionCurrentSha" | "updatePreviewDispatchedSha"
+    >;
   getDurableObjectId: () => string;
   tokenEncryptionKey?: string;
   encryptToken: (token: string, encryptionKey: string) => Promise<string>;
@@ -99,6 +104,8 @@ export interface SessionLifecycleHandlerDeps {
    * the agent.
    */
   createSystemMessage: (content: string) => void;
+  dispatchPreview: (commitSha: string) => Promise<void>;
+  broadcast: (message: { type: "preview_mode"; enabled: boolean }) => void;
 }
 
 function sessionTitleUpdateStatus(
@@ -118,6 +125,7 @@ export interface SessionLifecycleHandler {
   init: (request: Request) => Promise<Response>;
   getState: () => Response;
   updateTitle: (request: Request) => Promise<Response>;
+  updatePreview: (request: Request) => Promise<Response>;
   archive: (request: Request) => Promise<Response>;
   unarchive: (request: Request) => Promise<Response>;
   cancel: () => Promise<Response>;
@@ -186,6 +194,7 @@ export function createSessionLifecycleHandler(
         sandboxSettings: body.sandboxSettings ? JSON.stringify(body.sandboxSettings) : null,
         planMode,
         planModel,
+        previewEnabled: body.previewEnabled,
         createdAt: now,
         updatedAt: now,
       });
@@ -256,6 +265,7 @@ export function createSessionLifecycleHandler(
         branchName: session.branch_name,
         baseSha: session.base_sha,
         currentSha: session.current_sha,
+        previewEnabled: session.preview_enabled === 1,
         opencodeSessionId: session.opencode_session_id,
         status: session.status,
         model: session.model,
@@ -272,6 +282,46 @@ export function createSessionLifecycleHandler(
             }
           : null,
       });
+    },
+
+    async updatePreview(request: Request): Promise<Response> {
+      const session = deps.getSession();
+      if (!session) return Response.json({ error: "Session not found" }, { status: 404 });
+
+      let body: { enabled?: boolean; commitSha?: string; userId?: string };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return Response.json({ error: "Invalid request body" }, { status: 400 });
+      }
+      if (typeof body.enabled !== "boolean") {
+        return Response.json({ error: "enabled must be a boolean" }, { status: 400 });
+      }
+      if (body.commitSha !== undefined && !/^[0-9a-f]{40}$/i.test(body.commitSha)) {
+        return Response.json({ error: "commitSha must be a full Git SHA" }, { status: 400 });
+      }
+      if (body.userId && !deps.getParticipantByUserId(body.userId)) {
+        return Response.json({ error: "Not authorized to update preview mode" }, { status: 403 });
+      }
+
+      if (body.commitSha) deps.repository.updateSessionCurrentSha(body.commitSha);
+      const sha = body.commitSha ?? session.current_sha;
+
+      if (body.enabled && sha && sha !== session.preview_dispatched_sha) {
+        try {
+          await deps.dispatchPreview(sha);
+          deps.repository.updatePreviewDispatchedSha(sha);
+        } catch (error) {
+          deps.getLog().error("preview.dispatch_failed", {
+            error: error instanceof Error ? error : String(error),
+            commit_sha: sha,
+          });
+          return Response.json({ error: "Failed to dispatch preview" }, { status: 502 });
+        }
+      }
+      deps.repository.updatePreviewEnabled(body.enabled, deps.now());
+      deps.broadcast({ type: "preview_mode", enabled: body.enabled });
+      return Response.json({ enabled: body.enabled, dispatchedSha: sha ?? null });
     },
 
     async updateTitle(request: Request): Promise<Response> {

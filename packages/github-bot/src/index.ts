@@ -10,6 +10,7 @@ import type {
   Env,
   PullRequestOpenedPayload,
   PullRequestLabeledPayload,
+  PullRequestSynchronizedPayload,
   PullRequestStateChangedPayload,
   ReviewRequestedPayload,
   IssueCommentPayload,
@@ -24,6 +25,7 @@ import { verifyWebhookSignature } from "./verify";
 import {
   handlePullRequestOpened,
   handlePullRequestLabeled,
+  handlePullRequestSynchronized,
   handlePullRequestStateChanged,
   handleReviewRequested,
   handleIssueComment,
@@ -338,6 +340,14 @@ function dispatchHandler(
       }
       if (p.action === "labeled") {
         return handlePullRequestLabeled(env, log, payload as PullRequestLabeledPayload, traceId);
+      }
+      if (p.action === "synchronize") {
+        return handlePullRequestSynchronized(
+          env,
+          log,
+          payload as PullRequestSynchronizedPayload,
+          traceId
+        );
       }
       if (p.action === "closed" || p.action === "reopened") {
         return handlePullRequestStateChanged(
