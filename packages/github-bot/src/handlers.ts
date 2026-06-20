@@ -1057,6 +1057,10 @@ export async function handlePullRequestLabeled(
   const repoFullName = `${owner}/${repoName}`.toLowerCase();
 
   if (isPreviewLabel(label.name)) {
+    if (env.PREVIEW_LABEL_ENABLED !== "true") {
+      log.debug("handler.preview_label_disabled", { trace_id: traceId, label: label.name });
+      return { outcome: "skipped", skip_reason: "preview_label_disabled" };
+    }
     return dispatchPullRequestPreview(env, payload, traceId, "github_label_added");
   }
 
@@ -1164,6 +1168,9 @@ export async function handlePullRequestSynchronized(
   payload: PullRequestSynchronizedPayload,
   traceId: string
 ): Promise<HandlerResult> {
+  if (env.PREVIEW_LABEL_ENABLED !== "true") {
+    return { outcome: "skipped", skip_reason: "preview_label_disabled" };
+  }
   if (!payload.pull_request.labels?.some((label) => isPreviewLabel(label.name))) {
     return { outcome: "skipped", skip_reason: "preview_not_enabled" };
   }

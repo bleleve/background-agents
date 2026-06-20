@@ -49,6 +49,7 @@ module "github_bot_worker" {
     { name = "DEFAULT_PLAN_MODEL", value = "anthropic/claude-haiku-4-5" },
     { name = "GITHUB_BOT_USERNAME", value = var.github_bot_username },
     { name = "REEF_ALIAS_ENABLED", value = var.reef_alias_enabled ? "true" : "false" },
+    { name = "PREVIEW_LABEL_ENABLED", value = var.preview_label_enabled ? "true" : "false" },
   ]
 
   secrets = [

@@ -41,6 +41,7 @@ async function enablePreviewForExistingSession(
   payload: LinearWebhookPayload,
   env: Env
 ): Promise<void> {
+  if (env.PREVIEW_LABEL_ENABLED !== "true") return;
   if (!wasPreviewLabelAdded(payload)) return;
 
   const existingSession = await lookupIssueSession(env, payload.data.id);

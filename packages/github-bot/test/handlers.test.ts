@@ -1910,7 +1910,7 @@ const pullRequestLabeledPayload: PullRequestLabeledPayload = {
 
 describe("handlePullRequestLabeled", () => {
   it("uses a stable repo-and-PR slug for a preview without a session", async () => {
-    const env = createMockEnv();
+    const env = { ...createMockEnv(), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
     const log = createMockLogger();
     const cpFetch = getControlPlaneFetch(env);
     cpFetch.mockResolvedValue(new Response(JSON.stringify({ dispatchId: "d-1" }), { status: 202 }));
@@ -1933,6 +1933,24 @@ describe("handlePullRequestLabeled", () => {
       commitSha: "abc123",
       slug: "widgets-42",
     });
+  });
+
+  it("skips the preview label when PREVIEW_LABEL_ENABLED is not set", async () => {
+    const env = createMockEnv(); // PREVIEW_LABEL_ENABLED not set → off by default
+    const log = createMockLogger();
+    const payload: PullRequestLabeledPayload = {
+      ...pullRequestLabeledPayload,
+      label: { name: "preview" },
+      pull_request: {
+        ...pullRequestLabeledPayload.pull_request,
+        labels: [{ name: "preview" }],
+      },
+    };
+
+    const result = await handlePullRequestLabeled(env, log, payload, "trace-preview");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "preview_label_disabled" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
   });
 
   it("re-runs a full code review when the reef: ask for review label is added", async () => {
@@ -2065,7 +2083,7 @@ describe("handlePullRequestLabeled", () => {
 
 describe("handlePullRequestSynchronized", () => {
   it("re-dispatches a standalone preview with the same slug", async () => {
-    const env = createMockEnv();
+    const env = { ...createMockEnv(), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
     const log = createMockLogger();
     const cpFetch = getControlPlaneFetch(env);
     cpFetch.mockResolvedValue(new Response(JSON.stringify({ dispatchId: "d-1" }), { status: 202 }));
@@ -2090,7 +2108,7 @@ describe("handlePullRequestSynchronized", () => {
   });
 
   it("does not dispatch a PR update without the preview label", async () => {
-    const env = createMockEnv();
+    const env = { ...createMockEnv(), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
     const payload: PullRequestSynchronizedPayload = {
       action: "synchronize",
       pull_request: { ...pullRequestLabeledPayload.pull_request, labels: [] },
@@ -2101,6 +2119,24 @@ describe("handlePullRequestSynchronized", () => {
     await expect(
       handlePullRequestSynchronized(env, createMockLogger(), payload, "trace-sync")
     ).resolves.toEqual({ outcome: "skipped", skip_reason: "preview_not_enabled" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("skips when PREVIEW_LABEL_ENABLED is not set, even if the label is present", async () => {
+    const env = createMockEnv(); // PREVIEW_LABEL_ENABLED not set → off by default
+    const payload: PullRequestSynchronizedPayload = {
+      action: "synchronize",
+      pull_request: {
+        ...pullRequestLabeledPayload.pull_request,
+        labels: [{ name: "preview" }],
+      },
+      repository: pullRequestLabeledPayload.repository,
+      sender: pullRequestLabeledPayload.sender,
+    };
+
+    await expect(
+      handlePullRequestSynchronized(env, createMockLogger(), payload, "trace-sync")
+    ).resolves.toEqual({ outcome: "skipped", skip_reason: "preview_label_disabled" });
     expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
   });
 });

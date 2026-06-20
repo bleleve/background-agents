@@ -167,7 +167,7 @@ describe("handleLinearIssueEvent", () => {
         }),
       });
       const fetcher = createFakeFetcher(200);
-      const env = makeEnv(kv, fetcher);
+      const env = { ...makeEnv(kv, fetcher), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
 
       await handleLinearIssueEvent(updatePayload, env);
 
@@ -203,7 +203,7 @@ describe("handleLinearIssueEvent", () => {
         "issue:issue-abc": JSON.stringify({ sessionId: "session-existing" }),
       });
       const fetcher = createFakeFetcher(200);
-      const env = makeEnv(kv, fetcher);
+      const env = { ...makeEnv(kv, fetcher), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
 
       await handleLinearIssueEvent(updatePayload, env);
 
@@ -213,6 +213,36 @@ describe("handleLinearIssueEvent", () => {
         expect.objectContaining({
           body: JSON.stringify({ enabled: true, reason: "linear_label_added" }),
         })
+      );
+    });
+
+    it("does not enable preview when PREVIEW_LABEL_ENABLED is not set, even if the label is added", async () => {
+      const updatePayload: LinearWebhookPayload = {
+        ...baseCreatePayload,
+        action: "update",
+        updatedFrom: { labels: baseCreatePayload.data.labels },
+        data: {
+          ...baseCreatePayload.data,
+          labels: [
+            ...(baseCreatePayload.data.labels ?? []),
+            { id: "label-preview", name: "preview", color: "#00ff00" },
+          ],
+        },
+      };
+      const kv = createFakeKV({
+        "config:project-repos": JSON.stringify(projectRepoMapping),
+        "issue:issue-abc": JSON.stringify({ sessionId: "session-existing" }),
+      });
+      const fetcher = createFakeFetcher(200);
+      const env = makeEnv(kv, fetcher); // PREVIEW_LABEL_ENABLED not set → off by default
+
+      await handleLinearIssueEvent(updatePayload, env);
+
+      // Only the linear-event forward should fire; the preview endpoint must not be called.
+      expect(fetcher.fetch).toHaveBeenCalledOnce();
+      expect(fetcher.fetch).toHaveBeenCalledWith(
+        "https://internal/internal/linear-event",
+        expect.objectContaining({ method: "POST" })
       );
     });
 

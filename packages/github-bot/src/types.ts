@@ -52,6 +52,13 @@ export interface Env {
    * Only enable this in the production environment.
    */
   REEF_ALIAS_ENABLED?: string;
+
+  /**
+   * When set to "true", the bot responds to the "preview" label on pull requests
+   * by dispatching an RWX preview run. Defaults to off so that multiple
+   * deployments do not all react to the same label.
+   */
+  PREVIEW_LABEL_ENABLED?: string;
 }
 
 /**
