@@ -25,10 +25,12 @@ import httpx
 
 from .constants import (
     CODE_SERVER_PORT,
+    CODE_SERVER_PORT_ENV_VAR,
     EXPECTED_TUNNEL_PORTS_ENV_VAR,
     SANDBOX_ENV_FILE_PATH,
     TTYD_PORT,
     TTYD_PROXY_PORT,
+    TTYD_PROXY_PORT_ENV_VAR,
     TUNNEL_ENV_FILE_PATH,
 )
 from .log_config import configure_logging, get_logger
@@ -49,6 +51,18 @@ def _deep_merge(base: dict, override: dict) -> dict:
         else:
             result[key] = value
     return result
+
+
+def _port_from_env(env_var: str, default: int) -> int:
+    """Read an integer port from the environment, falling back to ``default``."""
+    raw = os.environ.get(env_var)
+    if raw is None:
+        return default
+    try:
+        port = int(raw)
+    except ValueError:
+        return default
+    return port if 1 <= port <= 65535 else default
 
 
 # Maps tool filename → env var that gates its installation. A tool is installed
@@ -801,10 +815,11 @@ class SandboxSupervisor:
         if self.repo_path.exists() and (self.repo_path / ".git").exists():
             workdir = self.repo_path
 
+        code_server_port = _port_from_env(CODE_SERVER_PORT_ENV_VAR, CODE_SERVER_PORT)
         self.code_server_process = await asyncio.create_subprocess_exec(
             "code-server",
             "--bind-addr",
-            f"0.0.0.0:{CODE_SERVER_PORT}",
+            f"0.0.0.0:{code_server_port}",
             "--auth",
             "password",
             "--disable-telemetry",
@@ -816,7 +831,7 @@ class SandboxSupervisor:
         )
 
         asyncio.create_task(self._forward_code_server_logs())
-        self.log.info("code_server.started", port=CODE_SERVER_PORT)
+        self.log.info("code_server.started", port=code_server_port)
 
     async def _forward_code_server_logs(self) -> None:
         """Forward code-server stdout to supervisor stdout."""
@@ -946,7 +961,7 @@ class SandboxSupervisor:
         cmd = [
             "ttyd",
             "--port",
-            str(TTYD_PORT),
+            str(TTYD_PORT),  # localhost-only internal port; fixed (never exposed)
             "--interface",
             "127.0.0.1",  # localhost only — proxy is the only external gateway
             "--writable",
@@ -973,7 +988,10 @@ class SandboxSupervisor:
 
         cmd = ["bun", "run", "/app/sandbox_runtime/ttyd_proxy/server.ts"]
 
-        self.log.info("ttyd_proxy.starting", port=TTYD_PROXY_PORT)
+        self.log.info(
+            "ttyd_proxy.starting",
+            port=_port_from_env(TTYD_PROXY_PORT_ENV_VAR, TTYD_PROXY_PORT),
+        )
 
         self.ttyd_proxy_process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -2014,7 +2032,8 @@ class SandboxSupervisor:
 
             if self.ttyd_process is not None:
                 ttyd_ready = await self._wait_for_port(
-                    TTYD_PORT, timeout_seconds=self.SIDECAR_TIMEOUT_SECONDS
+                    TTYD_PORT,
+                    timeout_seconds=self.SIDECAR_TIMEOUT_SECONDS,
                 )
                 if ttyd_ready:
                     try:
