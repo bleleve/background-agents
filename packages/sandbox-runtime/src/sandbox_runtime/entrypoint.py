@@ -577,10 +577,43 @@ class SandboxSupervisor:
         cached_modules = deps_cache / "node_modules"
         local_modules = opencode_dir / "node_modules"
         if cached_modules.is_dir() and not local_modules.exists():
-            shutil.copytree(cached_modules, local_modules, symlinks=True)
+            self._materialize_node_modules(cached_modules, local_modules)
 
         # Ensure .opencode is excluded from git tracking in the cloned repo.
         self._exclude_opencode_from_git(workdir)
+
+    def _materialize_node_modules(self, src: Path, dest: Path) -> None:
+        """Make the pre-built OpenCode node_modules available at ``dest``.
+
+        These deps are read-only reference data baked into the image and are
+        identical for every session. A plain ``shutil.copytree`` copies file
+        *data* for thousands of small files, which on the repo-image filesystem
+        can take minutes and silently dominate boot (no timing log previously
+        bracketed this step). Hardlinking each file only creates directory
+        entries — no data copy — turning that into roughly a second.
+
+        Hardlinks require ``src`` and ``dest`` on the same device; if they live
+        on different mounts the per-file ``os.link`` fails with ``EXDEV``, so we
+        fall back to a normal copy. Either way the duration and the path taken
+        are logged so this step is observable.
+        """
+        start = time.monotonic()
+        try:
+            shutil.copytree(src, dest, symlinks=True, copy_function=os.link)
+            mode = "hardlink"
+        except (OSError, shutil.Error) as exc:
+            # Cross-device (EXDEV) or partial link failure: drop whatever the
+            # aborted attempt created and fall back to a real copy so boot still
+            # succeeds — just slowly.
+            shutil.rmtree(dest, ignore_errors=True)
+            shutil.copytree(src, dest, symlinks=True)
+            mode = "copy"
+            self.log.warn("opencode.node_modules_hardlink_fallback", error=str(exc))
+        self.log.info(
+            "opencode.node_modules_ready",
+            mode=mode,
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
 
     def _install_bin_scripts(self) -> None:
         """Install standalone CLI scripts into /usr/local/bin.
@@ -1112,12 +1145,13 @@ class SandboxSupervisor:
             workdir = self.repo_path
 
         # Tool/skill/agent/plugin installation does synchronous, potentially
-        # heavy filesystem work — most notably _install_tools' shutil.copytree
-        # of the OpenCode node_modules. Run it off the event loop: while
-        # start_opencode() runs, the concurrent _boot_progress_loop must keep
-        # pinging the control plane. A multi-second blocking copy here would
-        # otherwise freeze the loop, stall the pings, and let the 90s heartbeat
-        # watchdog mark a healthy-but-slow boot as stale.
+        # heavy filesystem work — most notably _install_tools materializing the
+        # OpenCode node_modules (hardlink walk over thousands of files, or a
+        # full copy on the cross-device fallback). Run it off the event loop:
+        # while start_opencode() runs, the concurrent _boot_progress_loop must
+        # keep pinging the control plane. A multi-second blocking call here
+        # would otherwise freeze the loop, stall the pings, and let the 90s
+        # heartbeat watchdog mark a healthy-but-slow boot as stale.
         await asyncio.to_thread(self._install_tools, workdir)
         await asyncio.to_thread(self._install_skills, workdir)
         await asyncio.to_thread(self._install_agents)
