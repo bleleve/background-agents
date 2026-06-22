@@ -5,10 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from src import web_api
-from src.sandbox.manager import (
-    DEFAULT_BUILD_TIMEOUT_SECONDS,
-    build_function_timeout_seconds,
-)
+from src.sandbox.manager import DEFAULT_BUILD_TIMEOUT_SECONDS
 
 
 def _patch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -16,19 +13,20 @@ def _patch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _patch_build_repo_image(monkeypatch: pytest.MonkeyPatch, captured: dict) -> None:
-    """Stub build_repo_image so we can capture .with_options(timeout=).spawn.aio(**)."""
+    """Stub build_repo_image so we can capture .spawn.aio(**kwargs).
+
+    The endpoint must call spawn directly — modal 1.3.1's Function has no
+    .with_options, so the stub deliberately omits it; if the endpoint reaches
+    for .with_options again the AttributeError fails the test.
+    """
 
     async def fake_aio(**kwargs):
         captured["spawn_kwargs"] = kwargs
         return SimpleNamespace(object_id="fc-1")
 
-    def with_options(**kwargs):
-        captured["with_options"] = kwargs
-        return SimpleNamespace(spawn=SimpleNamespace(aio=fake_aio))
-
     monkeypatch.setattr(
         "src.scheduler.image_builder.build_repo_image",
-        SimpleNamespace(with_options=with_options),
+        SimpleNamespace(spawn=SimpleNamespace(aio=fake_aio)),
     )
 
 
@@ -57,8 +55,8 @@ def test_build_endpoint_name_matches_control_plane_label():
 
 
 @pytest.mark.asyncio
-async def test_build_uses_requested_timeout_for_sandbox_and_function(monkeypatch):
-    """The requested build timeout drives the sandbox lifetime and the worker timeout."""
+async def test_build_passes_requested_timeout_to_sandbox(monkeypatch):
+    """The requested build timeout is forwarded to the worker (→ build sandbox lifetime)."""
     captured = {}
     _patch_auth(monkeypatch)
     _patch_build_repo_image(monkeypatch, captured)
@@ -76,7 +74,6 @@ async def test_build_uses_requested_timeout_for_sandbox_and_function(monkeypatch
 
     assert result["success"] is True
     assert captured["spawn_kwargs"]["build_timeout_seconds"] == 2400
-    assert captured["with_options"]["timeout"] == build_function_timeout_seconds(2400)
 
 
 @pytest.mark.asyncio
@@ -98,9 +95,6 @@ async def test_build_defaults_timeout_when_absent(monkeypatch):
 
     assert result["success"] is True
     assert captured["spawn_kwargs"]["build_timeout_seconds"] == DEFAULT_BUILD_TIMEOUT_SECONDS
-    assert captured["with_options"]["timeout"] == build_function_timeout_seconds(
-        DEFAULT_BUILD_TIMEOUT_SECONDS
-    )
 
 
 @pytest.mark.asyncio

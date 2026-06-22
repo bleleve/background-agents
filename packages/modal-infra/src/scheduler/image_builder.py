@@ -241,10 +241,18 @@ async def _stream_build_logs(
     return head_sha, False, setup_error or supervisor_error
 
 
+# Size the worker timeout for the LONGEST allowed build. The control plane caps
+# the requested build_timeout_seconds at MAX_BUILD_TIMEOUT_SECONDS, and modal
+# 1.3.1 has no per-call timeout override (Function.with_options does not exist),
+# so the static decorator must already accommodate the max. The actual per-build
+# limit is still enforced on the build sandbox itself via
+# create_build_sandbox(timeout_seconds=...); the worker just idles until that
+# sandbox finishes, then snapshots, so a generous ceiling here is free (it exits
+# as soon as the build completes).
 @app.function(
     image=function_image,
     secrets=[internal_api_secret, github_app_secrets],
-    timeout=build_function_timeout_seconds(DEFAULT_BUILD_TIMEOUT_SECONDS),
+    timeout=build_function_timeout_seconds(MAX_BUILD_TIMEOUT_SECONDS),
 )
 async def build_repo_image(
     repo_owner: str,
