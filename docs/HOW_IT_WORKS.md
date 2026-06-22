@@ -218,17 +218,22 @@ When restoring from a previous snapshot:
 ```
 ┌─────────────┐    ┌────────────┐    ┌─────────────┐    ┌───────┐
 │  Restore    │───▶│ Quick Sync │───▶│ Start Script│───▶│ Ready │
-│  Snapshot   │    │ (git pull) │    │ (optional)  │    │       │
+│  Snapshot   │    │ (git sync) │    │ (optional)  │    │       │
 └─────────────┘    └────────────┘    └─────────────┘    └───────┘
 ```
 
 1. **Restore snapshot**: Modal or Vercel restores the filesystem from a saved snapshot
-2. **Quick sync**: Pulls latest changes (usually just a few commits)
+2. **Quick sync**: Fetches the session branch and resets the working branch to the remote tip
+   (`git checkout -B <branch> origin/<branch>`). Uncommitted working-tree edits are stashed before
+   the reset and re-applied after it, so in-progress changes survive the restore.
 3. **Start script**: Runs `scripts/.openinspect/start.sh` for runtime startup (if present)
 4. **Ready**: Sandbox is ready almost instantly
 
-Snapshots include installed dependencies, built artifacts, and workspace state. This is why
-follow-up prompts in an existing session are much faster than the first prompt.
+Snapshots include installed dependencies, built artifacts, and workspace state. The quick sync
+preserves the working tree's **uncommitted** edits across the branch reset (stashed and re-applied);
+**committed** history, by contrast, follows the remote, so local commits survive a restore only once
+they've been pushed to the session branch. This is why follow-up prompts in an existing session are
+much faster than the first prompt.
 
 ### Repo Image Start
 

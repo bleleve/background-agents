@@ -180,15 +180,20 @@ Wide events use `outcome` to indicate result:
 
 #### Git Operations (`component: "bridge"` / `"supervisor"`)
 
-| Event                | Level       | Key Fields                                               | Description        |
-| -------------------- | ----------- | -------------------------------------------------------- | ------------------ |
-| `git.clone_start`    | info        | `repo_owner`, `repo_name`, `authenticated`               | Clone started      |
-| `git.clone_complete` | info        | `repo_path`                                              | Clone succeeded    |
-| `git.clone_error`    | error       | `stderr`, `exit_code`                                    | Clone failed       |
-| `git.sync_complete`  | info        | `head_sha`                                               | Repo sync complete |
-| `git.push_start`     | info        | `branch_name`, `repo_owner`, `repo_name`, `token_source` | Push started       |
-| `git.push_complete`  | info        | `branch_name`                                            | Push succeeded     |
-| `git.push_error`     | warn, error | `reason` or `exc`, `branch_name`                         | Push failed        |
+| Event                    | Level       | Key Fields                                               | Description                                                                  |
+| ------------------------ | ----------- | -------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `git.clone_start`        | info        | `repo_owner`, `repo_name`, `authenticated`               | Clone started                                                                |
+| `git.clone_complete`     | info        | `repo_path`                                              | Clone succeeded                                                              |
+| `git.clone_error`        | error       | `stderr`, `exit_code`                                    | Clone failed                                                                 |
+| `git.sync_complete`      | info        | `head_sha`                                               | Repo sync complete                                                           |
+| `git.stash_created`      | info        | `label`                                                  | Boot autostash of uncommitted edits created before the checkout reset        |
+| `git.stash_restored`     | info        | `label`                                                  | Boot autostash re-applied after checkout (uncommitted edits survive restore) |
+| `git.stash_pop_conflict` | warn        | `stderr`, `exit_code`                                    | Autostash pop conflicted; stash kept (recover via `git stash list`)          |
+| `git.stash_failed`       | warn        | `stderr`, `exit_code`                                    | `git stash push` failed; checkout attempted anyway                           |
+| `git.stash_skipped`      | warn        | `reason`                                                 | Stash skipped (e.g. it failed); checkout attempted on the dirty tree         |
+| `git.push_start`         | info        | `branch_name`, `repo_owner`, `repo_name`, `token_source` | Push started                                                                 |
+| `git.push_complete`      | info        | `branch_name`                                            | Push succeeded                                                               |
+| `git.push_error`         | warn, error | `reason` or `exc`, `branch_name`                         | Push failed                                                                  |
 
 #### OpenCode (`component: "bridge"`)
 
