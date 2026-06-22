@@ -616,10 +616,7 @@ async def api_build_img(
     require_auth(authorization)
 
     try:
-        from .sandbox.manager import (
-            DEFAULT_BUILD_TIMEOUT_SECONDS,
-            build_function_timeout_seconds,
-        )
+        from .sandbox.manager import DEFAULT_BUILD_TIMEOUT_SECONDS
         from .scheduler.image_builder import build_repo_image
 
         repo_owner = request.get("repo_owner")
@@ -642,10 +639,11 @@ async def api_build_img(
         if not default_branch:
             raise HTTPException(status_code=400, detail="default_branch is required")
 
-        function_timeout = build_function_timeout_seconds(build_timeout_seconds)
-
-        # Spawn the async builder — returns immediately
-        await build_repo_image.with_options(timeout=function_timeout).spawn.aio(
+        # Spawn the async builder — returns immediately. The worker's own timeout
+        # is sized for the max allowed build at definition time (modal 1.3.1 has
+        # no per-call Function.with_options override); the requested
+        # build_timeout_seconds is enforced on the build sandbox it creates.
+        await build_repo_image.spawn.aio(
             repo_owner=repo_owner,
             repo_name=repo_name,
             default_branch=default_branch,
