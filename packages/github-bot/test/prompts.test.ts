@@ -317,6 +317,41 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("Sonar");
   });
 
+  // A diff with `<`, `>`, `&`, `"` — asserts the body is embedded verbatim (the
+  // untrusted-content wrapper escapes only the tag sequence, not HTML entities),
+  // so hunk headers and code survive for the agent to hand-count line anchors.
+  const sampleDiff = `diff --git a/src/x.ts b/src/x.ts
+@@ -1,3 +1,4 @@
+ const a = 1;
+-const y = a > 0;
++const y = a < 0 && a > -10;
++export const z = "<tag>";
+`;
+
+  it("inlines a pre-fetched diff and tells the agent not to run gh pr diff", () => {
+    const prompt = buildCodeReviewPrompt({ ...baseParams, prDiff: sampleDiff });
+    expect(prompt).toContain("## Full Diff");
+    expect(prompt).toContain('<user_content source="github_pr_diff" author="github">');
+    // Diff body is verbatim — not HTML-escaped.
+    expect(prompt).toContain("const y = a < 0 && a > -10;");
+    expect(prompt).toContain('export const z = "<tag>";');
+    expect(prompt).not.toContain("&lt;");
+    expect(prompt).toContain("you do NOT need to run `gh pr diff 42`");
+    expect(prompt).toContain("Review the full diff provided above");
+    // The large-diff anti-loop fallback must not appear when the diff is inlined.
+    expect(prompt).not.toContain("## Diff access");
+  });
+
+  it("falls back to fetch-it-yourself with anti-loop guidance when no diff is inlined", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    // The quality bar references "## Full Diff" as a conditional phrase, so the
+    // reliable signal for "no diff inlined" is the absence of the diff block.
+    expect(prompt).not.toContain('<user_content source="github_pr_diff"');
+    expect(prompt).toContain("## Diff access");
+    expect(prompt).toContain("gh pr diff 42 > /tmp/pr-42.diff");
+    expect(prompt).toContain("Do NOT run `gh pr diff 42` repeatedly");
+  });
+
   it("permits formal verdicts via the submit-pr-review tool when autoApproveOnOpen is true", () => {
     const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
     expect(prompt).toContain("submit-pr-review");
@@ -365,6 +400,20 @@ describe("buildCommentActionPrompt", () => {
     const prompt = buildCommentActionPrompt(baseParams);
     expect(prompt).toContain("Do NOT submit a formal pull request review");
     expect(prompt).toContain("do not run `gh pr review`");
+  });
+
+  it("inlines a pre-fetched diff for the comment-action prompt", () => {
+    const prompt = buildCommentActionPrompt({ ...baseParams, prDiff: "diff --git a/f b/f\n+x\n" });
+    expect(prompt).toContain("## Full Diff");
+    expect(prompt).toContain('<user_content source="github_pr_diff" author="github">');
+    expect(prompt).toContain("Review the current changes in the **## Full Diff** above");
+    expect(prompt).not.toContain("## Diff access");
+  });
+
+  it("uses anti-loop fetch guidance when no diff is inlined", () => {
+    const prompt = buildCommentActionPrompt(baseParams);
+    expect(prompt).toContain("## Diff access");
+    expect(prompt).toContain("Get the current changes as described under **## Diff access** above");
   });
 
   it("works without title, base, or head (issue comment case)", () => {
@@ -632,5 +681,18 @@ describe("buildFailedChecksPrompt", () => {
     expect(prompt).toContain("Disprove it before posting");
     expect(prompt).toContain("Don't flag what the repo's own tooling already catches");
     expect(prompt).toContain("Out of scope — do not post");
+  });
+
+  it("inlines a pre-fetched diff as context when provided", () => {
+    const prompt = buildFailedChecksPrompt({ ...baseParams, prDiff: "diff --git a/f b/f\n+x\n" });
+    expect(prompt).toContain("## Full Diff");
+    expect(prompt).toContain('<user_content source="github_pr_diff" author="github">');
+  });
+
+  it("omits the diff section entirely when no diff is inlined (worktree is on head)", () => {
+    const prompt = buildFailedChecksPrompt(baseParams);
+    expect(prompt).not.toContain('<user_content source="github_pr_diff"');
+    // CI-fix worktree is on the PR head, so there is no `gh pr diff` fallback section.
+    expect(prompt).not.toContain("## Diff access");
   });
 });
