@@ -33,12 +33,27 @@ def _patch_build_repo_image(monkeypatch: pytest.MonkeyPatch, captured: dict) -> 
 
 
 async def _call_build(request: dict) -> dict:
-    return await web_api.api_build_repo_image.get_raw_f()(
+    return await web_api.api_build_img.get_raw_f()(
         request,
         authorization="Bearer test",
         x_trace_id=None,
         x_request_id=None,
     )
+
+
+def test_build_endpoint_name_matches_control_plane_label():
+    """The endpoint MUST be named `api_build_img`.
+
+    The function name drives the Modal web-endpoint label, and the control
+    plane calls it at `${baseUrl}-api-build-img.modal.run`
+    (packages/control-plane/src/sandbox/client.ts → buildRepoImageUrl). The
+    longer upstream name `api_build_repo_image` yields a different (and, in long
+    workspaces, hash-truncated) label, so the control plane's hard-coded URL
+    404s and repo-image rebuilds silently stop. This guard fails loudly if a
+    future upstream merge renames it back.
+    """
+    assert hasattr(web_api, "api_build_img")
+    assert not hasattr(web_api, "api_build_repo_image")
 
 
 @pytest.mark.asyncio

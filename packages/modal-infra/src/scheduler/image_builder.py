@@ -8,8 +8,8 @@ This module handles:
 - Scheduled rebuilds every 30 minutes (cron) with git ls-remote comparison
 
 The build flow:
-1. Control plane POSTs to api_build_repo_image with repo info + callback URL
-2. api_build_repo_image spawns build_repo_image.spawn() and returns immediately
+1. Control plane POSTs to api_build_img with repo info + callback URL
+2. api_build_img spawns build_repo_image.spawn() and returns immediately
 3. build_repo_image creates a build sandbox, waits for it to finish, snapshots
 4. On success/failure, POSTs result to the callback URL with HMAC auth
 
@@ -258,7 +258,7 @@ async def build_repo_image(
     """
     Async worker: create build sandbox, await exit, snapshot, callback.
 
-    This function is spawned by api_build_repo_image and runs asynchronously.
+    This function is spawned by api_build_img and runs asynchronously.
     Results are reported back to the control plane via callback URLs.
 
     Args:
