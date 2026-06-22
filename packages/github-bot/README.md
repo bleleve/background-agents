@@ -55,8 +55,10 @@ Key design decisions:
   session (delivery dedupe via KV `X-GitHub-Delivery`). The exception is re-triggering a review —
   the `reef: ask for review` label and the web "Re-run review" button re-run in the PR's existing
   review session (mapped in KV `review-session:<repo>:<pr>`).
-- **No PR context fetching**: The bot only uses metadata already in the webhook payload. The agent
-  gathers additional context (diffs, prior comments, file contents) itself using `gh` CLI.
+- **Minimal PR context fetching**: The bot pre-fetches the PR diff and inlines it into the prompt
+  for diffs below the large-diff threshold, so the agent reviews it directly without running
+  `gh pr diff` (larger diffs fall back to the agent fetching them itself). Beyond the diff, the
+  agent gathers any additional context (prior comments, file contents) itself using the `gh` CLI.
 
 ## Deployment
 
@@ -226,7 +228,9 @@ Three prompt templates in `src/prompts.ts`:
 
 **`buildCodeReviewPrompt`** — Includes PR title, body, author, branches, and instructions to:
 
-- Run `gh pr diff` for the full diff
+- Review the full diff — pre-fetched by the bot and inlined into the prompt for diffs below the
+  large-diff threshold; for larger diffs, fetch it with `gh pr diff` (the prompt carries anti-loop
+  guidance to save it to a file and read it in pages)
 - Submit a formal verdict only through the `submit-pr-review` tool, never raw `gh pr review` /
   `gh api .../pulls/{n}/reviews` (those are blocked in the sandbox by the `gh` wrapper — see
   `sandbox-runtime` `git_credential_helper` `gh-guard`). The tool routes to the control plane
