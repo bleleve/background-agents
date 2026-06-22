@@ -18,8 +18,17 @@ function createProcessor() {
     ),
     updateSandboxGitSyncStatus: vi.fn(),
     updateSessionCurrentSha: vi.fn(),
-    getSession: vi.fn(() => null as { opencode_session_id: string | null } | null),
+    getSession: vi.fn(
+      () =>
+        null as {
+          opencode_session_id: string | null;
+          preview_enabled?: number;
+          current_sha?: string | null;
+          preview_dispatched_sha?: string | null;
+        } | null
+    ),
     updateOpencodeSessionId: vi.fn(),
+    updatePreviewDispatchedSha: vi.fn(),
   };
 
   const callbackService = {
@@ -41,6 +50,7 @@ function createProcessor() {
   const getIsProcessing = vi.fn(() => false);
   const applySessionTitleUpdate = vi.fn((title: string) => ({ ok: true as const, title }));
   const waitUntil = vi.fn();
+  const dispatchPreview = vi.fn(async () => {});
 
   const processor = new SessionSandboxEventProcessor({
     ctx: { waitUntil } as unknown as DurableObjectState,
@@ -62,6 +72,7 @@ function createProcessor() {
     updateLastActivity,
     scheduleInactivityCheck,
     processMessageQueue,
+    dispatchPreview,
   });
 
   return {
@@ -77,10 +88,97 @@ function createProcessor() {
     updateLastActivity,
     applySessionTitleUpdate,
     waitUntil,
+    dispatchPreview,
   };
 }
 
 describe("SessionSandboxEventProcessor", () => {
+  it("dispatches a preview when a completed turn fires and preview is enabled", async () => {
+    const h = createProcessor();
+    h.repository.getSession.mockReturnValue({
+      opencode_session_id: null,
+      preview_enabled: 1,
+      current_sha: "2".repeat(40),
+      preview_dispatched_sha: null,
+    });
+    await h.processor.processSandboxEvent({
+      type: "execution_complete",
+      messageId: "message-1",
+      success: true,
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      commitSha: "2".repeat(40),
+    });
+
+    expect(h.dispatchPreview).toHaveBeenCalledWith("execution_complete");
+  });
+
+  it("dispatches a preview immediately on push_complete when preview is enabled", async () => {
+    const h = createProcessor();
+    h.repository.getSession.mockReturnValue({
+      opencode_session_id: null,
+      preview_enabled: 1,
+      current_sha: null,
+      preview_dispatched_sha: null,
+    });
+
+    await h.processor.processSandboxEvent({
+      type: "push_complete",
+      branchName: "my-feature-branch",
+      commitSha: "3".repeat(40),
+      sandboxId: "sb-1",
+      timestamp: 1000,
+    });
+
+    expect(h.dispatchPreview).toHaveBeenCalledWith("push_complete");
+    expect(h.repository.updatePreviewDispatchedSha).toHaveBeenCalledWith("3".repeat(40));
+  });
+
+  it("does not dispatch a preview twice for the same commit", async () => {
+    const h = createProcessor();
+    const sha = "4".repeat(40);
+    h.repository.getSession.mockReturnValue({
+      opencode_session_id: null,
+      preview_enabled: 1,
+      current_sha: sha,
+      preview_dispatched_sha: sha,
+    });
+
+    await h.processor.processSandboxEvent({
+      type: "execution_complete",
+      messageId: "message-1",
+      success: true,
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      commitSha: sha,
+    });
+
+    expect(h.dispatchPreview).not.toHaveBeenCalled();
+    expect(h.repository.updatePreviewDispatchedSha).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch a preview when preview mode is disabled", async () => {
+    const h = createProcessor();
+    h.repository.getSession.mockReturnValue({
+      opencode_session_id: null,
+      preview_enabled: 0,
+      current_sha: null,
+      preview_dispatched_sha: null,
+    });
+
+    await h.processor.processSandboxEvent({
+      type: "execution_complete",
+      messageId: "message-1",
+      success: true,
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      commitSha: "2".repeat(40),
+    });
+
+    expect(h.repository.updateSessionCurrentSha).toHaveBeenCalledWith("2".repeat(40));
+    expect(h.dispatchPreview).not.toHaveBeenCalled();
+  });
+
   it("updates heartbeat without broadcasting", async () => {
     const h = createProcessor();
     const event: SandboxEvent = {

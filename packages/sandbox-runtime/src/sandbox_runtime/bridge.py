@@ -368,6 +368,25 @@ class AgentBridge:
             self.log.debug("bridge.tunnel_urls_read_failed", exc=e)
         return urls
 
+    async def _get_head_sha(self) -> str | None:
+        """Return the checked-out repository HEAD without blocking the event loop."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(self.repo_path),
+                "rev-parse",
+                "HEAD",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            sha = stdout.decode().strip()
+            return sha if proc.returncode == 0 and len(sha) == 40 else None
+        except Exception as e:
+            self.log.debug("bridge.head_sha_failed", exc=e)
+            return None
+
     async def _connect_and_run(self) -> None:
         """Connect to control plane and handle messages.
 
@@ -400,6 +419,9 @@ class AgentBridge:
                 tunnel_urls = self._read_tunnel_urls()
                 if tunnel_urls:
                     ready_event["tunnelUrls"] = tunnel_urls
+                commit_sha = await self._get_head_sha()
+                if commit_sha:
+                    ready_event["commitSha"] = commit_sha
                 await self._send_event(ready_event)
 
                 just_flushed = await self._flush_event_buffer()
@@ -661,6 +683,17 @@ class AgentBridge:
             "</user_message>", "<\\/user_message>"
         )
 
+    # Appended to every implementation turn so the agent pushes its commits
+    # before ending the turn, which triggers an immediate preview dispatch for
+    # sessions with preview enabled.
+    _PUSH_TURN_INSTRUCTION = (
+        "<system_instruction>\n"
+        "After completing all changes for this turn, push your commits to the remote "
+        "branch before finishing. Use git push so the latest work is immediately "
+        "available on the remote.\n"
+        "</system_instruction>"
+    )
+
     @staticmethod
     def _build_resume_preamble(resume_context: dict[str, Any]) -> str | None:
         """Build a restate-and-confirm preamble from a resume context payload.
@@ -777,6 +810,7 @@ class AgentBridge:
                 preamble_kind = "resume"
             else:
                 preamble_kind = "none"
+            content = f"{content}\n\n{self._PUSH_TURN_INSTRUCTION}"
 
         self.log.info(
             "prompt.start",
@@ -856,11 +890,13 @@ class AgentBridge:
                             message_id=message_id,
                         )
 
+            commit_sha = await self._get_head_sha()
             await self._send_event(
                 {
                     "type": "execution_complete",
                     "messageId": message_id,
                     "success": not had_error,
+                    **({"commitSha": commit_sha} if commit_sha else {}),
                     **({"error": error_message} if error_message else {}),
                 }
             )
@@ -868,11 +904,13 @@ class AgentBridge:
         except Exception as e:
             outcome = "error"
             self.log.error("prompt.error", exc=e, message_id=message_id)
+            commit_sha = await self._get_head_sha()
             await self._send_event(
                 {
                     "type": "execution_complete",
                     "messageId": message_id,
                     "success": False,
+                    **({"commitSha": commit_sha} if commit_sha else {}),
                     "error": str(e),
                 }
             )
@@ -2055,10 +2093,12 @@ class AgentBridge:
                 )
             else:
                 self.log.info("git.push_complete", branch_name=branch_name)
+                commit_sha = await self._get_head_sha()
                 await self._send_event(
                     {
                         "type": "push_complete",
                         "branchName": branch_name,
+                        **({"commitSha": commit_sha} if commit_sha else {}),
                         "timestamp": time.time(),
                     }
                 )

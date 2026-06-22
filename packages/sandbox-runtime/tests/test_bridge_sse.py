@@ -790,6 +790,40 @@ class TestSSEStreaming:
         assert complete["success"] is False
         assert complete["error"] == "OpenCode completed without emitting assistant output."
 
+    @pytest.mark.asyncio
+    async def test_handle_prompt_reports_final_head_after_agent_finishes(self, bridge: AgentBridge):
+        """The completion event must carry HEAD after the agent has finished its turn."""
+        final_sha = "a" * 40
+        bridge._configure_git_identity = AsyncMock()
+        bridge._get_head_sha = AsyncMock(return_value=final_sha)
+        bridge._send_event = AsyncMock()
+
+        async def stream_response(*_args, **_kwargs):
+            yield {
+                "type": "token",
+                "messageId": "cp-msg-1",
+                "content": "Changes committed.",
+            }
+
+        bridge._stream_opencode_response_sse = stream_response
+
+        await bridge._handle_prompt(
+            {
+                "messageId": "cp-msg-1",
+                "content": "Implement the change",
+                "model": "anthropic/claude-haiku-4-5",
+            }
+        )
+
+        complete = next(
+            call.args[0]
+            for call in bridge._send_event.await_args_list
+            if call.args[0]["type"] == "execution_complete"
+        )
+        assert complete["success"] is True
+        assert complete["commitSha"] == final_sha
+        bridge._get_head_sha.assert_awaited_once()
+
 
 class TestFetchFinalMessageState:
     """Tests for _fetch_final_message_state method.

@@ -58,7 +58,8 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 #      sandbox lifetime, e.g. Vercel, can lower it so the bridge self-stops first)
 # v86: bridge adopts a control-plane-supplied opencodeSessionId on prompt so a
 #      relaunched/restored sandbox resumes the prior OpenCode session
-CACHE_BUSTER = "v86-bridge-resume-opencode-session"
+# v87: push completion events include HEAD SHA for preview dispatch deduplication
+CACHE_BUSTER = "v87-push-complete-sha"
 
 # Base image with all development tools
 base_image = (

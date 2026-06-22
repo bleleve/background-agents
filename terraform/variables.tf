@@ -190,6 +190,12 @@ variable "reef_alias_enabled" {
   default     = false
 }
 
+variable "preview_label_enabled" {
+  description = "Enable the GitHub and Linear bots to respond to the \"preview\" label. Set to true only in the deployment that should trigger RWX preview runs when this label is applied; all other deployments should leave this false."
+  type        = bool
+  default     = false
+}
+
 # =============================================================================
 # Slack App Credentials
 # =============================================================================

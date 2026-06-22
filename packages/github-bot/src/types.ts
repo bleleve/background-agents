@@ -52,6 +52,13 @@ export interface Env {
    * Only enable this in the production environment.
    */
   REEF_ALIAS_ENABLED?: string;
+
+  /**
+   * When set to "true", the bot responds to the "preview" label on pull requests
+   * by dispatching an RWX preview run. Defaults to off so that multiple
+   * deployments do not all react to the same label.
+   */
+  PREVIEW_LABEL_ENABLED?: string;
 }
 
 /**
@@ -94,6 +101,13 @@ export interface PullRequestLabeledPayload {
   };
   repository: { owner: { login: string }; name: string; private: boolean };
   sender: { login: string; id: number; avatar_url: string };
+}
+
+export interface PullRequestSynchronizedPayload {
+  action: "synchronize";
+  pull_request: PullRequestLabeledPayload["pull_request"];
+  repository: PullRequestLabeledPayload["repository"];
+  sender: PullRequestLabeledPayload["sender"];
 }
 
 export interface ReviewRequestedPayload {

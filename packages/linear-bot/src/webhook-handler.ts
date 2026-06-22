@@ -32,6 +32,7 @@ import {
   extractModelFromLabels,
   extractPlanModelFromLabels,
   isPlanModeTriggered,
+  isPreviewEnabled,
   resolveSessionModelSettings,
 } from "./model-resolution";
 import {
@@ -142,6 +143,7 @@ async function createSession(
     actorEmail?: string;
     planMode?: boolean;
     planModel?: string;
+    previewEnabled?: boolean;
   },
   traceId?: string
 ): Promise<{ ok: true; sessionId: string } | { ok: false; status: number; body: string }> {
@@ -918,6 +920,7 @@ async function handleNewSession(
       actorEmail,
       planMode,
       planModel,
+      previewEnabled: isPreviewEnabled(labels),
     },
     traceId
   );

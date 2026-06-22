@@ -11,6 +11,7 @@ import type {
   Env,
   PullRequestOpenedPayload,
   PullRequestLabeledPayload,
+  PullRequestSynchronizedPayload,
   PullRequestStateChangedPayload,
   ReviewRequestedPayload,
   IssueCommentPayload,
@@ -26,6 +27,7 @@ import {
   postReaction,
   checkSenderPermission,
   dismissPullRequestReview,
+  createIssueComment,
 } from "./github-auth";
 import {
   buildCodeReviewPrompt,
@@ -41,6 +43,7 @@ import {
   extractReviewModelFromLabels,
   hasPlanLabel,
   isAskForReviewLabel,
+  isPreviewLabel,
   type GitHubLabel,
 } from "./label-resolution";
 
@@ -1053,6 +1056,14 @@ export async function handlePullRequestLabeled(
   const repoName = repo.name;
   const repoFullName = `${owner}/${repoName}`.toLowerCase();
 
+  if (isPreviewLabel(label.name)) {
+    if (env.PREVIEW_LABEL_ENABLED !== "true") {
+      log.debug("handler.preview_label_disabled", { trace_id: traceId, label: label.name });
+      return { outcome: "skipped", skip_reason: "preview_label_disabled" };
+    }
+    return dispatchPullRequestPreview(env, payload, traceId, "github_label_added");
+  }
+
   if (!isAskForReviewLabel(label.name)) {
     log.debug("handler.not_review_label", { trace_id: traceId, label: label.name });
     return { outcome: "skipped", skip_reason: "not_review_label" };
@@ -1145,6 +1156,94 @@ export async function handlePullRequestLabeled(
     existingSessionId,
     meta,
   });
+}
+
+/**
+ * Re-dispatch a labeled PR preview at its newest head. Standalone PR previews use
+ * a deterministic slug so every synchronize event addresses the same sandbox.
+ */
+export async function handlePullRequestSynchronized(
+  env: Env,
+  _log: Logger,
+  payload: PullRequestSynchronizedPayload,
+  traceId: string
+): Promise<HandlerResult> {
+  if (env.PREVIEW_LABEL_ENABLED !== "true") {
+    return { outcome: "skipped", skip_reason: "preview_label_disabled" };
+  }
+  if (!payload.pull_request.labels?.some((label) => isPreviewLabel(label.name))) {
+    return { outcome: "skipped", skip_reason: "preview_not_enabled" };
+  }
+  return dispatchPullRequestPreview(env, payload, traceId, "github_synchronized");
+}
+
+async function dispatchPullRequestPreview(
+  env: Env,
+  payload: Pick<PullRequestLabeledPayload, "pull_request" | "repository">,
+  traceId: string,
+  reason: string
+): Promise<HandlerResult> {
+  const { pull_request: pr, repository: repo } = payload;
+  const owner = repo.owner.login;
+  const repoName = repo.name;
+  const repoFullName = `${owner}/${repoName}`.toLowerCase();
+  const sessionId =
+    extractSessionIdFromBranch(pr.head.ref) ??
+    (await lookupPrSession(env, repoFullName, pr.number)) ??
+    (await lookupReviewSession(env, repoFullName, pr.number));
+  const headers = await getAuthHeaders(env, traceId);
+  const response = sessionId
+    ? await env.CONTROL_PLANE.fetch(
+        `https://internal/sessions/${encodeURIComponent(sessionId)}/preview`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ enabled: true, commitSha: pr.head.sha, reason }),
+        }
+      )
+    : await env.CONTROL_PLANE.fetch("https://internal/previews/dispatch", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          repoOwner: owner,
+          repoName,
+          branchName: pr.head.ref,
+          commitSha: pr.head.sha,
+          slug: `${repoName}-${pr.number}`,
+          reason,
+        }),
+      });
+  if (!response.ok) {
+    throw new Error(`Preview dispatch failed: ${response.status} ${await response.text()}`);
+  }
+  const result = (await response.json()) as {
+    previewUrls?: Record<string, string>;
+    runUrl?: string;
+  };
+  const linkUrl = result.previewUrls?.hire ?? result.runUrl;
+  if (linkUrl) {
+    const userAgent = resolveAppName(env);
+    const token = await generateInstallationToken({
+      appId: env.GITHUB_APP_ID,
+      privateKey: env.GITHUB_APP_PRIVATE_KEY,
+      installationId: env.GITHUB_APP_INSTALLATION_ID,
+      userAgent,
+    });
+    await createIssueComment(
+      token,
+      owner,
+      repoName,
+      pr.number,
+      `[hire preview](${linkUrl})`,
+      userAgent
+    );
+  }
+  return {
+    outcome: "processed",
+    session_id: sessionId ?? "",
+    message_id: "",
+    handler_action: "preview_dispatch",
+  };
 }
 
 /** Body of an internal `POST /internal/reviews` request (from the web UI). */

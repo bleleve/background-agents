@@ -14,9 +14,31 @@ expect.extend(matchers);
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe("ActionBar", () => {
+  it("renders View preview for hydrated preview artifacts", () => {
+    render(
+      <ActionBar
+        sessionId="session-1"
+        sessionStatus="active"
+        artifacts={[
+          {
+            id: "artifact-preview-1",
+            type: "preview",
+            url: "https://preview.example.com/session-1",
+            metadata: { previewStatus: "active" },
+            createdAt: 1234,
+          },
+        ]}
+      />
+    );
+
+    const link = screen.getByRole("link", { name: /view preview/i });
+    expect(link).toHaveAttribute("href", "https://preview.example.com/session-1");
+  });
+
   it("renders View PR for hydrated PR artifacts", () => {
     render(
       <ActionBar

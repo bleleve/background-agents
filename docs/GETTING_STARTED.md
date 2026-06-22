@@ -808,6 +808,9 @@ Go to your fork's Settings → Secrets and variables → Actions (or per-environ
 | `LINEAR_WEBHOOK_SECRET`          | Linear webhook signing secret (required if Linear enabled)                                  |
 | `ANTHROPIC_API_KEY`              | Anthropic API key                                                                           |
 | `DEEPSEEK_API_KEY`               | DeepSeek API key (optional, required only for DeepSeek models)                              |
+| `RWX_ACCESS_TOKEN`               | RWX API access token (optional; required to enable preview mode)                            |
+| `RWX_ORG_SLUG`                   | RWX organization slug (optional; enables per-product preview URLs alongside the run URL)    |
+| `RWX_BASE_URL`                   | RWX API base URL override (optional; defaults to `https://cloud.rwx.com/mint/api`)          |
 | `TOKEN_ENCRYPTION_KEY`           | Generated encryption key (OAuth tokens)                                                     |
 | `REPO_SECRETS_ENCRYPTION_KEY`    | Generated encryption key (repo secrets)                                                     |
 | `INTERNAL_CALLBACK_SECRET`       | Generated callback secret                                                                   |

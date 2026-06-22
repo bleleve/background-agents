@@ -30,6 +30,7 @@ interface SessionSandboxEventProcessorDeps {
   updateLastActivity: (timestamp: number) => void;
   scheduleInactivityCheck: () => Promise<void>;
   processMessageQueue: () => Promise<void>;
+  dispatchPreview: (reason: string) => Promise<unknown>;
 }
 
 /** Event types that require delivery acknowledgement. */
@@ -48,6 +49,7 @@ const CRITICAL_EVENT_TYPES: ReadonlySet<string> = new Set([
 
 export class SessionSandboxEventProcessor {
   private pendingPushResolvers = new Map<string, PushResolver>();
+  private previewDispatchesInFlight = new Set<string>();
 
   constructor(private readonly deps: SessionSandboxEventProcessorDeps) {}
 
@@ -68,6 +70,10 @@ export class SessionSandboxEventProcessor {
     }
 
     if (event.type === "ready") {
+      if (event.commitSha) {
+        this.deps.repository.updateSessionCurrentSha(event.commitSha);
+      }
+      await this.dispatchPreviewIfNeeded("sandbox_ready");
       // Re-store the tunnel URLs the sandbox reports on (re)connect. A transient
       // connecting/heartbeat timeout can clear the stored URLs while the sandbox
       // is still alive (its Modal tunnels stay valid); the bridge re-reports the
@@ -221,6 +227,10 @@ export class SessionSandboxEventProcessor {
     }
 
     if (event.type === "execution_complete") {
+      if (event.commitSha) {
+        this.deps.repository.updateSessionCurrentSha(event.commitSha);
+      }
+      this.deps.ctx.waitUntil(this.dispatchPreviewIfNeeded("execution_complete", event.commitSha));
       const completionMessageId = messageId;
       if (messageId) {
         this.deps.repository.upsertExecutionCompleteEvent(messageId, event, now);
@@ -319,6 +329,13 @@ export class SessionSandboxEventProcessor {
       this.handlePushEvent(event);
     }
 
+    if (event.type === "push_complete") {
+      if (event.commitSha) {
+        this.deps.repository.updateSessionCurrentSha(event.commitSha);
+      }
+      await this.dispatchPreviewIfNeeded("push_complete", event.commitSha);
+    }
+
     this.deps.broadcast({ type: "sandbox_event", event });
 
     if (CRITICAL_EVENT_TYPES.has(event.type)) {
@@ -410,6 +427,31 @@ export class SessionSandboxEventProcessor {
       this.deps.wsManager.send(sandboxWs, { type: "ack", ackId });
     } else {
       this.deps.log.debug("Cannot send ACK: no sandbox socket", { ack_id: ackId });
+    }
+  }
+
+  private async dispatchPreviewIfNeeded(reason: string, commitSha?: string): Promise<void> {
+    const session = this.deps.repository.getSession();
+    if (!session || session.preview_enabled !== 1) return;
+    const sha = commitSha ?? session.current_sha;
+    if (
+      sha &&
+      (session.preview_dispatched_sha === sha || this.previewDispatchesInFlight.has(sha))
+    ) {
+      return;
+    }
+    if (sha) this.previewDispatchesInFlight.add(sha);
+    try {
+      await this.deps.dispatchPreview(reason);
+      if (sha) {
+        this.deps.repository.updatePreviewDispatchedSha(sha);
+      }
+    } catch (error) {
+      this.deps.log.error("preview.dispatch_failed", {
+        error: error instanceof Error ? error : String(error),
+      });
+    } finally {
+      if (sha) this.previewDispatchesInFlight.delete(sha);
     }
   }
 

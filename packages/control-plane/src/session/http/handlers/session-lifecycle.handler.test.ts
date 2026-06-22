@@ -86,6 +86,9 @@ function createHandler() {
     createParticipant: vi.fn(),
     createArtifact: vi.fn(),
     createMessage: vi.fn(),
+    updatePreviewEnabled: vi.fn(),
+    updateSessionCurrentSha: vi.fn(),
+    updatePreviewDispatchedSha: vi.fn(),
   };
   const getDurableObjectId = vi.fn(() => "session-do-id");
   const encryptToken = vi.fn();
@@ -112,6 +115,12 @@ function createHandler() {
   const updateSandboxStatus = vi.fn();
 
   const createSystemMessage = vi.fn();
+  const dispatchPreview = vi.fn(async () => ({
+    runUrl: "https://cloud.rwx.com/mint/org/runs/1",
+    previewUrls: { hire: "https://hire-session-1--testorg.r1.rwx.run/" },
+  }));
+  const broadcastArtifactCreated = vi.fn();
+  const broadcast = vi.fn();
 
   const handler = createSessionLifecycleHandler({
     repository,
@@ -134,6 +143,9 @@ function createHandler() {
     sendToSandbox,
     updateSandboxStatus,
     createSystemMessage,
+    dispatchPreview,
+    broadcastArtifactCreated,
+    broadcast,
   });
 
   return {
@@ -407,6 +419,7 @@ describe("createSessionLifecycleHandler", () => {
       baseSha: "base-sha",
       currentSha: "head-sha",
       opencodeSessionId: "oc-1",
+      previewEnabled: false,
       status: "active",
       model: "anthropic/claude-haiku-4-5",
       reasoningEffort: "high",

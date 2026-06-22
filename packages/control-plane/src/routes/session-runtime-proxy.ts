@@ -161,6 +161,22 @@ async function handleUpdateSessionTitle(
   });
 }
 
+async function handleUpdatePreview(
+  request: Request,
+  _env: Env,
+  match: RegExpMatchArray,
+  ctx: SessionRouteContext
+): Promise<Response> {
+  const sessionId = getSessionId(match);
+  if (sessionId instanceof Response) return sessionId;
+  const body = await request.text().catch(() => "{}");
+  return ctx.sessionRuntime.fetch(sessionId, SessionInternalPaths.updatePreview, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+}
+
 async function handleArchiveSession(
   request: Request,
   _env: Env,
@@ -304,6 +320,11 @@ export const sessionRuntimeProxyRoutes: Route[] = [
     method: "PATCH",
     pattern: parsePattern("/sessions/:id/title"),
     handler: handleUpdateSessionTitle,
+  }),
+  sessionRoute({
+    method: "POST",
+    pattern: parsePattern("/sessions/:id/preview"),
+    handler: handleUpdatePreview,
   }),
   sessionRoute({
     method: "POST",

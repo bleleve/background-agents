@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS session (
   plan_approval_status TEXT,                        -- NULL | 'awaiting_approval' | 'approved' | 'rejected'
   plan_model TEXT,                                  -- Model used for planning turns (NULL when plan_mode=0)
   plan_cost_snapshot REAL,                          -- total_cost captured at plan approval; NULL until then. Build cost = total_cost - this.
+  preview_enabled INTEGER NOT NULL DEFAULT 0,
+  preview_dispatched_sha TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -456,6 +458,17 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
             AND user_id != 'system'
             AND id NOT IN (SELECT author_id FROM messages WHERE author_id IS NOT NULL)`
       );
+    },
+  },
+  {
+    id: 36,
+    description: "Add per-session preview dispatch state",
+    run: (sql) => {
+      runMigration(
+        sql,
+        `ALTER TABLE session ADD COLUMN preview_enabled INTEGER NOT NULL DEFAULT 0`
+      );
+      runMigration(sql, `ALTER TABLE session ADD COLUMN preview_dispatched_sha TEXT`);
     },
   },
 ];

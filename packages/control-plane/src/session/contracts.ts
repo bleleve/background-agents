@@ -28,6 +28,7 @@ export const SessionInternalPaths = {
   spawnContext: "/internal/spawn-context",
   childSummary: "/internal/child-summary",
   updateTitle: "/internal/update-title",
+  updatePreview: "/internal/update-preview",
   cancel: "/internal/cancel",
   childSessionUpdate: "/internal/child-session-update",
   plan: "/internal/plan",

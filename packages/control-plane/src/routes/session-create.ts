@@ -174,6 +174,7 @@ async function handleCreateSession(
     prState: body.prState,
     prHeadRef: body.prHeadRef,
     prBaseRef: body.prBaseRef,
+    previewEnabled: body.previewEnabled,
   };
 
   try {
