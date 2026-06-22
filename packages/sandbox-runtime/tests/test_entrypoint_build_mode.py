@@ -506,12 +506,14 @@ class TestUpdateExistingRepo:
 
     @pytest.mark.asyncio
     async def test_fetches_and_checks_out(self, base_env, tmp_path):
-        """Should rewrite origin to a plain URL, fetch with refspec, stash, and checkout.
+        """Should rewrite origin to a plain URL, fetch, then (dirty tree) stash,
+        checkout, and restore the stash.
 
-        The `set-url` step exists to scrub stale embedded tokens from
-        snapshots taken before the credential-helper migration.  The stash
-        step clears uncommitted local changes so the checkout cannot be
-        blocked by working-tree modifications.
+        The `set-url` step scrubs stale embedded tokens from snapshots taken
+        before the credential-helper migration. The stash clears uncommitted
+        local changes so the checkout cannot be blocked by working-tree
+        modifications; the pop restores them afterwards so a previous session's
+        in-flight edits survive the branch reset.
         """
         supervisor = _make_supervisor(base_env)
         supervisor.repo_path = tmp_path
@@ -521,7 +523,9 @@ class TestUpdateExistingRepo:
         async def fake_subprocess(*args, **kwargs):
             call_log.append(args)
             mock_proc = MagicMock()
-            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            # Report a dirty tree so the stash/restore path runs end-to-end.
+            stdout = b" M src/app.py\n" if "status" in args else b""
+            mock_proc.communicate = AsyncMock(return_value=(stdout, b""))
             mock_proc.returncode = 0
             return mock_proc
 
@@ -532,16 +536,20 @@ class TestUpdateExistingRepo:
             result = await supervisor._update_existing_repo()
 
         assert result is True
-        # set-url (scrub stale embedded token), fetch, stash, checkout
-        assert len(call_log) == 4
+        # set-url (scrub token), fetch, status (dirty check), stash, checkout, pop
+        assert len(call_log) == 6
         assert "set-url" in call_log[0]
         # The rewrite must use a token-free URL.
         assert call_log[0][-1] == supervisor._build_repo_url()
         assert "@" not in call_log[0][-1]
         assert "fetch" in call_log[1]
-        assert "stash" in call_log[2]
-        assert "checkout" in call_log[3]
-        assert "-B" in call_log[3]
+        assert "status" in call_log[2]
+        assert "stash" in call_log[3]
+        assert "push" in call_log[3]
+        assert "checkout" in call_log[4]
+        assert "-B" in call_log[4]
+        assert "stash" in call_log[5]
+        assert "pop" in call_log[5]
 
     @pytest.mark.asyncio
     async def test_returns_false_when_no_repo_path(self, base_env, tmp_path):
@@ -659,37 +667,15 @@ class TestStashLocalChanges:
     """Test _stash_local_changes() — stash before checkout."""
 
     @pytest.mark.asyncio
-    async def test_stash_succeeds_with_no_changes(self, base_env, tmp_path):
-        """Returns True when there is nothing to stash."""
-        supervisor = _make_supervisor(base_env)
-        supervisor.repo_path = tmp_path
-
-        async def fake_subprocess(*args, **kwargs):
-            mock_proc = MagicMock()
-            mock_proc.communicate = AsyncMock(return_value=(b"No local changes to stash", b""))
-            mock_proc.returncode = 0
-            return mock_proc
-
-        with patch(
-            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
-            side_effect=fake_subprocess,
-        ):
-            result = await supervisor._stash_local_changes()
-
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_stash_succeeds_with_changes(self, base_env, tmp_path):
-        """Returns True and logs when changes were stashed."""
+    async def test_stash_returns_true_on_success(self, base_env, tmp_path):
+        """Returns True and logs when the stash command succeeds."""
         supervisor = _make_supervisor(base_env)
         supervisor.repo_path = tmp_path
         supervisor.log = MagicMock()
 
         async def fake_subprocess(*args, **kwargs):
             mock_proc = MagicMock()
-            mock_proc.communicate = AsyncMock(
-                return_value=(b"Saved working directory and index state WIP on main", b"")
-            )
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
             mock_proc.returncode = 0
             return mock_proc
 
@@ -702,7 +688,7 @@ class TestStashLocalChanges:
         assert result is True
         supervisor.log.info.assert_called_once_with(
             "git.stash_created",
-            stash_output="Saved working directory and index state WIP on main",
+            label="reef-boot-autostash",
         )
 
     @pytest.mark.asyncio
@@ -756,8 +742,42 @@ class TestStashLocalChanges:
         assert "--include-untracked" in stash_call
 
     @pytest.mark.asyncio
-    async def test_checkout_stashes_before_switching(self, base_env, tmp_path):
-        """_checkout_branch must call git stash before git checkout."""
+    async def test_checkout_stashes_then_restores_on_dirty_tree(self, base_env, tmp_path):
+        """On a dirty tree: status check, stash, checkout, then pop (restore)."""
+        supervisor = _make_supervisor(base_env)
+        supervisor.repo_path = tmp_path
+
+        call_log = []
+
+        async def fake_subprocess(*args, **kwargs):
+            call_log.append(args)
+            mock_proc = MagicMock()
+            stdout = b" M src/app.py\n" if "status" in args else b""
+            mock_proc.communicate = AsyncMock(return_value=(stdout, b""))
+            mock_proc.returncode = 0
+            return mock_proc
+
+        with patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            side_effect=fake_subprocess,
+        ):
+            result = await supervisor._checkout_branch("main")
+
+        assert result is True
+        # status (dirty check), stash push, checkout, stash pop
+        assert len(call_log) == 4
+        assert "status" in call_log[0]
+        assert "stash" in call_log[1]
+        assert "--include-untracked" in call_log[1]
+        assert "checkout" in call_log[2]
+        assert "-B" in call_log[2]
+        assert "stash" in call_log[3]
+        assert "pop" in call_log[3]
+
+    @pytest.mark.asyncio
+    async def test_checkout_skips_stash_when_tree_clean(self, base_env, tmp_path):
+        """A clean tree (e.g. fresh repo-image clone) is left untouched — no
+        stash, no pop."""
         supervisor = _make_supervisor(base_env)
         supervisor.repo_path = tmp_path
 
@@ -777,15 +797,16 @@ class TestStashLocalChanges:
             result = await supervisor._checkout_branch("main")
 
         assert result is True
+        # status (clean) then checkout — no stash, no pop.
         assert len(call_log) == 2
-        assert "stash" in call_log[0]
-        assert "--include-untracked" in call_log[0]
+        assert "status" in call_log[0]
         assert "checkout" in call_log[1]
-        assert "-B" in call_log[1]
+        assert not any("stash" in c for c in call_log)
 
     @pytest.mark.asyncio
     async def test_checkout_proceeds_even_if_stash_fails(self, base_env, tmp_path):
-        """If stash fails, checkout is still attempted (stash failure is non-fatal)."""
+        """If stash fails on a dirty tree, checkout is still attempted (non-fatal)
+        and no pop is run since nothing was set aside."""
         supervisor = _make_supervisor(base_env)
         supervisor.repo_path = tmp_path
         supervisor.log = MagicMock()
@@ -795,7 +816,10 @@ class TestStashLocalChanges:
         async def fake_subprocess(*args, **kwargs):
             call_log.append(args)
             mock_proc = MagicMock()
-            if "stash" in args:
+            if "status" in args:
+                mock_proc.returncode = 0
+                mock_proc.communicate = AsyncMock(return_value=(b" M src/app.py\n", b""))
+            elif "stash" in args:
                 mock_proc.returncode = 1
                 mock_proc.communicate = AsyncMock(return_value=(b"", b"stash error"))
             else:
@@ -809,9 +833,106 @@ class TestStashLocalChanges:
         ):
             result = await supervisor._checkout_branch("main")
 
-        # Checkout was still attempted and succeeded
+        # Checkout was still attempted and succeeded.
         assert result is True
         assert any("checkout" in c for c in call_log)
+        # Stash failed → nothing was set aside → no pop attempted.
+        assert not any("pop" in c for c in call_log)
+        supervisor.log.warn.assert_any_call("git.stash_skipped", reason="stash_failed")
+
+    @pytest.mark.asyncio
+    async def test_checkout_leaves_stash_when_checkout_fails(self, base_env, tmp_path):
+        """If checkout fails on a dirty tree, the stash is left intact (no pop) so
+        the work stays recoverable rather than popped onto an un-reset tree."""
+        supervisor = _make_supervisor(base_env)
+        supervisor.repo_path = tmp_path
+        supervisor.log = MagicMock()
+
+        call_log = []
+
+        async def fake_subprocess(*args, **kwargs):
+            call_log.append(args)
+            mock_proc = MagicMock()
+            if "status" in args:
+                mock_proc.returncode = 0
+                mock_proc.communicate = AsyncMock(return_value=(b" M src/app.py\n", b""))
+            elif "checkout" in args:
+                mock_proc.returncode = 1
+                mock_proc.communicate = AsyncMock(return_value=(b"", b"checkout error"))
+            else:
+                mock_proc.returncode = 0
+                mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            return mock_proc
+
+        with patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            side_effect=fake_subprocess,
+        ):
+            result = await supervisor._checkout_branch("main")
+
+        assert result is False
+        assert not any("pop" in c for c in call_log)
+
+    @pytest.mark.asyncio
+    async def test_restore_stashed_changes_pop_conflict_is_non_fatal(self, base_env, tmp_path):
+        """A conflicting `git stash pop` logs a warning and keeps the stash; it
+        must not raise (the work stays recoverable via `git stash list`)."""
+        supervisor = _make_supervisor(base_env)
+        supervisor.repo_path = tmp_path
+        supervisor.log = MagicMock()
+
+        async def fake_subprocess(*args, **kwargs):
+            mock_proc = MagicMock()
+            mock_proc.returncode = 1
+            mock_proc.communicate = AsyncMock(
+                return_value=(b"", b"CONFLICT (content): merge conflict")
+            )
+            return mock_proc
+
+        with patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            side_effect=fake_subprocess,
+        ):
+            await supervisor._restore_stashed_changes()
+
+        supervisor.log.warn.assert_called_once()
+        assert supervisor.log.warn.call_args[0][0] == "git.stash_pop_conflict"
+
+    @pytest.mark.asyncio
+    async def test_working_tree_is_dirty_true_when_changes_present(self, base_env, tmp_path):
+        """`git status --porcelain` with output means a dirty tree."""
+        supervisor = _make_supervisor(base_env)
+        supervisor.repo_path = tmp_path
+
+        async def fake_subprocess(*args, **kwargs):
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.communicate = AsyncMock(return_value=(b" M src/app.py\n?? new.txt\n", b""))
+            return mock_proc
+
+        with patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            side_effect=fake_subprocess,
+        ):
+            assert await supervisor._working_tree_is_dirty() is True
+
+    @pytest.mark.asyncio
+    async def test_working_tree_is_clean_when_no_output(self, base_env, tmp_path):
+        """Empty `git status --porcelain` output means a clean tree."""
+        supervisor = _make_supervisor(base_env)
+        supervisor.repo_path = tmp_path
+
+        async def fake_subprocess(*args, **kwargs):
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            return mock_proc
+
+        with patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            side_effect=fake_subprocess,
+        ):
+            assert await supervisor._working_tree_is_dirty() is False
 
 
 class TestPerformGitSync:
