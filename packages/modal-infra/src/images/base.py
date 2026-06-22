@@ -59,7 +59,8 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v86: bridge adopts a control-plane-supplied opencodeSessionId on prompt so a
 #      relaunched/restored sandbox resumes the prior OpenCode session
 # v87: push completion events include HEAD SHA for preview dispatch deduplication
-CACHE_BUSTER = "v87-push-complete-sha"
+# v88: opencode node_modules materialized via hardlinks (was a slow per-file copy)
+CACHE_BUSTER = "v88-opencode-node-modules-hardlink"
 
 # Base image with all development tools
 base_image = (

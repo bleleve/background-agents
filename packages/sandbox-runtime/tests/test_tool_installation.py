@@ -1,5 +1,6 @@
 """Tests for _install_tools() and _install_bin_scripts() in SandboxSupervisor."""
 
+import errno
 import json
 from contextlib import contextmanager
 from pathlib import Path
@@ -290,6 +291,65 @@ class TestInstallTools:
         tool_dest = workdir / ".opencode" / "tool"
         assert (tool_dest / "slack-notify.js").exists()
         assert (tool_dest / "spawn-task.js").exists()
+
+
+class TestMaterializeNodeModules:
+    """Cases for _materialize_node_modules() — hardlink with cross-device fallback."""
+
+    def _build_src(self, root: Path) -> Path:
+        """Create a small node_modules-like tree with a file and an internal symlink."""
+        src = root / "node_modules"
+        pkg = src / "@opencode-ai" / "plugin"
+        pkg.mkdir(parents=True)
+        (pkg / "index.js").write_text("module.exports = {}")
+        # node_modules commonly contains .bin symlinks pointing within the tree.
+        bin_dir = src / ".bin"
+        bin_dir.mkdir()
+        (bin_dir / "plugin").symlink_to("../@opencode-ai/plugin/index.js")
+        return src
+
+    def test_files_are_hardlinked_same_device(self, tmp_path):
+        """On one device, files share an inode with the source (no data copy)."""
+        sup = _make_supervisor()
+        src = self._build_src(tmp_path / "cache")
+        dest = tmp_path / "workspace" / ".opencode" / "node_modules"
+
+        sup._materialize_node_modules(src, dest)
+
+        src_file = src / "@opencode-ai" / "plugin" / "index.js"
+        dest_file = dest / "@opencode-ai" / "plugin" / "index.js"
+        assert dest_file.exists()
+        assert src_file.samefile(dest_file)
+        assert dest_file.stat().st_ino == src_file.stat().st_ino
+
+    def test_internal_symlinks_preserved(self, tmp_path):
+        """Symlinks inside the tree are recreated as symlinks, not hardlinked."""
+        sup = _make_supervisor()
+        src = self._build_src(tmp_path / "cache")
+        dest = tmp_path / "workspace" / ".opencode" / "node_modules"
+
+        sup._materialize_node_modules(src, dest)
+
+        link = dest / ".bin" / "plugin"
+        assert link.is_symlink()
+        assert str(link.readlink()) == "../@opencode-ai/plugin/index.js"
+
+    def test_falls_back_to_copy_on_cross_device(self, tmp_path):
+        """EXDEV from os.link must fall back to a real copy (distinct inode)."""
+        sup = _make_supervisor()
+        src = self._build_src(tmp_path / "cache")
+        dest = tmp_path / "workspace" / ".opencode" / "node_modules"
+
+        with patch("os.link", side_effect=OSError(errno.EXDEV, "cross-device link")):
+            sup._materialize_node_modules(src, dest)
+
+        src_file = src / "@opencode-ai" / "plugin" / "index.js"
+        dest_file = dest / "@opencode-ai" / "plugin" / "index.js"
+        # Copied, not hardlinked: same content but a separate inode.
+        assert dest_file.read_text() == "module.exports = {}"
+        assert dest_file.stat().st_ino != src_file.stat().st_ino
+        # The internal symlink survives the fallback path too.
+        assert (dest / ".bin" / "plugin").is_symlink()
 
 
 class TestExcludeOpencodeFromGit:
