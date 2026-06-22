@@ -94,6 +94,9 @@ GH_WRAPPER_REAL_PATH = "/usr/bin/gh"
 # Exit code the `gh-guard` action returns to signal "blocked by policy". Kept
 # distinct from gh's own 1/2/4 so the block is unambiguous in logs.
 GH_GUARD_BLOCK_RC = 3
+# Label attached to the boot-time autostash so it is identifiable in
+# `git stash list` and recoverable if the post-checkout pop conflicts.
+BOOT_STASH_LABEL = "reef-boot-autostash"
 GH_WRAPPER_BODY = (
     "#!/bin/sh\n"
     f'REAL_GH="{GH_WRAPPER_REAL_PATH}"\n'
@@ -408,25 +411,52 @@ class SandboxSupervisor:
             return False
         return True
 
-    async def _stash_local_changes(self) -> bool:
-        """Stash any uncommitted local changes so a checkout can proceed cleanly.
+    async def _working_tree_is_dirty(self) -> bool:
+        """Return True if the working tree has uncommitted changes.
 
-        Uses ``git stash --include-untracked`` so that both tracked modifications
-        and untracked files (e.g. generated lock-file updates written by a
-        previous session) are moved out of the way before the branch reset.
-
-        Returns True if the stash succeeded (or there was nothing to stash),
-        False on unexpected failure.
+        Uses ``git status --porcelain`` — empty output iff clean — as a stable,
+        locale-independent signal. Callers gate the boot-time stash/restore on
+        this so a clean repo-image clone is left untouched and only a dirty
+        snapshot-restore tree is stashed and re-applied.
         """
         result = await asyncio.create_subprocess_exec(
             "git",
-            "stash",
-            "--include-untracked",
+            "status",
+            "--porcelain",
             cwd=self.repo_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await result.communicate()
+        stdout, _stderr = await result.communicate()
+        if result.returncode != 0:
+            return False
+        return bool(stdout.decode().strip())
+
+    async def _stash_local_changes(self) -> bool:
+        """Stash uncommitted local changes so a checkout can proceed cleanly.
+
+        Uses ``git stash push --include-untracked`` so that both tracked
+        modifications and untracked files are moved out of the way before the
+        branch reset. The stash is labelled (``BOOT_STASH_LABEL``) so it is
+        identifiable in ``git stash list`` and recoverable if the post-checkout
+        pop conflicts.
+
+        Returns True if the stash command succeeded, False on failure. Callers
+        gate this on ``_working_tree_is_dirty``, so success means an entry was
+        created and ``_restore_stashed_changes`` should pop it after checkout.
+        """
+        result = await asyncio.create_subprocess_exec(
+            "git",
+            "stash",
+            "push",
+            "--include-untracked",
+            "-m",
+            BOOT_STASH_LABEL,
+            cwd=self.repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await result.communicate()
         if result.returncode != 0:
             self.log.warn(
                 "git.stash_failed",
@@ -434,22 +464,56 @@ class SandboxSupervisor:
                 exit_code=result.returncode,
             )
             return False
-        stash_output = stdout.decode().strip()
-        if stash_output and stash_output != "No local changes to stash":
-            self.log.info("git.stash_created", stash_output=stash_output)
+        self.log.info("git.stash_created", label=BOOT_STASH_LABEL)
         return True
+
+    async def _restore_stashed_changes(self) -> None:
+        """Re-apply the stash taken before the checkout.
+
+        Restores the previous session's uncommitted working-tree edits on top
+        of the freshly reset branch so they survive a snapshot restore/relaunch.
+        Modal restores never resume in place (see modal-provider
+        ``supportsPersistentResume: false``); without this pop the edits would
+        stay buried in the un-popped stash and be lost.
+
+        ``git stash pop`` keeps the stash entry on conflict, so on a non-zero
+        exit we log and leave it: the work stays recoverable via
+        ``git stash list`` rather than being silently discarded.
+        """
+        result = await asyncio.create_subprocess_exec(
+            "git",
+            "stash",
+            "pop",
+            cwd=self.repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await result.communicate()
+        if result.returncode != 0:
+            self.log.warn(
+                "git.stash_pop_conflict",
+                stderr=self._redact_git_stderr(stderr.decode()),
+                exit_code=result.returncode,
+            )
+            return
+        self.log.info("git.stash_restored", label=BOOT_STASH_LABEL)
 
     async def _checkout_branch(self, branch: str) -> bool:
         """Create/reset a local branch to match the remote tip.
 
         Stashes any uncommitted local changes before the checkout so that
-        working-tree modifications (e.g. lock-file regenerations from a
-        previous session) do not block the branch reset.
+        working-tree modifications do not block the branch reset, then restores
+        them afterwards so a previous session's in-flight edits survive the
+        reset instead of being buried in an un-popped stash.
         """
-        if not await self._stash_local_changes():
-            # Stash failure is non-fatal; attempt the checkout anyway —
-            # it will fail loudly below if the working tree is still dirty.
-            self.log.warn("git.stash_skipped", reason="stash_failed")
+        stashed = False
+        if await self._working_tree_is_dirty():
+            if await self._stash_local_changes():
+                stashed = True
+            else:
+                # Stash failure is non-fatal; attempt the checkout anyway —
+                # it will fail loudly below if the working tree is still dirty.
+                self.log.warn("git.stash_skipped", reason="stash_failed")
 
         result = await asyncio.create_subprocess_exec(
             "git",
@@ -470,6 +534,9 @@ class SandboxSupervisor:
                 target_branch=branch,
             )
             return False
+
+        if stashed:
+            await self._restore_stashed_changes()
         return True
 
     # ------------------------------------------------------------------

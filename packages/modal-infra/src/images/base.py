@@ -60,7 +60,8 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 #      relaunched/restored sandbox resumes the prior OpenCode session
 # v87: push completion events include HEAD SHA for preview dispatch deduplication
 # v88: opencode node_modules materialized via hardlinks (was a slow per-file copy)
-CACHE_BUSTER = "v88-opencode-node-modules-hardlink"
+# v89: boot-time autostash is popped after checkout so uncommitted edits survive restore
+CACHE_BUSTER = "v89-restore-uncommitted-edits"
 
 # Base image with all development tools
 base_image = (
