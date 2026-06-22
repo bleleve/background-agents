@@ -25,10 +25,12 @@ import httpx
 
 from .constants import (
     CODE_SERVER_PORT,
+    CODE_SERVER_PORT_ENV_VAR,
     EXPECTED_TUNNEL_PORTS_ENV_VAR,
     SANDBOX_ENV_FILE_PATH,
     TTYD_PORT,
     TTYD_PROXY_PORT,
+    TTYD_PROXY_PORT_ENV_VAR,
     TUNNEL_ENV_FILE_PATH,
 )
 from .log_config import configure_logging, get_logger
@@ -49,6 +51,18 @@ def _deep_merge(base: dict, override: dict) -> dict:
         else:
             result[key] = value
     return result
+
+
+def _port_from_env(env_var: str, default: int) -> int:
+    """Read an integer port from the environment, falling back to ``default``."""
+    raw = os.environ.get(env_var)
+    if raw is None:
+        return default
+    try:
+        port = int(raw)
+    except ValueError:
+        return default
+    return port if 1 <= port <= 65535 else default
 
 
 # Maps tool filename → env var that gates its installation. A tool is installed
@@ -80,6 +94,9 @@ GH_WRAPPER_REAL_PATH = "/usr/bin/gh"
 # Exit code the `gh-guard` action returns to signal "blocked by policy". Kept
 # distinct from gh's own 1/2/4 so the block is unambiguous in logs.
 GH_GUARD_BLOCK_RC = 3
+# Label attached to the boot-time autostash so it is identifiable in
+# `git stash list` and recoverable if the post-checkout pop conflicts.
+BOOT_STASH_LABEL = "reef-boot-autostash"
 GH_WRAPPER_BODY = (
     "#!/bin/sh\n"
     f'REAL_GH="{GH_WRAPPER_REAL_PATH}"\n'
@@ -144,6 +161,12 @@ class SandboxSupervisor:
         self.code_server_process: asyncio.subprocess.Process | None = None
         self.ttyd_process: asyncio.subprocess.Process | None = None
         self.ttyd_proxy_process: asyncio.subprocess.Process | None = None
+        self.dockerd_process: asyncio.subprocess.Process | None = None
+        self._code_server_log_task: asyncio.Task[None] | None = None
+        self._ttyd_log_task: asyncio.Task[None] | None = None
+        self._ttyd_proxy_log_task: asyncio.Task[None] | None = None
+        self._opencode_log_task: asyncio.Task[None] | None = None
+        self._bridge_log_task: asyncio.Task[None] | None = None
         self._boot_progress_task: asyncio.Task[None] | None = None
         self.shutdown_event = asyncio.Event()
         self.git_sync_complete = asyncio.Event()
@@ -388,25 +411,52 @@ class SandboxSupervisor:
             return False
         return True
 
-    async def _stash_local_changes(self) -> bool:
-        """Stash any uncommitted local changes so a checkout can proceed cleanly.
+    async def _working_tree_is_dirty(self) -> bool:
+        """Return True if the working tree has uncommitted changes.
 
-        Uses ``git stash --include-untracked`` so that both tracked modifications
-        and untracked files (e.g. generated lock-file updates written by a
-        previous session) are moved out of the way before the branch reset.
-
-        Returns True if the stash succeeded (or there was nothing to stash),
-        False on unexpected failure.
+        Uses ``git status --porcelain`` — empty output iff clean — as a stable,
+        locale-independent signal. Callers gate the boot-time stash/restore on
+        this so a clean repo-image clone is left untouched and only a dirty
+        snapshot-restore tree is stashed and re-applied.
         """
         result = await asyncio.create_subprocess_exec(
             "git",
-            "stash",
-            "--include-untracked",
+            "status",
+            "--porcelain",
             cwd=self.repo_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await result.communicate()
+        stdout, _stderr = await result.communicate()
+        if result.returncode != 0:
+            return False
+        return bool(stdout.decode().strip())
+
+    async def _stash_local_changes(self) -> bool:
+        """Stash uncommitted local changes so a checkout can proceed cleanly.
+
+        Uses ``git stash push --include-untracked`` so that both tracked
+        modifications and untracked files are moved out of the way before the
+        branch reset. The stash is labelled (``BOOT_STASH_LABEL``) so it is
+        identifiable in ``git stash list`` and recoverable if the post-checkout
+        pop conflicts.
+
+        Returns True if the stash command succeeded, False on failure. Callers
+        gate this on ``_working_tree_is_dirty``, so success means an entry was
+        created and ``_restore_stashed_changes`` should pop it after checkout.
+        """
+        result = await asyncio.create_subprocess_exec(
+            "git",
+            "stash",
+            "push",
+            "--include-untracked",
+            "-m",
+            BOOT_STASH_LABEL,
+            cwd=self.repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await result.communicate()
         if result.returncode != 0:
             self.log.warn(
                 "git.stash_failed",
@@ -414,22 +464,56 @@ class SandboxSupervisor:
                 exit_code=result.returncode,
             )
             return False
-        stash_output = stdout.decode().strip()
-        if stash_output and stash_output != "No local changes to stash":
-            self.log.info("git.stash_created", stash_output=stash_output)
+        self.log.info("git.stash_created", label=BOOT_STASH_LABEL)
         return True
+
+    async def _restore_stashed_changes(self) -> None:
+        """Re-apply the stash taken before the checkout.
+
+        Restores the previous session's uncommitted working-tree edits on top
+        of the freshly reset branch so they survive a snapshot restore/relaunch.
+        Modal restores never resume in place (see modal-provider
+        ``supportsPersistentResume: false``); without this pop the edits would
+        stay buried in the un-popped stash and be lost.
+
+        ``git stash pop`` keeps the stash entry on conflict, so on a non-zero
+        exit we log and leave it: the work stays recoverable via
+        ``git stash list`` rather than being silently discarded.
+        """
+        result = await asyncio.create_subprocess_exec(
+            "git",
+            "stash",
+            "pop",
+            cwd=self.repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await result.communicate()
+        if result.returncode != 0:
+            self.log.warn(
+                "git.stash_pop_conflict",
+                stderr=self._redact_git_stderr(stderr.decode()),
+                exit_code=result.returncode,
+            )
+            return
+        self.log.info("git.stash_restored", label=BOOT_STASH_LABEL)
 
     async def _checkout_branch(self, branch: str) -> bool:
         """Create/reset a local branch to match the remote tip.
 
         Stashes any uncommitted local changes before the checkout so that
-        working-tree modifications (e.g. lock-file regenerations from a
-        previous session) do not block the branch reset.
+        working-tree modifications do not block the branch reset, then restores
+        them afterwards so a previous session's in-flight edits survive the
+        reset instead of being buried in an un-popped stash.
         """
-        if not await self._stash_local_changes():
-            # Stash failure is non-fatal; attempt the checkout anyway —
-            # it will fail loudly below if the working tree is still dirty.
-            self.log.warn("git.stash_skipped", reason="stash_failed")
+        stashed = False
+        if await self._working_tree_is_dirty():
+            if await self._stash_local_changes():
+                stashed = True
+            else:
+                # Stash failure is non-fatal; attempt the checkout anyway —
+                # it will fail loudly below if the working tree is still dirty.
+                self.log.warn("git.stash_skipped", reason="stash_failed")
 
         result = await asyncio.create_subprocess_exec(
             "git",
@@ -450,6 +534,9 @@ class SandboxSupervisor:
                 target_branch=branch,
             )
             return False
+
+        if stashed:
+            await self._restore_stashed_changes()
         return True
 
     # ------------------------------------------------------------------
@@ -563,10 +650,43 @@ class SandboxSupervisor:
         cached_modules = deps_cache / "node_modules"
         local_modules = opencode_dir / "node_modules"
         if cached_modules.is_dir() and not local_modules.exists():
-            shutil.copytree(cached_modules, local_modules, symlinks=True)
+            self._materialize_node_modules(cached_modules, local_modules)
 
         # Ensure .opencode is excluded from git tracking in the cloned repo.
         self._exclude_opencode_from_git(workdir)
+
+    def _materialize_node_modules(self, src: Path, dest: Path) -> None:
+        """Make the pre-built OpenCode node_modules available at ``dest``.
+
+        These deps are read-only reference data baked into the image and are
+        identical for every session. A plain ``shutil.copytree`` copies file
+        *data* for thousands of small files, which on the repo-image filesystem
+        can take minutes and silently dominate boot (no timing log previously
+        bracketed this step). Hardlinking each file only creates directory
+        entries — no data copy — turning that into roughly a second.
+
+        Hardlinks require ``src`` and ``dest`` on the same device; if they live
+        on different mounts the per-file ``os.link`` fails with ``EXDEV``, so we
+        fall back to a normal copy. Either way the duration and the path taken
+        are logged so this step is observable.
+        """
+        start = time.monotonic()
+        try:
+            shutil.copytree(src, dest, symlinks=True, copy_function=os.link)
+            mode = "hardlink"
+        except (OSError, shutil.Error) as exc:
+            # Cross-device (EXDEV) or partial link failure: drop whatever the
+            # aborted attempt created and fall back to a real copy so boot still
+            # succeeds — just slowly.
+            shutil.rmtree(dest, ignore_errors=True)
+            shutil.copytree(src, dest, symlinks=True)
+            mode = "copy"
+            self.log.warn("opencode.node_modules_hardlink_fallback", error=str(exc))
+        self.log.info(
+            "opencode.node_modules_ready",
+            mode=mode,
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
 
     def _install_bin_scripts(self) -> None:
         """Install standalone CLI scripts into /usr/local/bin.
@@ -721,7 +841,7 @@ class SandboxSupervisor:
 
             # Copy via a temp file so the target is never partially written.
             shutil.copy2(str(source), str(tmp_path))
-            Path.chmod(str(tmp_path), 0o600)
+            tmp_path.chmod(0o600)
             tmp_path.replace(config_path)
 
             self.log.info("eks.kubeconfig_written", path=str(config_path))
@@ -801,10 +921,11 @@ class SandboxSupervisor:
         if self.repo_path.exists() and (self.repo_path / ".git").exists():
             workdir = self.repo_path
 
+        code_server_port = _port_from_env(CODE_SERVER_PORT_ENV_VAR, CODE_SERVER_PORT)
         self.code_server_process = await asyncio.create_subprocess_exec(
             "code-server",
             "--bind-addr",
-            f"0.0.0.0:{CODE_SERVER_PORT}",
+            f"0.0.0.0:{code_server_port}",
             "--auth",
             "password",
             "--disable-telemetry",
@@ -815,8 +936,8 @@ class SandboxSupervisor:
             stderr=asyncio.subprocess.STDOUT,
         )
 
-        asyncio.create_task(self._forward_code_server_logs())
-        self.log.info("code_server.started", port=CODE_SERVER_PORT)
+        self._code_server_log_task = asyncio.create_task(self._forward_code_server_logs())
+        self.log.info("code_server.started", port=code_server_port)
 
     async def _forward_code_server_logs(self) -> None:
         """Forward code-server stdout to supervisor stdout."""
@@ -877,6 +998,7 @@ class SandboxSupervisor:
             return
 
         self.log.info("mcp.install_packages", packages=packages)
+        proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 "npm",
@@ -903,8 +1025,9 @@ class SandboxSupervisor:
                 packages=packages,
                 timeout_seconds=self.MCP_PACKAGE_INSTALL_TIMEOUT_SECONDS,
             )
-            proc.kill()
-            await proc.wait()
+            if proc is not None:
+                proc.kill()
+                await proc.wait()
         except Exception as e:
             self.log.warn("mcp.packages_install_error", packages=packages, exc=str(e))
 
@@ -946,7 +1069,7 @@ class SandboxSupervisor:
         cmd = [
             "ttyd",
             "--port",
-            str(TTYD_PORT),
+            str(TTYD_PORT),  # localhost-only internal port; fixed (never exposed)
             "--interface",
             "127.0.0.1",  # localhost only — proxy is the only external gateway
             "--writable",
@@ -963,7 +1086,7 @@ class SandboxSupervisor:
             env=os.environ.copy(),
         )
 
-        asyncio.create_task(self._forward_ttyd_logs())
+        self._ttyd_log_task = asyncio.create_task(self._forward_ttyd_logs())
         self.log.info("ttyd.started", pid=self.ttyd_process.pid)
 
     async def start_ttyd_proxy(self) -> None:
@@ -973,7 +1096,10 @@ class SandboxSupervisor:
 
         cmd = ["bun", "run", "/app/sandbox_runtime/ttyd_proxy/server.ts"]
 
-        self.log.info("ttyd_proxy.starting", port=TTYD_PROXY_PORT)
+        self.log.info(
+            "ttyd_proxy.starting",
+            port=_port_from_env(TTYD_PROXY_PORT_ENV_VAR, TTYD_PROXY_PORT),
+        )
 
         self.ttyd_proxy_process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -982,7 +1108,7 @@ class SandboxSupervisor:
             env=os.environ.copy(),
         )
 
-        asyncio.create_task(self._forward_ttyd_proxy_logs())
+        self._ttyd_proxy_log_task = asyncio.create_task(self._forward_ttyd_proxy_logs())
         self.log.info("ttyd_proxy.started", pid=self.ttyd_proxy_process.pid)
 
     async def _forward_ttyd_logs(self) -> None:
@@ -1094,12 +1220,13 @@ class SandboxSupervisor:
             workdir = self.repo_path
 
         # Tool/skill/agent/plugin installation does synchronous, potentially
-        # heavy filesystem work — most notably _install_tools' shutil.copytree
-        # of the OpenCode node_modules. Run it off the event loop: while
-        # start_opencode() runs, the concurrent _boot_progress_loop must keep
-        # pinging the control plane. A multi-second blocking copy here would
-        # otherwise freeze the loop, stall the pings, and let the 90s heartbeat
-        # watchdog mark a healthy-but-slow boot as stale.
+        # heavy filesystem work — most notably _install_tools materializing the
+        # OpenCode node_modules (hardlink walk over thousands of files, or a
+        # full copy on the cross-device fallback). Run it off the event loop:
+        # while start_opencode() runs, the concurrent _boot_progress_loop must
+        # keep pinging the control plane. A multi-second blocking call here
+        # would otherwise freeze the loop, stall the pings, and let the 90s
+        # heartbeat watchdog mark a healthy-but-slow boot as stale.
         await asyncio.to_thread(self._install_tools, workdir)
         await asyncio.to_thread(self._install_skills, workdir)
         await asyncio.to_thread(self._install_agents)
@@ -1135,7 +1262,7 @@ class SandboxSupervisor:
         )
 
         # Start log forwarder
-        asyncio.create_task(self._forward_opencode_logs())
+        self._opencode_log_task = asyncio.create_task(self._forward_opencode_logs())
 
         # Wait for health check
         await self._wait_for_health()
@@ -1273,12 +1400,10 @@ class SandboxSupervisor:
                 with contextlib.suppress(asyncio.CancelledError):
                     await drain_task
             if proc is not None and proc.returncode is None:
-                proc.terminate()
                 try:
-                    await asyncio.wait_for(proc.wait(), timeout=10)
-                except TimeoutError:
-                    with contextlib.suppress(ProcessLookupError):
-                        proc.kill()
+                    await self._terminate_child(proc, timeout_seconds=10, name="opencode_prewarm")
+                except Exception as e:
+                    self.log.warn("opencode.prewarm_terminate_failed", exc=e)
 
     async def start_bridge(self) -> None:
         """Start the agent bridge process."""
@@ -1318,7 +1443,7 @@ class SandboxSupervisor:
         )
 
         # Start log forwarder for bridge
-        asyncio.create_task(self._forward_bridge_logs())
+        self._bridge_log_task = asyncio.create_task(self._forward_bridge_logs())
         self.log.info("bridge.started")
 
         # Check if bridge exited immediately during startup
@@ -2014,7 +2139,8 @@ class SandboxSupervisor:
 
             if self.ttyd_process is not None:
                 ttyd_ready = await self._wait_for_port(
-                    TTYD_PORT, timeout_seconds=self.SIDECAR_TIMEOUT_SECONDS
+                    TTYD_PORT,
+                    timeout_seconds=self.SIDECAR_TIMEOUT_SECONDS,
                 )
                 if ttyd_ready:
                     try:
@@ -2060,6 +2186,44 @@ class SandboxSupervisor:
         finally:
             await self.shutdown()
 
+    async def _terminate_child(
+        self,
+        process: asyncio.subprocess.Process | None,
+        timeout_seconds: float,
+        name: str,
+    ) -> None:
+        """Terminate ``process`` gracefully, then kill and reap it.
+
+        Always waits for the process to exit so the asyncio subprocess
+        transport is closed before the event loop shuts down. Without the
+        final ``wait()``, ``BaseSubprocessTransport.__del__`` can raise
+        ``RuntimeError: Event loop is closed`` after ``asyncio.run`` returns.
+        """
+        if process is None or process.returncode is not None:
+            return
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
+            return
+        except TimeoutError:
+            process.kill()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except TimeoutError:
+            self.log.warn(f"{name}.kill_wait_timeout")
+
+    async def _cancel_log_task(self, task: asyncio.Task[None] | None, name: str) -> None:
+        """Cancel and await a log-forwarding task so its pipe transport closes."""
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=2.0)
+        except (asyncio.CancelledError, TimeoutError):
+            pass
+        except Exception as e:
+            self.log.debug(f"{name}.log_task_cancel_error", exc=e)
+
     async def _handle_signal(self, sig: signal.Signals) -> None:
         """Handle shutdown signal."""
         self.log.info("supervisor.signal", signal_name=sig.name)
@@ -2072,51 +2236,34 @@ class SandboxSupervisor:
         # Stop boot-progress pings if boot failed before the bridge took over.
         await self._stop_boot_progress_pings()
 
-        # Terminate bridge first
-        if self.bridge_process and self.bridge_process.returncode is None:
-            self.bridge_process.terminate()
-            try:
-                await asyncio.wait_for(self.bridge_process.wait(), timeout=5.0)
-            except TimeoutError:
-                self.bridge_process.kill()
+        # Terminate bridge first, then drain its log forwarder.
+        await self._terminate_child(self.bridge_process, 5.0, "bridge")
+        await self._cancel_log_task(self._bridge_log_task, "bridge")
 
-        # Terminate code-server
-        if self.code_server_process and self.code_server_process.returncode is None:
-            self.code_server_process.terminate()
-            try:
-                await asyncio.wait_for(self.code_server_process.wait(), timeout=5.0)
-            except TimeoutError:
-                self.code_server_process.kill()
+        # Terminate code-server, then drain its log forwarder.
+        await self._terminate_child(self.code_server_process, 5.0, "code_server")
+        await self._cancel_log_task(self._code_server_log_task, "code_server")
 
-        # Terminate ttyd proxy first (it depends on ttyd)
-        if self.ttyd_proxy_process and self.ttyd_proxy_process.returncode is None:
+        # Terminate ttyd proxy first (it depends on ttyd), then drain its log forwarder.
+        if self.ttyd_proxy_process is not None:
             self.log.info("ttyd_proxy.terminating")
-            self.ttyd_proxy_process.terminate()
-            try:
-                await asyncio.wait_for(
-                    self.ttyd_proxy_process.wait(), timeout=self.SIDECAR_TIMEOUT_SECONDS
-                )
-            except TimeoutError:
-                self.ttyd_proxy_process.kill()
+        await self._terminate_child(
+            self.ttyd_proxy_process, self.SIDECAR_TIMEOUT_SECONDS, "ttyd_proxy"
+        )
+        await self._cancel_log_task(self._ttyd_proxy_log_task, "ttyd_proxy")
 
-        # Terminate ttyd
-        if self.ttyd_process and self.ttyd_process.returncode is None:
+        # Terminate ttyd, then drain its log forwarder.
+        if self.ttyd_process is not None:
             self.log.info("ttyd.terminating")
-            self.ttyd_process.terminate()
-            try:
-                await asyncio.wait_for(
-                    self.ttyd_process.wait(), timeout=self.SIDECAR_TIMEOUT_SECONDS
-                )
-            except TimeoutError:
-                self.ttyd_process.kill()
+        await self._terminate_child(self.ttyd_process, self.SIDECAR_TIMEOUT_SECONDS, "ttyd")
+        await self._cancel_log_task(self._ttyd_log_task, "ttyd")
 
-        # Terminate OpenCode
-        if self.opencode_process and self.opencode_process.returncode is None:
-            self.opencode_process.terminate()
-            try:
-                await asyncio.wait_for(self.opencode_process.wait(), timeout=10.0)
-            except TimeoutError:
-                self.opencode_process.kill()
+        # Terminate OpenCode, then drain its log forwarder.
+        await self._terminate_child(self.opencode_process, 10.0, "opencode")
+        await self._cancel_log_task(self._opencode_log_task, "opencode")
+
+        # Terminate dockerd if it was started
+        await self._terminate_child(self.dockerd_process, 10.0, "dockerd")
 
         self.log.info("supervisor.shutdown_complete")
 

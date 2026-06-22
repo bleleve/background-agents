@@ -135,6 +135,7 @@ Endpoint URLs follow the pattern: `https://{workspace}--open-inspect-{endpoint}.
 | `api-warm` | POST | Yes | Pre-warm a sandbox |
 | `api-snapshot` | POST | Yes | Take filesystem snapshot |
 | `api-restore` | POST | Yes | Restore sandbox from snapshot |
+| `api-build-img` | POST | Yes | Build a repo image asynchronously; result posted to callback URL |
 
 ### Example: Create Sandbox
 

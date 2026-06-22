@@ -137,8 +137,9 @@ the session that produced it.
 
 Unlike auto-review, the session starts from the repository default branch rather than the PR head
 (see [Current Branch Behavior](#current-branch-behavior) below). This does not change the review
-output: the agent reads the diff with `gh pr diff` and anchors inline suggestions to the PR head
-SHA, so it does not need the PR branch checked out.
+output: the diff is pre-fetched and inlined into the prompt (the agent runs `gh pr diff` only as a
+fallback for large diffs), and inline suggestions are anchored to the PR head SHA, so it does not
+need the PR branch checked out.
 
 ### Current Branch Behavior
 

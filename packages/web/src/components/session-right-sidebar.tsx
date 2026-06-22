@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CollapsibleSection,
   ParticipantsSection,
@@ -19,8 +19,9 @@ import {
 } from "./sidebar/sandbox-statuses";
 import { resolvePreviewDisplay } from "./sidebar/preview-display";
 import { ChildSessionsSection } from "./sidebar/child-sessions-section";
-import { TerminalIcon, LinkIcon, RefreshIcon } from "@/components/ui/icons";
+import { GlobeIcon, TerminalIcon, LinkIcon, RefreshIcon } from "@/components/ui/icons";
 import { buildAuthenticatedUrl } from "@/lib/urls";
+import { toast } from "sonner";
 import { extractLatestTasks } from "@/lib/tasks";
 import { extractChangedFiles } from "@/lib/files";
 import type { Artifact, SandboxEvent } from "@/types/session";
@@ -52,6 +53,53 @@ export function SessionRightSidebarContent({
   onToggleTerminal,
   onOpenMedia,
 }: SessionRightSidebarContentProps) {
+  const [previewOn, setPreviewOn] = useState(sessionState?.previewEnabled ?? false);
+  const [isUpdatingPreview, setIsUpdatingPreview] = useState(false);
+  const [rwxRunUrl, setRwxRunUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPreviewOn(sessionState?.previewEnabled ?? false);
+  }, [sessionState?.previewEnabled]);
+
+  useEffect(() => {
+    const linkArtifact = artifacts.find(
+      (a) =>
+        a.type === "link" &&
+        (a.metadata as Record<string, unknown> | undefined)?.label === "RWX Run URL"
+    );
+    if (linkArtifact?.url) setRwxRunUrl(linkArtifact.url);
+  }, [artifacts]);
+
+  const handlePreviewToggle = async () => {
+    const enabled = !previewOn;
+    setPreviewOn(enabled);
+    setIsUpdatingPreview(true);
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        runUrl?: string;
+        previewUrls?: Record<string, string>;
+      };
+      if (!response.ok) {
+        setPreviewOn(!enabled);
+        toast.error(data.error || "Failed to update preview");
+      } else {
+        setRwxRunUrl(data.runUrl ?? null);
+        setPreviewUrl(data.previewUrls?.hire ?? null);
+      }
+    } catch {
+      setPreviewOn(!enabled);
+      toast.error("Failed to update preview");
+    } finally {
+      setIsUpdatingPreview(false);
+    }
+  };
   const tasks = useMemo(() => extractLatestTasks(events), [events]);
   const filesChanged = useMemo(() => extractChangedFiles(events), [events]);
   const mediaArtifacts = useMemo(
@@ -175,6 +223,49 @@ export function SessionRightSidebarContent({
           </div>
         </div>
       )}
+
+      {/* Preview mode toggle */}
+      <div className="px-4 py-4 border-b border-border-muted">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <GlobeIcon className="h-4 w-4" />
+            <span className="font-medium">Preview</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {previewOn && previewUrl && (
+              <a
+                href={previewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1 text-muted-foreground hover:text-foreground transition"
+                title="Open preview"
+              >
+                <LinkIcon className="h-3.5 w-3.5" />
+              </a>
+            )}
+            <button
+              onClick={handlePreviewToggle}
+              disabled={isUpdatingPreview || !sessionId}
+              className="text-xs text-accent hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isUpdatingPreview ? "Updating…" : previewOn ? "On" : "Off"}
+            </button>
+          </div>
+        </div>
+        {rwxRunUrl && (
+          <div className="mt-2">
+            <a
+              href={rwxRunUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-xs text-accent hover:underline"
+            >
+              <LinkIcon className="h-3 w-3" />
+              RWX Run URL
+            </a>
+          </div>
+        )}
+      </div>
 
       {/* Preview + Restart. The "Restart" link sits on the right of the Preview
           row (like the Terminal "Show" action) for a dead-idle sandbox; with no

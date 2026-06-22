@@ -69,6 +69,7 @@ export interface SessionInitInput {
    * unspecified and planMode is true, the DO falls back to DEFAULT_PLAN_MODEL.
    */
   planModel?: string;
+  previewEnabled?: boolean;
   automationId?: string | null;
   automationRunId?: string | null;
 }
@@ -152,6 +153,7 @@ export async function initializeSession(
           scmUserId: input.scmUserId,
           codeServerEnabled: input.codeServerEnabled,
           sandboxSettings: input.sandboxSettings,
+          previewEnabled: input.previewEnabled,
           parentSessionId: input.parentSessionId,
           spawnSource: input.spawnSource,
           spawnDepth: input.spawnDepth,

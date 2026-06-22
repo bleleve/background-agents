@@ -3,6 +3,7 @@ import type {
   Env,
   PullRequestOpenedPayload,
   PullRequestLabeledPayload,
+  PullRequestSynchronizedPayload,
   ReviewRequestedPayload,
   IssueCommentPayload,
   ReviewCommentPayload,
@@ -56,6 +57,7 @@ const defaultConfig: ResolvedGitHubConfig = {
 import {
   handlePullRequestOpened,
   handlePullRequestLabeled,
+  handlePullRequestSynchronized,
   handleReviewRequested,
   handleIssueComment,
   handleReviewComment,
@@ -238,26 +240,30 @@ beforeEach(() => {
   // Includes head/base (and head.repo for fork detection) so handlers that resolve
   // a clone branch from fetched PR details (e.g. handleIssueComment) work.
   // Tests that need a large diff (or check-suite details) override this per test.
+  // Use mockImplementation (fresh Response per call) because the PR endpoint is
+  // now hit more than once — resolveDiffContext reads details then the diff — and
+  // a Response body can only be consumed once.
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          number: 42,
-          title: "Test PR",
-          body: null,
-          html_url: "https://github.com/acme/widgets/pull/42",
-          state: "open",
-          draft: false,
-          user: { login: "pr-author" },
-          head: { ref: "feature/cache", sha: "abc123", repo: { full_name: "acme/widgets" } },
-          base: { ref: "main", repo: { private: true, full_name: "acme/widgets" } },
-          additions: 1,
-          deletions: 1,
-          changed_files: 1,
-        }),
-        { status: 200 }
-      )
+    vi.fn().mockImplementation(
+      () =>
+        new Response(
+          JSON.stringify({
+            number: 42,
+            title: "Test PR",
+            body: null,
+            html_url: "https://github.com/acme/widgets/pull/42",
+            state: "open",
+            draft: false,
+            user: { login: "pr-author" },
+            head: { ref: "feature/cache", sha: "abc123", repo: { full_name: "acme/widgets" } },
+            base: { ref: "main", repo: { private: true, full_name: "acme/widgets" } },
+            additions: 1,
+            deletions: 1,
+            changed_files: 1,
+          }),
+          { status: 200 }
+        )
     )
   );
 });
@@ -597,20 +603,21 @@ describe("handleCheckSuiteCompleted", () => {
     const log = createMockLogger();
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            number: 42,
-            title: "Fix lint errors",
-            body: "Automated update",
-            user: { login: "test-bot[bot]" },
-            head: { ref: "open-inspect/session-123", sha: "abc123" },
-            base: { ref: "main" },
-            draft: false,
-            state: "open",
-          }),
-          { status: 200 }
-        )
+      vi.fn().mockImplementation(
+        () =>
+          new Response(
+            JSON.stringify({
+              number: 42,
+              title: "Fix lint errors",
+              body: "Automated update",
+              user: { login: "test-bot[bot]" },
+              head: { ref: "open-inspect/session-123", sha: "abc123" },
+              base: { ref: "main" },
+              draft: false,
+              state: "open",
+            }),
+            { status: 200 }
+          )
       )
     );
 
@@ -674,20 +681,21 @@ describe("handleCheckSuiteCompleted", () => {
     const log = createMockLogger();
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            number: 42,
-            title: "Feature work",
-            body: "Authored by alice",
-            user: { login: "alice" },
-            head: { ref: "open-inspect/session-123", sha: "abc123" },
-            base: { ref: "main" },
-            draft: false,
-            state: "open",
-          }),
-          { status: 200 }
-        )
+      vi.fn().mockImplementation(
+        () =>
+          new Response(
+            JSON.stringify({
+              number: 42,
+              title: "Feature work",
+              body: "Authored by alice",
+              user: { login: "alice" },
+              head: { ref: "open-inspect/session-123", sha: "abc123" },
+              base: { ref: "main" },
+              draft: false,
+              state: "open",
+            }),
+            { status: 200 }
+          )
       )
     );
 
@@ -740,20 +748,21 @@ describe("handleCheckSuiteCompleted", () => {
     const log = createMockLogger();
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            number: 42,
-            title: "Fix lint errors",
-            body: "Automated update",
-            user: { login: "test-bot[bot]" },
-            head: { ref: "open-inspect/session-123", sha: "abc123" },
-            base: { ref: "main" },
-            draft: false,
-            state: "open",
-          }),
-          { status: 200 }
-        )
+      vi.fn().mockImplementation(
+        () =>
+          new Response(
+            JSON.stringify({
+              number: 42,
+              title: "Fix lint errors",
+              body: "Automated update",
+              user: { login: "test-bot[bot]" },
+              head: { ref: "open-inspect/session-123", sha: "abc123" },
+              base: { ref: "main" },
+              draft: false,
+              state: "open",
+            }),
+            { status: 200 }
+          )
       )
     );
 
@@ -1907,6 +1916,50 @@ const pullRequestLabeledPayload: PullRequestLabeledPayload = {
 };
 
 describe("handlePullRequestLabeled", () => {
+  it("uses a stable repo-and-PR slug for a preview without a session", async () => {
+    const env = { ...createMockEnv(), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
+    const log = createMockLogger();
+    const cpFetch = getControlPlaneFetch(env);
+    cpFetch.mockResolvedValue(new Response(JSON.stringify({ dispatchId: "d-1" }), { status: 202 }));
+    const payload: PullRequestLabeledPayload = {
+      ...pullRequestLabeledPayload,
+      label: { name: "preview" },
+      pull_request: {
+        ...pullRequestLabeledPayload.pull_request,
+        labels: [{ name: "preview" }],
+      },
+    };
+
+    await handlePullRequestLabeled(env, log, payload, "trace-preview");
+
+    expect(cpFetch).toHaveBeenCalledOnce();
+    expect(cpFetch.mock.calls[0][0]).toBe("https://internal/previews/dispatch");
+    expect(JSON.parse(cpFetch.mock.calls[0][1].body)).toMatchObject({
+      repoOwner: "acme",
+      repoName: "widgets",
+      commitSha: "abc123",
+      slug: "widgets-42",
+    });
+  });
+
+  it("skips the preview label when PREVIEW_LABEL_ENABLED is not set", async () => {
+    const env = createMockEnv(); // PREVIEW_LABEL_ENABLED not set → off by default
+    const log = createMockLogger();
+    const payload: PullRequestLabeledPayload = {
+      ...pullRequestLabeledPayload,
+      label: { name: "preview" },
+      pull_request: {
+        ...pullRequestLabeledPayload.pull_request,
+        labels: [{ name: "preview" }],
+      },
+    };
+
+    const result = await handlePullRequestLabeled(env, log, payload, "trace-preview");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "preview_label_disabled" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
   it("re-runs a full code review when the reef: ask for review label is added", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
@@ -2035,6 +2088,66 @@ describe("handlePullRequestLabeled", () => {
   });
 });
 
+describe("handlePullRequestSynchronized", () => {
+  it("re-dispatches a standalone preview with the same slug", async () => {
+    const env = { ...createMockEnv(), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
+    const log = createMockLogger();
+    const cpFetch = getControlPlaneFetch(env);
+    cpFetch.mockResolvedValue(new Response(JSON.stringify({ dispatchId: "d-1" }), { status: 202 }));
+    const payload: PullRequestSynchronizedPayload = {
+      action: "synchronize",
+      pull_request: {
+        ...pullRequestLabeledPayload.pull_request,
+        head: { ref: "feature/cache", sha: "def456" },
+        labels: [{ name: "Preview" }],
+      },
+      repository: pullRequestLabeledPayload.repository,
+      sender: pullRequestLabeledPayload.sender,
+    };
+
+    const result = await handlePullRequestSynchronized(env, log, payload, "trace-sync");
+
+    expect(result).toMatchObject({ outcome: "processed", handler_action: "preview_dispatch" });
+    expect(JSON.parse(cpFetch.mock.calls[0][1].body)).toMatchObject({
+      commitSha: "def456",
+      slug: "widgets-42",
+    });
+  });
+
+  it("does not dispatch a PR update without the preview label", async () => {
+    const env = { ...createMockEnv(), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
+    const payload: PullRequestSynchronizedPayload = {
+      action: "synchronize",
+      pull_request: { ...pullRequestLabeledPayload.pull_request, labels: [] },
+      repository: pullRequestLabeledPayload.repository,
+      sender: pullRequestLabeledPayload.sender,
+    };
+
+    await expect(
+      handlePullRequestSynchronized(env, createMockLogger(), payload, "trace-sync")
+    ).resolves.toEqual({ outcome: "skipped", skip_reason: "preview_not_enabled" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("skips when PREVIEW_LABEL_ENABLED is not set, even if the label is present", async () => {
+    const env = createMockEnv(); // PREVIEW_LABEL_ENABLED not set → off by default
+    const payload: PullRequestSynchronizedPayload = {
+      action: "synchronize",
+      pull_request: {
+        ...pullRequestLabeledPayload.pull_request,
+        labels: [{ name: "preview" }],
+      },
+      repository: pullRequestLabeledPayload.repository,
+      sender: pullRequestLabeledPayload.sender,
+    };
+
+    await expect(
+      handlePullRequestSynchronized(env, createMockLogger(), payload, "trace-sync")
+    ).resolves.toEqual({ outcome: "skipped", skip_reason: "preview_label_disabled" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+});
+
 describe("handleReviewRequestInternal", () => {
   const internalRequest = {
     owner: "acme",
@@ -2043,12 +2156,87 @@ describe("handleReviewRequestInternal", () => {
     requestedBy: { login: "alice", id: 1001, avatarUrl: "https://avatars.example/alice" },
   };
 
+  // Mock the GitHub API, branching on the Accept header: the diff media type
+  // returns `diffBody` (or 406 when null), everything else returns PR details
+  // with the given changed-line counts.
+  function mockGitHubFetch(opts: {
+    additions: number;
+    deletions: number;
+    diffBody: string | null;
+  }) {
+    return vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      const accept = String((init?.headers as Record<string, string>)?.Accept ?? "");
+      if (accept.includes("vnd.github.v3.diff")) {
+        return Promise.resolve(
+          opts.diffBody === null
+            ? new Response(null, { status: 406 })
+            : new Response(opts.diffBody, { status: 200 })
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            number: 42,
+            title: "Add caching",
+            body: "Adds Redis caching",
+            user: { login: "alice" },
+            head: { ref: "feature/cache", sha: "abc123" },
+            state: "open",
+            base: { ref: "main", repo: { private: false } },
+            additions: opts.additions,
+            deletions: opts.deletions,
+          }),
+          { status: 200 }
+        )
+      );
+    });
+  }
+
+  it("inlines the diff into the review prompt for a small PR", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.stubGlobal(
+      "fetch",
+      mockGitHubFetch({
+        additions: 5,
+        deletions: 2,
+        diffBody: "diff --git a/x b/x\n+hello-from-diff\n",
+      })
+    );
+
+    const result = await handleReviewRequestInternal(env, log, internalRequest, "trace-int");
+
+    expect(result).toEqual({ ok: true, sessionId: "session-123" });
+    const promptBody = JSON.parse(getControlPlaneFetch(env).mock.calls[1][1].body);
+    expect(promptBody.content).toContain("## Full Diff");
+    expect(promptBody.content).toContain("hello-from-diff");
+    expect(promptBody.content).not.toContain("## Diff access");
+  });
+
+  it("does not inline a large diff (keeps the fetch-it-yourself path)", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.stubGlobal(
+      "fetch",
+      mockGitHubFetch({ additions: 700, deletions: 0, diffBody: "should-not-be-inlined" })
+    );
+
+    const result = await handleReviewRequestInternal(env, log, internalRequest, "trace-int");
+
+    expect(result).toEqual({ ok: true, sessionId: "session-123" });
+    const promptBody = JSON.parse(getControlPlaneFetch(env).mock.calls[1][1].body);
+    expect(promptBody.content).not.toContain('<user_content source="github_pr_diff"');
+    expect(promptBody.content).not.toContain("should-not-be-inlined");
+    expect(promptBody.content).toContain("## Diff access");
+  });
+
   it("creates a review session from PR details fetched via the GitHub API", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
     // PR-details fetch returns title/body/author/branches + repo visibility.
-    // Use mockImplementation so each call gets a fresh Response (the endpoint is
-    // fetched twice — once here, once by isLargeDiff — and a body reads once).
+    // Use mockImplementation so each call gets a fresh Response — the PR endpoint
+    // is hit several times (visibility resolution, plus resolveDiffContext fetches
+    // details and the diff), and each Response body can only be read once.
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(() =>

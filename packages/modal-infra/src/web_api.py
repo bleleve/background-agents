@@ -576,6 +576,13 @@ async def api_restore(
     image=function_image,
     secrets=[internal_api_secret, github_app_secrets],
 )
+# NOTE: the function name drives the Modal web-endpoint label
+# (open-inspect-<name-with-dashes>). The control plane calls this endpoint at
+# `${baseUrl}-api-build-img.modal.run`, so this MUST stay `api_build_img`.
+# The longer upstream name `api_build_repo_image` produces a different label
+# (and overflows Modal's 63-char subdomain limit in long workspaces, getting
+# hashed), which makes the control plane's hard-coded URL 404. Keep in sync with
+# packages/control-plane/src/sandbox/client.ts (buildRepoImageUrl).
 @fastapi_endpoint(method="POST")
 async def api_build_img(
     request: dict,
@@ -598,7 +605,8 @@ async def api_build_img(
         "repo_name": "...",
         "default_branch": "main",
         "build_id": "...",
-        "callback_url": "..."
+        "callback_url": "...",
+        "build_timeout_seconds": 1800  // optional
     }
     """
     start_time = time.time()
@@ -608,6 +616,7 @@ async def api_build_img(
     require_auth(authorization)
 
     try:
+        from .sandbox.manager import DEFAULT_BUILD_TIMEOUT_SECONDS
         from .scheduler.image_builder import build_repo_image
 
         repo_owner = request.get("repo_owner")
@@ -616,6 +625,10 @@ async def api_build_img(
         build_id = request.get("build_id", "")
         callback_url = request.get("callback_url", "")
         user_env_vars = request.get("user_env_vars") or None
+        # Already capped by the control plane; default when absent/null.
+        build_timeout_seconds = int(
+            request.get("build_timeout_seconds") or DEFAULT_BUILD_TIMEOUT_SECONDS
+        )
 
         if not repo_owner or not repo_name:
             raise HTTPException(status_code=400, detail="repo_owner and repo_name are required")
@@ -626,7 +639,10 @@ async def api_build_img(
         if not default_branch:
             raise HTTPException(status_code=400, detail="default_branch is required")
 
-        # Spawn the async builder — returns immediately
+        # Spawn the async builder — returns immediately. The worker's own timeout
+        # is sized for the max allowed build at definition time (modal 1.3.1 has
+        # no per-call Function.with_options override); the requested
+        # build_timeout_seconds is enforced on the build sandbox it creates.
         await build_repo_image.spawn.aio(
             repo_owner=repo_owner,
             repo_name=repo_name,
@@ -634,6 +650,7 @@ async def api_build_img(
             callback_url=callback_url,
             build_id=build_id,
             user_env_vars=user_env_vars,
+            build_timeout_seconds=build_timeout_seconds,
         )
 
         return {
@@ -650,18 +667,18 @@ async def api_build_img(
     except Exception as e:
         outcome = "error"
         http_status = 500
-        log.error("api.error", exc=e, endpoint_name="api_build_repo_image")
+        log.error("api.error", exc=e, endpoint_name="api_build_img")
         return {"success": False, "error": str(e)}
     finally:
         duration_ms = int((time.time() - start_time) * 1000)
         log.info(
             "modal.http_request",
             http_method="POST",
-            http_path="/api_build_repo_image",
+            http_path="/api_build_img",
             http_status=http_status,
             duration_ms=duration_ms,
             outcome=outcome,
-            endpoint_name="api_build_repo_image",
+            endpoint_name="api_build_img",
             trace_id=x_trace_id,
             request_id=x_request_id,
         )

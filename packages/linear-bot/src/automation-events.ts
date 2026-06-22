@@ -7,10 +7,88 @@ import type { Env } from "./types";
 import type { LinearWebhookPayload } from "@open-inspect/shared";
 import { normalizeLinearEvent } from "@open-inspect/shared";
 import { buildInternalAuthHeaders } from "./utils/internal";
-import { getProjectRepoMapping, getTeamRepoMapping } from "./kv-store";
+import { getProjectRepoMapping, getTeamRepoMapping, lookupIssueSession } from "./kv-store";
 import { createLogger } from "./logger";
+import { postIssueComment } from "./utils/linear-client";
 
 const log = createLogger("automation-events");
+
+function hasPreviewLabel(payload: LinearWebhookPayload): boolean {
+  return payload.data.labels?.some((label) => label.name.toLowerCase() === "preview") ?? false;
+}
+
+function wasPreviewLabelAdded(payload: LinearWebhookPayload): boolean {
+  if (payload.action !== "update" || !hasPreviewLabel(payload)) return false;
+
+  const previousLabels = payload.updatedFrom?.labels;
+  if (!Array.isArray(previousLabels)) return false;
+
+  const previewLabel = payload.data.labels?.find((label) => label.name.toLowerCase() === "preview");
+  return !previousLabels.some((label) => {
+    if (typeof label === "string") {
+      return label === previewLabel?.id || label.toLowerCase() === "preview";
+    }
+    if (!label || typeof label !== "object") return false;
+    const previous = label as { id?: unknown; name?: unknown };
+    return (
+      previous.id === previewLabel?.id ||
+      (typeof previous.name === "string" && previous.name.toLowerCase() === "preview")
+    );
+  });
+}
+
+async function enablePreviewForExistingSession(
+  payload: LinearWebhookPayload,
+  env: Env
+): Promise<void> {
+  if (env.PREVIEW_LABEL_ENABLED !== "true") return;
+  if (!wasPreviewLabelAdded(payload)) return;
+
+  const existingSession = await lookupIssueSession(env, payload.data.id);
+  if (!existingSession) return;
+
+  try {
+    const authHeaders = await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET);
+    const response = await env.CONTROL_PLANE.fetch(
+      `https://internal/sessions/${existingSession.sessionId}/preview`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({ enabled: true, reason: "linear_label_added" }),
+      }
+    );
+
+    if (!response.ok) {
+      log.warn("automation_events.preview_enable_failed", {
+        issue_id: payload.data.id,
+        issue_identifier: payload.data.identifier,
+        session_id: existingSession.sessionId,
+        status: response.status,
+      });
+    } else {
+      const result = (await response.json()) as { previewUrls?: Record<string, string> };
+      log.info("automation_events.preview_enabled", {
+        issue_id: payload.data.id,
+        issue_identifier: payload.data.identifier,
+        session_id: existingSession.sessionId,
+      });
+      if (result.previewUrls?.hire && env.LINEAR_API_KEY) {
+        await postIssueComment(
+          env.LINEAR_API_KEY,
+          payload.data.id,
+          `[hire preview](${result.previewUrls.hire})`
+        );
+      }
+    }
+  } catch (err) {
+    log.warn("automation_events.preview_enable_error", {
+      issue_id: payload.data.id,
+      issue_identifier: payload.data.identifier,
+      session_id: existingSession.sessionId,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+  }
+}
 
 /**
  * Resolve the repo (owner + name) for an Issue webhook payload.
@@ -59,6 +137,13 @@ export async function handleLinearIssueEvent(
   if (payload.action !== "create" && payload.action !== "update") {
     return;
   }
+
+  // Issue updates are delivered independently from AgentSession events. If a
+  // preview label is added after a session starts, use the persisted
+  // issue-to-session mapping to opt that existing session into preview mode.
+  // This intentionally happens before repo resolution: the session mapping is
+  // sufficient, and a missing repo mapping should not prevent the toggle.
+  await enablePreviewForExistingSession(payload, env);
 
   // 2. Resolve repo from project or team mappings
   const { repoOwner, repoName } = await resolveRepo(payload, env);

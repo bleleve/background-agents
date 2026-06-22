@@ -88,6 +88,10 @@ export function isPlanModeTriggered(labels: LinearLabel[]): boolean {
   return labels.some((l) => l.name.trim().toLowerCase() === PREFIX_PLAN);
 }
 
+export function isPreviewEnabled(labels: LinearLabel[]): boolean {
+  return labels.some((label) => label.name.trim().toLowerCase() === "preview");
+}
+
 /**
  * Extract impl-model override: a label of the form `model-<alias>` or
  * `build-<alias>` (the two are interchangeable; first match wins).

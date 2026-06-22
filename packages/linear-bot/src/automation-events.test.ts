@@ -141,6 +141,134 @@ describe("handleLinearIssueEvent", () => {
       expect(body.eventType).toBe("issue.updated");
     });
 
+    it("enables preview mode on an existing session when the preview label is added", async () => {
+      const updatePayload: LinearWebhookPayload = {
+        ...baseCreatePayload,
+        action: "update",
+        updatedFrom: { labels: baseCreatePayload.data.labels },
+        data: {
+          ...baseCreatePayload.data,
+          labels: [
+            ...(baseCreatePayload.data.labels ?? []),
+            { id: "label-preview", name: "Preview", color: "#00ff00" },
+          ],
+        },
+      };
+      const kv = createFakeKV({
+        "config:project-repos": JSON.stringify(projectRepoMapping),
+        "issue:issue-abc": JSON.stringify({
+          sessionId: "session-existing",
+          issueId: "issue-abc",
+          issueIdentifier: "ENG-123",
+          repoOwner: "acme-org",
+          repoName: "my-app",
+          model: "test-model",
+          createdAt: Date.now(),
+        }),
+      });
+      const fetcher = createFakeFetcher(200);
+      const env = { ...makeEnv(kv, fetcher), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
+
+      await handleLinearIssueEvent(updatePayload, env);
+
+      expect(fetcher.fetch).toHaveBeenCalledTimes(2);
+      expect(fetcher.fetch).toHaveBeenNthCalledWith(
+        1,
+        "https://internal/sessions/session-existing/preview",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ enabled: true, reason: "linear_label_added" }),
+        })
+      );
+      expect(fetcher.fetch).toHaveBeenNthCalledWith(
+        2,
+        "https://internal/internal/linear-event",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+
+    it("enables preview mode even when the issue repository cannot be resolved", async () => {
+      const updatePayload: LinearWebhookPayload = {
+        ...baseCreatePayload,
+        action: "update",
+        updatedFrom: { labels: baseCreatePayload.data.labels },
+        data: {
+          ...baseCreatePayload.data,
+          project: undefined,
+          team: undefined,
+          labels: [{ id: "label-preview", name: "preview", color: "#00ff00" }],
+        },
+      };
+      const kv = createFakeKV({
+        "issue:issue-abc": JSON.stringify({ sessionId: "session-existing" }),
+      });
+      const fetcher = createFakeFetcher(200);
+      const env = { ...makeEnv(kv, fetcher), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
+
+      await handleLinearIssueEvent(updatePayload, env);
+
+      expect(fetcher.fetch).toHaveBeenCalledOnce();
+      expect(fetcher.fetch).toHaveBeenCalledWith(
+        "https://internal/sessions/session-existing/preview",
+        expect.objectContaining({
+          body: JSON.stringify({ enabled: true, reason: "linear_label_added" }),
+        })
+      );
+    });
+
+    it("does not enable preview when PREVIEW_LABEL_ENABLED is not set, even if the label is added", async () => {
+      const updatePayload: LinearWebhookPayload = {
+        ...baseCreatePayload,
+        action: "update",
+        updatedFrom: { labels: baseCreatePayload.data.labels },
+        data: {
+          ...baseCreatePayload.data,
+          labels: [
+            ...(baseCreatePayload.data.labels ?? []),
+            { id: "label-preview", name: "preview", color: "#00ff00" },
+          ],
+        },
+      };
+      const kv = createFakeKV({
+        "config:project-repos": JSON.stringify(projectRepoMapping),
+        "issue:issue-abc": JSON.stringify({ sessionId: "session-existing" }),
+      });
+      const fetcher = createFakeFetcher(200);
+      const env = makeEnv(kv, fetcher); // PREVIEW_LABEL_ENABLED not set → off by default
+
+      await handleLinearIssueEvent(updatePayload, env);
+
+      // Only the linear-event forward should fire; the preview endpoint must not be called.
+      expect(fetcher.fetch).toHaveBeenCalledOnce();
+      expect(fetcher.fetch).toHaveBeenCalledWith(
+        "https://internal/internal/linear-event",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+
+    it("does not enable preview for an unrelated update when the label already exists", async () => {
+      const labels = [{ id: "label-preview", name: "preview", color: "#00ff00" }];
+      const updatePayload: LinearWebhookPayload = {
+        ...baseCreatePayload,
+        action: "update",
+        updatedFrom: { title: "Old title" },
+        data: { ...baseCreatePayload.data, labels },
+      };
+      const kv = createFakeKV({
+        "config:project-repos": JSON.stringify(projectRepoMapping),
+        "issue:issue-abc": JSON.stringify({ sessionId: "session-existing" }),
+      });
+      const fetcher = createFakeFetcher(200);
+
+      await handleLinearIssueEvent(updatePayload, makeEnv(kv, fetcher));
+
+      expect(fetcher.fetch).toHaveBeenCalledOnce();
+      expect(fetcher.fetch).toHaveBeenCalledWith(
+        "https://internal/internal/linear-event",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+
     it("falls through to team mapping when project id is present but not in the mapping", async () => {
       const kv = createFakeKV({
         // project-repos has no entry for proj-1

@@ -54,7 +54,6 @@ export function ActionBar({
   const [isArchiving, setIsArchiving] = useState(false);
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
   const [isRerunningReview, setIsRerunningReview] = useState(false);
-
   const prArtifact = artifacts.find((a) => a.type === "pr");
   const previewArtifact = artifacts.find((a) => a.type === "preview");
   const mediaCount = artifacts.filter(

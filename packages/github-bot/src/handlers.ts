@@ -11,6 +11,7 @@ import type {
   Env,
   PullRequestOpenedPayload,
   PullRequestLabeledPayload,
+  PullRequestSynchronizedPayload,
   PullRequestStateChangedPayload,
   ReviewRequestedPayload,
   IssueCommentPayload,
@@ -26,6 +27,7 @@ import {
   postReaction,
   checkSenderPermission,
   dismissPullRequestReview,
+  createIssueComment,
 } from "./github-auth";
 import {
   buildCodeReviewPrompt,
@@ -41,6 +43,7 @@ import {
   extractReviewModelFromLabels,
   hasPlanLabel,
   isAskForReviewLabel,
+  isPreviewLabel,
   type GitHubLabel,
 } from "./label-resolution";
 
@@ -457,23 +460,56 @@ interface GitHubPullRequestDetails {
  * Above this many changed lines (additions + deletions), the review prompt
  * switches the agent into a Lookout-then-Dive strategy (delegating focused
  * investigations via spawn-task) so attention does not dilute across a big diff.
+ * It is also the gate for inlining the diff into the prompt: only sub-threshold
+ * diffs are inlined (see resolveDiffContext).
  */
 const LARGE_DIFF_THRESHOLD_LINES = 600;
 
 /**
- * Best-effort check of whether a PR is large enough to warrant the
- * Lookout/Diver review strategy. Returns false if PR details can't be fetched.
+ * Hard cap on the byte size of a diff inlined into the prompt. The line
+ * threshold is the primary gate; this is a safety valve against diffs with few
+ * but very long lines (e.g. minified blobs) that slip under the line count.
+ * Over the cap → fall back to the fetch-it-yourself path.
  */
-async function isLargeDiff(
+const INLINE_DIFF_MAX_BYTES = 256 * 1024;
+
+interface DiffContext {
+  /** PR is large enough to warrant the Lookout/Diver review strategy. */
+  largeDiff: boolean;
+  /** The pre-fetched unified diff to inline, or null to fall back to `gh pr diff`. */
+  prDiff: string | null;
+}
+
+/**
+ * Decide the diff strategy for a PR in one place: whether it's "large" (drives
+ * the Lookout/Diver prompt) and whether to inline the diff (small enough to
+ * pre-fetch and embed, so the agent never runs `gh pr diff` and can't loop on
+ * its truncated output).
+ *
+ * Pass `details` when the caller already fetched them, to avoid a duplicate PR
+ * fetch. Best-effort throughout: a failed fetch degrades to `largeDiff: false`
+ * / `prDiff: null`, i.e. the agent fetches the diff itself.
+ */
+async function resolveDiffContext(
   token: string,
   owner: string,
   repo: string,
-  pullNumber: number
-): Promise<boolean> {
-  const details = await fetchPullRequestDetails(token, owner, repo, pullNumber);
-  if (!details) return false;
-  const changedLines = (details.additions ?? 0) + (details.deletions ?? 0);
-  return changedLines >= LARGE_DIFF_THRESHOLD_LINES;
+  pullNumber: number,
+  details?: GitHubPullRequestDetails | null
+): Promise<DiffContext> {
+  const resolved =
+    details !== undefined ? details : await fetchPullRequestDetails(token, owner, repo, pullNumber);
+  const changedLines = (resolved?.additions ?? 0) + (resolved?.deletions ?? 0);
+  const largeDiff = changedLines >= LARGE_DIFF_THRESHOLD_LINES;
+
+  // Large diffs keep the Lookout/Diver fetch-it-yourself path (the prompt gives
+  // anti-loop guidance instead). Only inline small/medium diffs.
+  if (largeDiff) return { largeDiff, prDiff: null };
+
+  const diff = await fetchPullRequestDiff(token, owner, repo, pullNumber);
+  const prDiff =
+    diff && new TextEncoder().encode(diff).length <= INLINE_DIFF_MAX_BYTES ? diff : null;
+  return { largeDiff, prDiff };
 }
 
 function getFailedCheckAttemptKey(repoFullName: string, pullNumber: number): string {
@@ -520,6 +556,34 @@ async function fetchPullRequestDetails(
   );
   if (!response.ok) return null;
   return (await response.json()) as GitHubPullRequestDetails;
+}
+
+/**
+ * Fetch the PR's unified diff. Uses the `application/vnd.github.v3.diff` media
+ * type — byte-identical to what `gh pr diff` returns in the sandbox — so an
+ * inlined diff is interchangeable with the agent's own fetch. Returns null on
+ * any non-OK response (GitHub answers 406 for oversized diffs), which the
+ * caller treats as "don't inline, let the agent fetch it".
+ */
+async function fetchPullRequestDiff(
+  token: string,
+  owner: string,
+  repo: string,
+  pullNumber: number
+): Promise<string | null> {
+  const response = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${pullNumber}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github.v3.diff",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Open-Inspect",
+      },
+    }
+  );
+  if (!response.ok) return null;
+  return await response.text();
 }
 
 type CallerGatingResult =
@@ -711,7 +775,12 @@ async function runCodeReview(
     }
   }
 
-  const largeDiff = await isLargeDiff(ghToken, params.owner, params.repoName, params.prNumber);
+  const { largeDiff, prDiff } = await resolveDiffContext(
+    ghToken,
+    params.owner,
+    params.repoName,
+    params.prNumber
+  );
 
   const prompt = buildCodeReviewPrompt({
     owner: params.owner,
@@ -726,6 +795,7 @@ async function runCodeReview(
     codeReviewInstructions: params.codeReviewInstructions,
     autoApproveOnOpen: params.autoApproveOnOpen,
     largeDiff,
+    prDiff,
     resumed: reused,
     sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
   });
@@ -1053,6 +1123,14 @@ export async function handlePullRequestLabeled(
   const repoName = repo.name;
   const repoFullName = `${owner}/${repoName}`.toLowerCase();
 
+  if (isPreviewLabel(label.name)) {
+    if (env.PREVIEW_LABEL_ENABLED !== "true") {
+      log.debug("handler.preview_label_disabled", { trace_id: traceId, label: label.name });
+      return { outcome: "skipped", skip_reason: "preview_label_disabled" };
+    }
+    return dispatchPullRequestPreview(env, payload, traceId, "github_label_added");
+  }
+
   if (!isAskForReviewLabel(label.name)) {
     log.debug("handler.not_review_label", { trace_id: traceId, label: label.name });
     return { outcome: "skipped", skip_reason: "not_review_label" };
@@ -1145,6 +1223,94 @@ export async function handlePullRequestLabeled(
     existingSessionId,
     meta,
   });
+}
+
+/**
+ * Re-dispatch a labeled PR preview at its newest head. Standalone PR previews use
+ * a deterministic slug so every synchronize event addresses the same sandbox.
+ */
+export async function handlePullRequestSynchronized(
+  env: Env,
+  _log: Logger,
+  payload: PullRequestSynchronizedPayload,
+  traceId: string
+): Promise<HandlerResult> {
+  if (env.PREVIEW_LABEL_ENABLED !== "true") {
+    return { outcome: "skipped", skip_reason: "preview_label_disabled" };
+  }
+  if (!payload.pull_request.labels?.some((label) => isPreviewLabel(label.name))) {
+    return { outcome: "skipped", skip_reason: "preview_not_enabled" };
+  }
+  return dispatchPullRequestPreview(env, payload, traceId, "github_synchronized");
+}
+
+async function dispatchPullRequestPreview(
+  env: Env,
+  payload: Pick<PullRequestLabeledPayload, "pull_request" | "repository">,
+  traceId: string,
+  reason: string
+): Promise<HandlerResult> {
+  const { pull_request: pr, repository: repo } = payload;
+  const owner = repo.owner.login;
+  const repoName = repo.name;
+  const repoFullName = `${owner}/${repoName}`.toLowerCase();
+  const sessionId =
+    extractSessionIdFromBranch(pr.head.ref) ??
+    (await lookupPrSession(env, repoFullName, pr.number)) ??
+    (await lookupReviewSession(env, repoFullName, pr.number));
+  const headers = await getAuthHeaders(env, traceId);
+  const response = sessionId
+    ? await env.CONTROL_PLANE.fetch(
+        `https://internal/sessions/${encodeURIComponent(sessionId)}/preview`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ enabled: true, commitSha: pr.head.sha, reason }),
+        }
+      )
+    : await env.CONTROL_PLANE.fetch("https://internal/previews/dispatch", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          repoOwner: owner,
+          repoName,
+          branchName: pr.head.ref,
+          commitSha: pr.head.sha,
+          slug: `${repoName}-${pr.number}`,
+          reason,
+        }),
+      });
+  if (!response.ok) {
+    throw new Error(`Preview dispatch failed: ${response.status} ${await response.text()}`);
+  }
+  const result = (await response.json()) as {
+    previewUrls?: Record<string, string>;
+    runUrl?: string;
+  };
+  const linkUrl = result.previewUrls?.hire ?? result.runUrl;
+  if (linkUrl) {
+    const userAgent = resolveAppName(env);
+    const token = await generateInstallationToken({
+      appId: env.GITHUB_APP_ID,
+      privateKey: env.GITHUB_APP_PRIVATE_KEY,
+      installationId: env.GITHUB_APP_INSTALLATION_ID,
+      userAgent,
+    });
+    await createIssueComment(
+      token,
+      owner,
+      repoName,
+      pr.number,
+      `[hire preview](${linkUrl})`,
+      userAgent
+    );
+  }
+  return {
+    outcome: "processed",
+    session_id: sessionId ?? "",
+    message_id: "",
+    handler_action: "preview_dispatch",
+  };
 }
 
 /** Body of an internal `POST /internal/reviews` request (from the web UI). */
@@ -1376,6 +1542,8 @@ export async function handleCheckSuiteCompleted(
 
     log.info("session.reused", { ...meta, session_id: sessionId, action: "failed_checks" });
 
+    const { prDiff } = await resolveDiffContext(ghToken, owner, repoName, pullNumber, pr);
+
     const prompt = buildFailedChecksPrompt({
       owner,
       repo: repoName,
@@ -1388,6 +1556,7 @@ export async function handleCheckSuiteCompleted(
       maxAttempts: MAX_FAILED_CHECK_FIX_ATTEMPTS,
       checkSuiteConclusion: conclusion,
       isPublic: !repo.private,
+      prDiff,
     });
 
     const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
@@ -1592,6 +1761,8 @@ export async function handleIssueComment(
     await rememberPrSession(env, repoFullName, issue.number, sessionId);
   }
 
+  const { prDiff } = await resolveDiffContext(ghToken, owner, repoName, issue.number, prDetails);
+
   const prompt = buildCommentActionPrompt({
     owner,
     repo: repoName,
@@ -1602,6 +1773,7 @@ export async function handleIssueComment(
     isPublic: !repo.private,
     commentActionInstructions: config.commentActionInstructions,
     sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
+    prDiff,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
@@ -1731,6 +1903,8 @@ export async function handleReviewComment(
   });
   log.info("session.created", { ...meta, session_id: sessionId, action: "review_comment" });
 
+  const { prDiff } = await resolveDiffContext(ghToken, owner, repoName, pr.number);
+
   const prompt = buildCommentActionPrompt({
     owner,
     repo: repoName,
@@ -1746,6 +1920,7 @@ export async function handleReviewComment(
     commentId: comment.id,
     commentActionInstructions: config.commentActionInstructions,
     sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
+    prDiff,
   });
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {

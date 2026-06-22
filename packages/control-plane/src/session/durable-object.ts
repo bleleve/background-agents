@@ -84,6 +84,7 @@ import { DOFetcherAdapter } from "../scheduler/do-fetcher-adapter";
 import { PresenceService } from "./presence-service";
 import { SessionMessageQueue } from "./message-queue";
 import { SessionSandboxEventProcessor } from "./sandbox-events";
+import { SessionEventStream } from "./event-stream";
 import { createSessionInternalRoutes } from "./http/routes";
 import { createMessagesHandler, type MessagesHandler } from "./http/handlers/messages.handler";
 import { createPlansHandler, type PlansHandler } from "./http/handlers/plans.handler";
@@ -114,6 +115,7 @@ import {
 } from "./http/handlers/participants.handler";
 import { MessageService } from "./services/message.service";
 import { createAlarmHandler, type AlarmHandler } from "./alarm/handler";
+import { dispatchPreview } from "../preview-dispatch";
 
 /**
  * Recursively merge two plain objects, with override winning for non-dict values.
@@ -189,6 +191,7 @@ export class SessionDO extends DurableObject<Env> {
   private _messageQueue: SessionMessageQueue | null = null;
   // Message service (lazily initialized)
   private _messageService: MessageService | null = null;
+  private _eventStream: SessionEventStream | null = null;
   // Messages handler (lazily initialized)
   private _messagesHandler: MessagesHandler | null = null;
   // Plan service (lazily initialized)
@@ -232,6 +235,7 @@ export class SessionDO extends DurableObject<Env> {
     updatePrState: (request) => this.prStateHandler.updatePrState(request),
     wsToken: (request) => this.wsTokenHandler.generateWsToken(request),
     updateTitle: (request) => this.sessionLifecycleHandler.updateTitle(request),
+    updatePreview: (request) => this.sessionLifecycleHandler.updatePreview(request),
     archive: (request) => this.sessionLifecycleHandler.archive(request),
     unarchive: (request) => this.sessionLifecycleHandler.unarchive(request),
     supersede: (request) => this.sessionLifecycleHandler.supersede(request),
@@ -410,6 +414,14 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     return this._messageService;
+  }
+
+  private get eventStream(): SessionEventStream {
+    if (!this._eventStream) {
+      this._eventStream = new SessionEventStream(this.repository);
+    }
+
+    return this._eventStream;
   }
 
   private get messagesHandler(): MessagesHandler {
@@ -612,6 +624,23 @@ export class SessionDO extends DurableObject<Env> {
         getSandboxSocket: () => this.wsManager.getSandboxSocket(),
         sendToSandbox: (ws, message) => this.wsManager.send(ws, message),
         updateSandboxStatus: (status) => this.updateSandboxStatus(status),
+        dispatchPreview: async (reason?: string) => {
+          const session = this.getSession();
+          if (!session) throw new Error("Session not found");
+          const sessionId = this.getPublicSessionId(session);
+          return dispatchPreview(this.env, {
+            repoOwner: session.repo_owner,
+            repoName: session.repo_name,
+            branchName: session.branch_name ?? session.base_branch,
+            slug: sessionId,
+            sessionId,
+            reason,
+          });
+        },
+        broadcastArtifactCreated: (artifact) => {
+          this.broadcast({ type: "artifact_created", artifact });
+        },
+        broadcast: (message) => this.broadcast(message),
         notifySessionLifecycle: ({ event, actorAuthorId, actorDisplayName }) => {
           // Fire-and-forget cross-channel notification. Reaches the
           // originating bot (Slack/Linear) via the session's most recent
@@ -741,6 +770,19 @@ export class SessionDO extends DurableObject<Env> {
         updateLastActivity: (timestamp) => this.updateLastActivity(timestamp),
         scheduleInactivityCheck: () => this.scheduleInactivityCheck(),
         processMessageQueue: () => this.messageQueue.processMessageQueue(),
+        dispatchPreview: async (reason: string) => {
+          const session = this.getSession();
+          if (!session) throw new Error("Session not found");
+          const sessionId = this.getPublicSessionId(session);
+          return dispatchPreview(this.env, {
+            repoOwner: session.repo_owner,
+            repoName: session.repo_name,
+            branchName: session.branch_name ?? session.base_branch,
+            slug: sessionId,
+            sessionId,
+            reason,
+          });
+        },
       });
     }
 
@@ -1505,7 +1547,7 @@ export class SessionDO extends DurableObject<Env> {
     const sandbox = this.getSandbox();
     const state = await this.getSessionState(sandbox);
     const artifacts = this.messageService.listArtifacts();
-    const replay = this.getReplayData();
+    const replay = this.eventStream.getReplay();
 
     this.safeSend(ws, {
       type: "subscribed",
@@ -1530,33 +1572,6 @@ export class SessionDO extends DurableObject<Env> {
 
     // Notify others
     this.presenceService.broadcastPresence();
-  }
-
-  /**
-   * Collect historical events for replay.
-   * Returns parsed events and pagination metadata for inclusion in the subscribed message.
-   */
-  private getReplayData(): {
-    events: SandboxEvent[];
-    hasMore: boolean;
-    cursor: { timestamp: number; id: string } | null;
-  } {
-    const REPLAY_LIMIT = 500;
-    const rows = this.repository.getEventsForReplay(REPLAY_LIMIT);
-    const hasMore = rows.length >= REPLAY_LIMIT;
-
-    const events: SandboxEvent[] = [];
-    for (const row of rows) {
-      try {
-        events.push(JSON.parse(row.data));
-      } catch {
-        // Skip malformed events
-      }
-    }
-
-    const cursor = rows.length > 0 ? { timestamp: rows[0].created_at, id: rows[0].id } : null;
-
-    return { events, hasMore, cursor };
   }
 
   /**
@@ -1651,30 +1666,16 @@ export class SessionDO extends DurableObject<Env> {
     }
     client.lastFetchHistoryAt = now;
 
-    const rawLimit = typeof data.limit === "number" ? data.limit : 200;
-    const limit = Math.max(1, Math.min(rawLimit, 500));
-    const page = this.repository.getEventTimelinePage({
-      cursor: { kind: "timeline", createdAt: data.cursor.timestamp, id: data.cursor.id },
-      excludeTypes: ["heartbeat"],
-      limit,
+    const page = this.eventStream.getHistoryPage({
+      cursor: data.cursor,
+      limit: data.limit,
     });
-
-    const items: SandboxEvent[] = [];
-    for (const event of page.events) {
-      try {
-        items.push(JSON.parse(event.data));
-      } catch {
-        // Skip malformed events
-      }
-    }
 
     this.safeSend(ws, {
       type: "history_page",
-      items,
+      items: page.items,
       hasMore: page.hasMore,
-      cursor: page.nextCursor
-        ? { timestamp: page.nextCursor.createdAt, id: page.nextCursor.id }
-        : null,
+      cursor: page.cursor,
     } as ServerMessage);
   }
 
@@ -2203,6 +2204,7 @@ export class SessionDO extends DurableObject<Env> {
           }
         : null,
       sandboxDashboardUrl: this.getSandboxDashboardUrl(sandbox?.modal_object_id),
+      previewEnabled: session?.preview_enabled === 1,
     };
   }
 

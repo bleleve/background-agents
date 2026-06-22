@@ -34,6 +34,13 @@ export interface Env {
   INTERNAL_CALLBACK_SECRET?: string;
   LOG_LEVEL?: string;
   LINEAR_COMMENT_MAX_LENGTH?: string;
+
+  /**
+   * When set to "true", the bot responds to the "preview" label on Linear issues
+   * by dispatching an RWX preview run. Defaults to off so that multiple
+   * deployments do not all react to the same label.
+   */
+  PREVIEW_LABEL_ENABLED?: string;
 }
 
 // ─── OAuth Types ─────────────────────────────────────────────────────────────

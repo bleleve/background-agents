@@ -51,7 +51,7 @@ const SUGGESTION_QUALITY_BAR = `
 **Quality bar — verify before posting an inline suggestion.**
 A confidently-wrong inline comment costs reviewer time and erodes trust over many PRs.
 - **Disprove it before posting (most important).** For each finding, write one sentence on how an experienced engineer would refute it — a guard you overlooked, a caller that already handles the case, or intended behavior. If that refutation holds up, drop the finding. Post only what survives this step. Exception: "this rarely happens in practice" does **not** clear a finding whose consequence is silent data corruption or loss — judge those by severity, not just likelihood.
-- **Before claiming something is missing or not updated, search the full diff.** If your finding is "X changed but Y was not updated to match" (a stale test stub, a missing rename, a paired constant that didn't follow), run \`gh pr diff <n> | grep -n "Y"\` or grep the changed files to confirm Y is absent from this PR's changes. The most common false positive is spotting one side of a paired change and missing the matching update in a different file of the same PR.
+- **Before claiming something is missing or not updated, search the full diff.** If your finding is "X changed but Y was not updated to match" (a stale test stub, a missing rename, a paired constant that didn't follow), search the full diff — the **## Full Diff** section above when it is inlined, otherwise via \`gh pr diff <n> | grep -n "Y"\` — to confirm Y is absent from this PR's changes. The most common false positive is spotting one side of a paired change and missing the matching update in a different file of the same PR.
 - **Don't flag what the repo's own tooling already catches.** If lint, type-check, or the formatter would report it, skip it (run the repo's own checks when in doubt). Focus on behavioral risk, not style the build already enforces.
 - **Verify shell/regex/pattern claims empirically.** Test against representative input in the sandbox (e.g. \`printf 'pod/sidekiq-x\\npod/sourcery-sidekiq-y\\n' | grep -E '/sidekiq-'\`) rather than reasoning from analogous code you've seen elsewhere.
 - **Verify symbol-existence claims with grep.** Deprecated names, missing methods, env vars — confirm against the installed dependency in \`vendor/bundle/\` / \`node_modules/\` / etc., not from a newer library version's changelog.
@@ -65,7 +65,7 @@ A confidently-wrong inline comment costs reviewer time and erodes trust over man
 // quality changes to specific prompt versions via the review_suggestions D1 table.
 // The control-plane stamps this value against each recorded suggestion by looking
 // up the most recent github-bot session for the PR at record time.
-export const INLINE_SUGGESTION_PROMPT_VERSION = "v2";
+export const INLINE_SUGGESTION_PROMPT_VERSION = "v3";
 
 // Gate that every finding must pass BEFORE emitting an applyable ```suggestion block.
 // Evaluated step-by-step; a single failure → prose (or illustrative fence) instead.
@@ -107,7 +107,7 @@ If the \`ast-anchor\` tool is available in your toolset, call it with the owner,
 
 Otherwise derive the anchor manually:
 - Get the PR head SHA: \`SHA="$(gh pr view ${number} --repo ${owner}/${repo} --json headRefOid --jq .headRefOid)"\`
-- In \`gh pr diff ${number}\`, find the hunk header \`@@ -a,b +c,d @@\` containing the target lines. Start counting from line \`c\`, incrementing only for context lines (space prefix) and added lines (\`+\` prefix), skipping deleted lines (\`-\` prefix). The result is the 1-based RIGHT-side file line number.
+- In the diff (the **## Full Diff** section above when inlined, otherwise \`gh pr diff ${number}\` output), find the hunk header \`@@ -a,b +c,d @@\` containing the target lines. Start counting from line \`c\`, incrementing only for context lines (space prefix) and added lines (\`+\` prefix), skipping deleted lines (\`-\` prefix). The result is the 1-based RIGHT-side file line number.
 - Read the exact leading whitespace from the target line in the diff output — do not retype or guess it. GitHub applies the block verbatim.
 
 **Step 2 — Get the PR head SHA (if not already fetched).**
@@ -265,6 +265,48 @@ This PR is large. Don't review every line at full depth in one pass.
 Keep delegation proportional to risk — a handful of focused dives beats one diver per file.`;
 }
 
+// The unified diff the agent reviews. When small enough, github-bot pre-fetches
+// it (byte-identical to `gh pr diff`) and inlines it here, so the agent never
+// runs `gh pr diff` itself — OpenCode's bash tool truncates large command
+// output, which used to send the agent into a re-fetch loop. When the diff is
+// too large to inline, fall back to fetch-it-yourself with explicit anti-loop
+// guidance. `fallback` selects how the agent should obtain a non-inlined diff:
+//   - "default-branch": worktree is on the repo default branch (review,
+//     comment-action) → must read the diff via `gh pr diff`.
+//   - "head-branch": worktree is already on the PR head (failed-checks) → the
+//     agent reads files / `git diff` directly and needs no fetch guidance, so
+//     the section is omitted entirely when the diff isn't inlined.
+function buildDiffAccessSection(params: {
+  number: number;
+  prDiff: string | null | undefined;
+  fallback: "default-branch" | "head-branch";
+}): string {
+  const { number, prDiff, fallback } = params;
+
+  if (prDiff) {
+    const diffBlock = buildUntrustedUserContentBlock({
+      source: "github_pr_diff",
+      author: "github",
+      content: prDiff,
+      includeWarning: false,
+    });
+    return `## Full Diff
+${diffBlock}
+
+The complete diff is shown above. Review it directly — you do NOT need to run \`gh pr diff ${number}\` (the diff above is complete and authoritative; \`gh pr diff\` tool output can be truncated for large diffs).`;
+  }
+
+  if (fallback === "head-branch") return "";
+
+  return `## Diff access
+This PR's diff is large, so it is not inlined here. Fetch it once into a file and read the file in pages instead of re-running the command:
+
+   gh pr diff ${number} > /tmp/pr-${number}.diff
+   # then read /tmp/pr-${number}.diff (e.g. with the Read tool, or \`sed -n\`)
+
+Do NOT run \`gh pr diff ${number}\` repeatedly — its tool output may be truncated for large diffs, and re-running it wastes turns without changing the result.`;
+}
+
 export function buildCodeReviewPrompt(params: {
   owner: string;
   repo: string;
@@ -278,6 +320,8 @@ export function buildCodeReviewPrompt(params: {
   codeReviewInstructions?: string | null;
   autoApproveOnOpen?: boolean;
   largeDiff?: boolean;
+  /** Pre-fetched unified diff, inlined when small enough; null/undefined falls back to `gh pr diff`. */
+  prDiff?: string | null;
   /** True when re-running in an existing session — the worktree may be stale. */
   resumed?: boolean;
   sessionUrl?: string;
@@ -295,6 +339,7 @@ export function buildCodeReviewPrompt(params: {
     codeReviewInstructions,
     autoApproveOnOpen,
     largeDiff,
+    prDiff,
     resumed,
     sessionUrl,
   } = params;
@@ -331,13 +376,20 @@ export function buildCodeReviewPrompt(params: {
   const reviewInstruction = `4. A formal review verdict is OPTIONAL. If you want one, use the \`submit-pr-review\` tool (event APPROVE, REQUEST_CHANGES, or COMMENT) — it posts the review server-side after checking this repo's policy live. ${formalVerdictHint} NEVER submit a review with \`gh pr review\` or \`gh api ... repos/${owner}/${repo}/pulls/${number}/reviews\` — those are blocked in the sandbox. Your inline comments and the single verdict comment (below) are the primary output regardless of whether you submit a formal verdict.`;
 
   const largeDiffSection = largeDiff ? `\n${buildLookoutDiverGuidance()}\n` : "";
+  const diffAccessSection = buildDiffAccessSection({ number, prDiff, fallback: "default-branch" });
+  const diffStep1 = prDiff
+    ? `1. Review the full diff provided above under **## Full Diff** (do not run \`gh pr diff\`)`
+    : `1. Obtain and review the full diff as described under **## Diff access** above`;
 
   // The first-pass review session is cloned at the repo's DEFAULT branch (not the PR
   // head) — the prompt must not claim otherwise. Only the re-review path does a
-  // force-sync to the PR head. Access PR content via `gh pr diff` / contents API.
+  // force-sync to the PR head. Read full-file context (beyond the diff) via the contents API.
+  const diffSourceNote = prDiff
+    ? `the full diff is provided below`
+    : `read PR content via \`gh pr diff ${number}\``;
   const worktreeNote = resumed
     ? `This is a RE-REVIEW in an existing session — the PR may have new commits since your last pass. Before reviewing, sync the worktree to the latest PR head: \`gh pr checkout ${number} --force\` (or \`git fetch origin && git reset --hard "origin/${head}"\`). Do not rely on inline suggestions you posted earlier; re-evaluate the current diff from scratch.`
-    : `The repository is cloned at its DEFAULT branch (not the PR head). Read PR content via \`gh pr diff ${number}\` and \`gh api repos/${owner}/${repo}/contents/<path>?ref=<headSHA>\` — do NOT assume the working tree is on the PR head branch.`;
+    : `The repository is cloned at its DEFAULT branch (not the PR head) — ${diffSourceNote}, and read full-file context via \`gh api repos/${owner}/${repo}/contents/<path>?ref=<headSHA>\`. Do NOT assume the working tree is on the PR head branch.`;
 
   return `You are reviewing Pull Request #${number} in ${owner}/${repo}.
 ${worktreeNote}
@@ -355,10 +407,12 @@ ${prDescriptionBlock}
 ${PR_FIELDS_UNTRUSTED_NOTE}
 ${largeDiffSection}
 
+${diffAccessSection}
+
 ${UNTRUSTED_REPO_CONTENT_GUIDANCE}
 
 ## Instructions
-1. Run \`gh pr diff ${number}\` to see the full diff
+${diffStep1}
 2. Review the changes thoroughly, focusing on:
    - Correctness and potential bugs
    - Security concerns
@@ -395,6 +449,8 @@ export function buildCommentActionPrompt(params: {
   head?: string;
   filePath?: string;
   diffHunk?: string;
+  /** Pre-fetched unified diff, inlined when small enough; null/undefined falls back to `gh pr diff`. */
+  prDiff?: string | null;
   commentId?: number;
   commentActionInstructions?: string | null;
   /** Links the session in the verdict footer when the agent chooses a full review. */
@@ -412,13 +468,18 @@ export function buildCommentActionPrompt(params: {
     head,
     filePath,
     diffHunk,
+    prDiff,
     commentId,
     commentActionInstructions,
     sessionUrl,
   } = params;
 
+  const diffAccessSection = buildDiffAccessSection({ number, prDiff, fallback: "default-branch" });
+  const diffSourceNote = prDiff
+    ? `the full diff is provided below`
+    : `read PR content via \`gh pr diff ${number}\``;
   const intro = head
-    ? `You are working on Pull Request #${number} in ${owner}/${repo}.\nThe repository is cloned at its DEFAULT branch (not the PR head) — read PR content via \`gh pr diff ${number}\` and the contents API.`
+    ? `You are working on Pull Request #${number} in ${owner}/${repo}.\nThe repository is cloned at its DEFAULT branch (not the PR head) — ${diffSourceNote} and read full-file context via the contents API.`
     : `You are working on Pull Request #${number} in ${owner}/${repo}.`;
 
   let prDetails = "";
@@ -463,6 +524,8 @@ ${buildUntrustedUserContentBlock({
 
 ${UNTRUSTED_REPO_CONTENT_GUIDANCE}
 
+${diffAccessSection}
+
 ## Decide what is being asked
 Read the request above and choose ONE path:
 - **Full PR review** — the commenter is asking you to review or re-review the PR. Judge this from the meaning of their message, in any language or phrasing (e.g. "can you review it?", "review again", "take another look", "PTAL", "re-review please"). Follow **Full PR review** below.
@@ -478,7 +541,11 @@ ${SUGGESTION_QUALITY_BAR}
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
 ## Targeted request
-1. Run \`gh pr diff ${number}\` for the current changes and \`gh pr view ${number} --comments\` for prior conversation, as needed.
+1. ${
+    prDiff
+      ? `Review the current changes in the **## Full Diff** above`
+      : `Get the current changes as described under **## Diff access** above`
+  } and run \`gh pr view ${number} --comments\` for prior conversation, as needed.
 2. Address the request:
    - If code changes are needed, make them and push to the current branch
    - If it's a question, reply in-thread when possible${replyInstruction}
@@ -504,6 +571,8 @@ export function buildFailedChecksPrompt(params: {
   maxAttempts: number;
   checkSuiteConclusion: string;
   isPublic: boolean;
+  /** Pre-fetched unified diff, inlined as context when small enough; null/undefined omits it. */
+  prDiff?: string | null;
 }): string {
   const {
     owner,
@@ -517,7 +586,13 @@ export function buildFailedChecksPrompt(params: {
     maxAttempts,
     checkSuiteConclusion,
     isPublic,
+    prDiff,
   } = params;
+
+  // The failed-checks worktree is already on the PR head branch, so the agent
+  // reads files / `git diff` directly — no `gh pr diff` fetch guidance is needed
+  // when the diff isn't inlined (the section collapses to empty).
+  const diffAccessSection = buildDiffAccessSection({ number, prDiff, fallback: "head-branch" });
 
   const prTitleBlock = buildUntrustedUserContentBlock({
     source: "github_pr_title",
@@ -563,7 +638,7 @@ ${checkConclusionBlock}
 ${PR_FIELDS_UNTRUSTED_NOTE}
 
 ${UNTRUSTED_REPO_CONTENT_GUIDANCE}
-
+${diffAccessSection ? `\n${diffAccessSection}\n` : ""}
 ## Instructions
 1. Inspect failing checks for this PR:
    - Run \`gh pr checks ${number}\`

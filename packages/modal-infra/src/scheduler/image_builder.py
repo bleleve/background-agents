@@ -8,8 +8,8 @@ This module handles:
 - Scheduled rebuilds every 30 minutes (cron) with git ls-remote comparison
 
 The build flow:
-1. Control plane POSTs to api_build_repo_image with repo info + callback URL
-2. api_build_repo_image spawns build_repo_image.spawn() and returns immediately
+1. Control plane POSTs to api_build_img with repo info + callback URL
+2. api_build_img spawns build_repo_image.spawn() and returns immediately
 3. build_repo_image creates a build sandbox, waits for it to finish, snapshots
 4. On success/failure, POSTs result to the callback URL with HMAC auth
 
@@ -40,6 +40,11 @@ from ..app import (
 )
 from ..auth import generate_internal_token
 from ..log_config import get_logger
+from ..sandbox.manager import (
+    DEFAULT_BUILD_TIMEOUT_SECONDS,
+    MAX_BUILD_TIMEOUT_SECONDS,
+    build_function_timeout_seconds,
+)
 
 log = get_logger("image_builder")
 
@@ -236,10 +241,18 @@ async def _stream_build_logs(
     return head_sha, False, setup_error or supervisor_error
 
 
+# Size the worker timeout for the LONGEST allowed build. The control plane caps
+# the requested build_timeout_seconds at MAX_BUILD_TIMEOUT_SECONDS, and modal
+# 1.3.1 has no per-call timeout override (Function.with_options does not exist),
+# so the static decorator must already accommodate the max. The actual per-build
+# limit is still enforced on the build sandbox itself via
+# create_build_sandbox(timeout_seconds=...); the worker just idles until that
+# sandbox finishes, then snapshots, so a generous ceiling here is free (it exits
+# as soon as the build completes).
 @app.function(
     image=function_image,
     secrets=[internal_api_secret, github_app_secrets],
-    timeout=1800,  # 30 minutes
+    timeout=build_function_timeout_seconds(MAX_BUILD_TIMEOUT_SECONDS),
 )
 async def build_repo_image(
     repo_owner: str,
@@ -248,11 +261,12 @@ async def build_repo_image(
     callback_url: str = "",
     build_id: str = "",
     user_env_vars: dict[str, str] | None = None,
+    build_timeout_seconds: int | None = None,
 ) -> None:
     """
     Async worker: create build sandbox, await exit, snapshot, callback.
 
-    This function is spawned by api_build_repo_image and runs asynchronously.
+    This function is spawned by api_build_img and runs asynchronously.
     Results are reported back to the control plane via callback URLs.
 
     Args:
@@ -262,8 +276,13 @@ async def build_repo_image(
         callback_url: URL to POST success result to
         build_id: Build identifier from the control plane
         user_env_vars: User-defined environment variables (repo secrets) injected into the build sandbox
+        build_timeout_seconds: Build sandbox lifetime (already clamped by the control
+            plane). None → DEFAULT_BUILD_TIMEOUT_SECONDS. The caller sizes this
+            function's own timeout above it via build_function_timeout_seconds().
     """
     from ..sandbox.manager import SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS, SandboxManager
+
+    sandbox_timeout_seconds = build_timeout_seconds or DEFAULT_BUILD_TIMEOUT_SECONDS
 
     # Validate callback URL against allowed hosts to prevent SSRF
     if callback_url and not validate_control_plane_url(callback_url):
@@ -293,6 +312,7 @@ async def build_repo_image(
             default_branch=default_branch,
             clone_token=clone_token,
             user_env_vars=user_env_vars,
+            timeout_seconds=sandbox_timeout_seconds,
         )
 
         # 3. Stream stdout until build completes (sandbox stays alive for snapshotting)
@@ -381,17 +401,22 @@ STALE_BUILD_HEADROOM_SECONDS = 300  # 5 minutes
 def _resolve_stale_threshold_seconds() -> int:
     """Max age for a 'building' row before the scheduler sweep marks it failed.
 
-    Kept strictly above the worst-case healthy build = build-sandbox lifetime
-    (BUILD_TIMEOUT_SECONDS) + filesystem snapshot timeout, so a slow-but-progressing
-    build is never reaped mid-flight regardless of IMAGE_SNAPSHOT_TIMEOUT_SECONDS.
-    Defaults to BUILD_TIMEOUT_SECONDS + DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS
+    Kept strictly above the worst-case healthy build. Upstream made the per-build
+    timeout configurable up to MAX_BUILD_TIMEOUT_SECONDS, so we size the threshold
+    against that ceiling (not the default) plus the filesystem snapshot timeout, so
+    a slow-but-progressing build is never reaped mid-flight regardless of either
+    IMAGE_SNAPSHOT_TIMEOUT_SECONDS or a caller-supplied build timeout. Defaults to
+    MAX_BUILD_TIMEOUT_SECONDS + DEFAULT_SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS
     + STALE_BUILD_HEADROOM_SECONDS. Guarded by test_stale_threshold_* invariants.
     """
     # Deferred import: manager constructs the Modal base image at module load.
-    from ..sandbox.manager import BUILD_TIMEOUT_SECONDS, _resolve_snapshot_timeout_seconds
+    # MAX_BUILD_TIMEOUT_SECONDS is already imported at module scope above.
+    from ..sandbox.manager import _resolve_snapshot_timeout_seconds
 
     return (
-        BUILD_TIMEOUT_SECONDS + _resolve_snapshot_timeout_seconds() + STALE_BUILD_HEADROOM_SECONDS
+        MAX_BUILD_TIMEOUT_SECONDS
+        + _resolve_snapshot_timeout_seconds()
+        + STALE_BUILD_HEADROOM_SECONDS
     )
 
 

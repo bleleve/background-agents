@@ -8,7 +8,7 @@ import type {
 
 export interface Artifact {
   id: string;
-  type: "pr" | "screenshot" | "video" | "preview" | "branch";
+  type: "pr" | "screenshot" | "video" | "preview" | "branch" | "link";
   url: string | null;
   metadata?: (Partial<ScreenshotArtifactMetadata> | Partial<VideoArtifactMetadata>) & {
     prNumber?: number;

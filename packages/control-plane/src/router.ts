@@ -31,6 +31,7 @@ import { prReviewRoutes } from "./routes/pr-review";
 import { reviewSuggestionRoutes } from "./routes/review-suggestions";
 import { recordSuggestionRoutes } from "./routes/record-suggestion";
 import { webhookRoutes } from "./webhooks";
+import { previewRoutes } from "./routes/previews";
 
 const logger = createLogger("router");
 
@@ -313,6 +314,7 @@ const routes: Route[] = [
 
   // Session management
   ...sessionRoutes,
+  ...previewRoutes,
 
   // Plan persistence
   {

@@ -32,10 +32,15 @@ export interface GitHubLabel {
  * in-place by the label-migration step, so no legacy alias is needed here.
  */
 export const ASK_FOR_REVIEW_LABEL = "reef: ask for review";
+export const PREVIEW_LABEL = "preview";
 
 /** Whether `name` is the re-review trigger label (case-insensitive). */
 export function isAskForReviewLabel(name: string): boolean {
   return name.trim().toLowerCase() === ASK_FOR_REVIEW_LABEL;
+}
+
+export function isPreviewLabel(name: string): boolean {
+  return name.trim().toLowerCase() === PREVIEW_LABEL;
 }
 
 // `model` and `build` are interchangeable for the impl-model override.
