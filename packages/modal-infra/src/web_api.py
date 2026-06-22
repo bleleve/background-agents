@@ -576,8 +576,15 @@ async def api_restore(
     image=function_image,
     secrets=[internal_api_secret, github_app_secrets],
 )
+# NOTE: the function name drives the Modal web-endpoint label
+# (open-inspect-<name-with-dashes>). The control plane calls this endpoint at
+# `${baseUrl}-api-build-img.modal.run`, so this MUST stay `api_build_img`.
+# The longer upstream name `api_build_repo_image` produces a different label
+# (and overflows Modal's 63-char subdomain limit in long workspaces, getting
+# hashed), which makes the control plane's hard-coded URL 404. Keep in sync with
+# packages/control-plane/src/sandbox/client.ts (buildRepoImageUrl).
 @fastapi_endpoint(method="POST")
-async def api_build_repo_image(
+async def api_build_img(
     request: dict,
     authorization: str | None = Header(None),
     x_trace_id: str | None = Header(None),
@@ -662,18 +669,18 @@ async def api_build_repo_image(
     except Exception as e:
         outcome = "error"
         http_status = 500
-        log.error("api.error", exc=e, endpoint_name="api_build_repo_image")
+        log.error("api.error", exc=e, endpoint_name="api_build_img")
         return {"success": False, "error": str(e)}
     finally:
         duration_ms = int((time.time() - start_time) * 1000)
         log.info(
             "modal.http_request",
             http_method="POST",
-            http_path="/api_build_repo_image",
+            http_path="/api_build_img",
             http_status=http_status,
             duration_ms=duration_ms,
             outcome=outcome,
-            endpoint_name="api_build_repo_image",
+            endpoint_name="api_build_img",
             trace_id=x_trace_id,
             request_id=x_request_id,
         )
