@@ -158,6 +158,12 @@ class SandboxSupervisor:
         self.code_server_process: asyncio.subprocess.Process | None = None
         self.ttyd_process: asyncio.subprocess.Process | None = None
         self.ttyd_proxy_process: asyncio.subprocess.Process | None = None
+        self.dockerd_process: asyncio.subprocess.Process | None = None
+        self._code_server_log_task: asyncio.Task[None] | None = None
+        self._ttyd_log_task: asyncio.Task[None] | None = None
+        self._ttyd_proxy_log_task: asyncio.Task[None] | None = None
+        self._opencode_log_task: asyncio.Task[None] | None = None
+        self._bridge_log_task: asyncio.Task[None] | None = None
         self._boot_progress_task: asyncio.Task[None] | None = None
         self.shutdown_event = asyncio.Event()
         self.git_sync_complete = asyncio.Event()
@@ -735,7 +741,7 @@ class SandboxSupervisor:
 
             # Copy via a temp file so the target is never partially written.
             shutil.copy2(str(source), str(tmp_path))
-            Path.chmod(str(tmp_path), 0o600)
+            tmp_path.chmod(0o600)
             tmp_path.replace(config_path)
 
             self.log.info("eks.kubeconfig_written", path=str(config_path))
@@ -830,7 +836,7 @@ class SandboxSupervisor:
             stderr=asyncio.subprocess.STDOUT,
         )
 
-        asyncio.create_task(self._forward_code_server_logs())
+        self._code_server_log_task = asyncio.create_task(self._forward_code_server_logs())
         self.log.info("code_server.started", port=code_server_port)
 
     async def _forward_code_server_logs(self) -> None:
@@ -892,6 +898,7 @@ class SandboxSupervisor:
             return
 
         self.log.info("mcp.install_packages", packages=packages)
+        proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 "npm",
@@ -918,8 +925,9 @@ class SandboxSupervisor:
                 packages=packages,
                 timeout_seconds=self.MCP_PACKAGE_INSTALL_TIMEOUT_SECONDS,
             )
-            proc.kill()
-            await proc.wait()
+            if proc is not None:
+                proc.kill()
+                await proc.wait()
         except Exception as e:
             self.log.warn("mcp.packages_install_error", packages=packages, exc=str(e))
 
@@ -978,7 +986,7 @@ class SandboxSupervisor:
             env=os.environ.copy(),
         )
 
-        asyncio.create_task(self._forward_ttyd_logs())
+        self._ttyd_log_task = asyncio.create_task(self._forward_ttyd_logs())
         self.log.info("ttyd.started", pid=self.ttyd_process.pid)
 
     async def start_ttyd_proxy(self) -> None:
@@ -1000,7 +1008,7 @@ class SandboxSupervisor:
             env=os.environ.copy(),
         )
 
-        asyncio.create_task(self._forward_ttyd_proxy_logs())
+        self._ttyd_proxy_log_task = asyncio.create_task(self._forward_ttyd_proxy_logs())
         self.log.info("ttyd_proxy.started", pid=self.ttyd_proxy_process.pid)
 
     async def _forward_ttyd_logs(self) -> None:
@@ -1153,7 +1161,7 @@ class SandboxSupervisor:
         )
 
         # Start log forwarder
-        asyncio.create_task(self._forward_opencode_logs())
+        self._opencode_log_task = asyncio.create_task(self._forward_opencode_logs())
 
         # Wait for health check
         await self._wait_for_health()
@@ -1291,12 +1299,10 @@ class SandboxSupervisor:
                 with contextlib.suppress(asyncio.CancelledError):
                     await drain_task
             if proc is not None and proc.returncode is None:
-                proc.terminate()
                 try:
-                    await asyncio.wait_for(proc.wait(), timeout=10)
-                except TimeoutError:
-                    with contextlib.suppress(ProcessLookupError):
-                        proc.kill()
+                    await self._terminate_child(proc, timeout_seconds=10, name="opencode_prewarm")
+                except Exception as e:
+                    self.log.warn("opencode.prewarm_terminate_failed", exc=e)
 
     async def start_bridge(self) -> None:
         """Start the agent bridge process."""
@@ -1336,7 +1342,7 @@ class SandboxSupervisor:
         )
 
         # Start log forwarder for bridge
-        asyncio.create_task(self._forward_bridge_logs())
+        self._bridge_log_task = asyncio.create_task(self._forward_bridge_logs())
         self.log.info("bridge.started")
 
         # Check if bridge exited immediately during startup
@@ -2079,6 +2085,44 @@ class SandboxSupervisor:
         finally:
             await self.shutdown()
 
+    async def _terminate_child(
+        self,
+        process: asyncio.subprocess.Process | None,
+        timeout_seconds: float,
+        name: str,
+    ) -> None:
+        """Terminate ``process`` gracefully, then kill and reap it.
+
+        Always waits for the process to exit so the asyncio subprocess
+        transport is closed before the event loop shuts down. Without the
+        final ``wait()``, ``BaseSubprocessTransport.__del__`` can raise
+        ``RuntimeError: Event loop is closed`` after ``asyncio.run`` returns.
+        """
+        if process is None or process.returncode is not None:
+            return
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
+            return
+        except TimeoutError:
+            process.kill()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except TimeoutError:
+            self.log.warn(f"{name}.kill_wait_timeout")
+
+    async def _cancel_log_task(self, task: asyncio.Task[None] | None, name: str) -> None:
+        """Cancel and await a log-forwarding task so its pipe transport closes."""
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=2.0)
+        except (asyncio.CancelledError, TimeoutError):
+            pass
+        except Exception as e:
+            self.log.debug(f"{name}.log_task_cancel_error", exc=e)
+
     async def _handle_signal(self, sig: signal.Signals) -> None:
         """Handle shutdown signal."""
         self.log.info("supervisor.signal", signal_name=sig.name)
@@ -2091,51 +2135,34 @@ class SandboxSupervisor:
         # Stop boot-progress pings if boot failed before the bridge took over.
         await self._stop_boot_progress_pings()
 
-        # Terminate bridge first
-        if self.bridge_process and self.bridge_process.returncode is None:
-            self.bridge_process.terminate()
-            try:
-                await asyncio.wait_for(self.bridge_process.wait(), timeout=5.0)
-            except TimeoutError:
-                self.bridge_process.kill()
+        # Terminate bridge first, then drain its log forwarder.
+        await self._terminate_child(self.bridge_process, 5.0, "bridge")
+        await self._cancel_log_task(self._bridge_log_task, "bridge")
 
-        # Terminate code-server
-        if self.code_server_process and self.code_server_process.returncode is None:
-            self.code_server_process.terminate()
-            try:
-                await asyncio.wait_for(self.code_server_process.wait(), timeout=5.0)
-            except TimeoutError:
-                self.code_server_process.kill()
+        # Terminate code-server, then drain its log forwarder.
+        await self._terminate_child(self.code_server_process, 5.0, "code_server")
+        await self._cancel_log_task(self._code_server_log_task, "code_server")
 
-        # Terminate ttyd proxy first (it depends on ttyd)
-        if self.ttyd_proxy_process and self.ttyd_proxy_process.returncode is None:
+        # Terminate ttyd proxy first (it depends on ttyd), then drain its log forwarder.
+        if self.ttyd_proxy_process is not None:
             self.log.info("ttyd_proxy.terminating")
-            self.ttyd_proxy_process.terminate()
-            try:
-                await asyncio.wait_for(
-                    self.ttyd_proxy_process.wait(), timeout=self.SIDECAR_TIMEOUT_SECONDS
-                )
-            except TimeoutError:
-                self.ttyd_proxy_process.kill()
+        await self._terminate_child(
+            self.ttyd_proxy_process, self.SIDECAR_TIMEOUT_SECONDS, "ttyd_proxy"
+        )
+        await self._cancel_log_task(self._ttyd_proxy_log_task, "ttyd_proxy")
 
-        # Terminate ttyd
-        if self.ttyd_process and self.ttyd_process.returncode is None:
+        # Terminate ttyd, then drain its log forwarder.
+        if self.ttyd_process is not None:
             self.log.info("ttyd.terminating")
-            self.ttyd_process.terminate()
-            try:
-                await asyncio.wait_for(
-                    self.ttyd_process.wait(), timeout=self.SIDECAR_TIMEOUT_SECONDS
-                )
-            except TimeoutError:
-                self.ttyd_process.kill()
+        await self._terminate_child(self.ttyd_process, self.SIDECAR_TIMEOUT_SECONDS, "ttyd")
+        await self._cancel_log_task(self._ttyd_log_task, "ttyd")
 
-        # Terminate OpenCode
-        if self.opencode_process and self.opencode_process.returncode is None:
-            self.opencode_process.terminate()
-            try:
-                await asyncio.wait_for(self.opencode_process.wait(), timeout=10.0)
-            except TimeoutError:
-                self.opencode_process.kill()
+        # Terminate OpenCode, then drain its log forwarder.
+        await self._terminate_child(self.opencode_process, 10.0, "opencode")
+        await self._cancel_log_task(self._opencode_log_task, "opencode")
+
+        # Terminate dockerd if it was started
+        await self._terminate_child(self.dockerd_process, 10.0, "dockerd")
 
         self.log.info("supervisor.shutdown_complete")
 

@@ -335,8 +335,9 @@ Optional variables:
   allowed to soft-delete any automation, regardless of ownership. Creators can always delete their
   own automations; this variable grants that same capability to designated admin users. Leave empty
   (default) to restrict deletion to creators only.
-- `RWX_ACCESS_TOKEN` - RWX API access token. Required to use preview mode (`POST /sessions/:id/preview`
-  and `POST /previews/dispatch`). Leave unset to disable preview dispatch.
+- `RWX_ACCESS_TOKEN` - RWX API access token. Required to use preview mode
+  (`POST /sessions/:id/preview` and `POST /previews/dispatch`). Leave unset to disable preview
+  dispatch.
 - `RWX_BASE_URL` - Override the RWX API base URL (default: `https://cloud.rwx.com/mint/api`). Useful
   for testing against a non-production RWX environment.
 - `RWX_ORG_SLUG` - RWX organization slug. When set, preview responses include per-product frontend
