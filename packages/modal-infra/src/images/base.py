@@ -61,9 +61,8 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v87: push completion events include HEAD SHA for preview dispatch deduplication
 # v88: opencode node_modules materialized via hardlinks (was a slow per-file copy)
 # v89: boot-time autostash is popped after checkout so uncommitted edits survive restore
-# v90: remove RTK
-# v91: install Playwright 1.61.0 and download Chromium browser + deps
-CACHE_BUSTER = "v91-install-playwright"
+# v90: bridge reports HEAD from the cloned repo for preview dispatches
+CACHE_BUSTER = "v92-preview-head-sha"
 
 # Base image with all development tools
 base_image = (
