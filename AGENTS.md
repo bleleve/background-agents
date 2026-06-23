@@ -133,6 +133,22 @@ These run inside a real `workerd` runtime with Miniflare, using the `cloudflareT
 Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:`. Keep the subject
 under 72 characters. Use the PR body for details, not the commit message.
 
+## Terraform Variables
+
+New Terraform variables (defined in `terraform/variables.tf`) must also be threaded through
+`.github/workflows/terraform.yml` as `TF_VAR_*` environment variables — in **both** the `plan` job
+(Terraform Plan step) and the `apply` job (Terraform Apply step).
+
+- **Bool variables controlled per-environment** (e.g. features enabled only in production): use a
+  GitHub Actions variable with a `false` fallback: `TF_VAR_my_var: "${{ vars.MY_VAR || 'false' }}"`.
+  Set the GitHub environment variable via
+  `gh variable set MY_VAR --body "true" --env production --repo onboardiq/background-agents`.
+- **Secrets**: use `${{ secrets.MY_SECRET }}`.
+- **Variables with a universal default**: inline the default or reference `vars.*` as appropriate.
+
+Omitting a variable from the workflow causes `terraform plan`/`apply` to use the `default` from
+`variables.tf`, which may silently diverge from intent — always add it explicitly.
+
 ## Key Gotchas
 
 - **Build order**: always build `@open-inspect/shared` before packages that depend on it.

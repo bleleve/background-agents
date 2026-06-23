@@ -1193,7 +1193,10 @@ async function startSessionAndSendPrompt(
   const planMode = userPrefs?.planModeDefault === true || classifierShouldPlan === true;
   const planModel = planMode ? userPrefs?.planModel || defaultPlanModel : undefined;
 
-  // Best-effort user info resolution for identity linking
+  // Best-effort user info resolution for identity linking. The email is the
+  // join key the control plane uses to link this Slack identity to the same
+  // canonical user as the person's web (GitHub) login, so it appears under
+  // the web "Mine" filter.
   let displayName: string | undefined;
   let email: string | undefined;
   try {
@@ -1205,9 +1208,22 @@ async function startSessionAndSendPrompt(
         userInfo.user.name ||
         undefined;
       email = userInfo.user.profile?.email || undefined;
+      if (!email) {
+        log.warn("slack.user_info.no_email", { trace_id: traceId, slack_user_id: userId });
+      }
+    } else {
+      log.warn("slack.user_info.failed", {
+        trace_id: traceId,
+        slack_user_id: userId,
+        error: userInfo.error,
+      });
     }
-  } catch {
-    // Proceed with no display name / email — control plane handles missing fields
+  } catch (err) {
+    log.warn("slack.user_info.threw", {
+      trace_id: traceId,
+      slack_user_id: userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // Create session via control plane with user's preferred model, reasoning effort, and branch
