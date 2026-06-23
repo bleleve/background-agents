@@ -1030,6 +1030,14 @@ export class SessionDO extends DurableObject<Env> {
         ...DEFAULT_LIFECYCLE_CONFIG.inactivity,
         timeoutMs: parseInt(this.env.SANDBOX_INACTIVITY_TIMEOUT_MS || "900000", 10),
       },
+      inFlightSilence: {
+        ...DEFAULT_LIFECYCLE_CONFIG.inFlightSilence,
+        timeoutMs: parseInt(
+          this.env.SANDBOX_INFLIGHT_SILENCE_TIMEOUT_MS ||
+            String(DEFAULT_LIFECYCLE_CONFIG.inFlightSilence.timeoutMs),
+          10
+        ),
+      },
       mcpServerLookup,
       slackAgentNotifyLookup,
       sandboxDashboardUrlBuilder,

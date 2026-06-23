@@ -343,6 +343,19 @@ Optional variables:
 - `RWX_ORG_SLUG` - RWX organization slug. When set, preview responses include per-product frontend
   URLs (e.g. `hire-<slug>--<org>.r1.rwx.run`) alongside the run URL.
 
+Sandbox lifecycle tuning knobs (all in milliseconds):
+
+- `SANDBOX_INACTIVITY_TIMEOUT_MS` - How long a sandbox stays alive with no activity before it's
+  snapshotted/stopped (default: `900000` = 15 min).
+- `EXECUTION_TIMEOUT_MS` - Max time a single turn may stay `processing` before it's auto-failed
+  (default: `5700000` = 95 min; must exceed the bridge's 90-min `PROMPT_MAX_DURATION`).
+- `SANDBOX_INFLIGHT_SILENCE_TIMEOUT_MS` - Continuous-silence backstop before an **in-flight** turn
+  is terminally failed (default: `600000` = 10 min). While a turn is processing, a
+  connecting/heartbeat blip is treated as a recoverable reconnection (slow restore/respawn) until
+  the box has been silent for this long — so an actively-working turn is never failed on the short
+  90s/120s watchdog windows. Measured on last sign of life, never on total turn duration; must
+  exceed the worst legitimate restore/respawn silence.
+
 See [terraform/terraform.tfvars.example](../../terraform/terraform.tfvars.example) for the complete
 list.
 
