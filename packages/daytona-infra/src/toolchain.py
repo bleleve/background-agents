@@ -9,11 +9,11 @@ from daytona import CreateSnapshotParams, Daytona, Image
 OPENCODE_VERSION = "latest"
 CODE_SERVER_VERSION = "4.109.5"
 AGENT_BROWSER_VERSION = "0.21.2"
-RTK_VERSION = "0.35.0"
 # Bump when changing image contents to invalidate the Daytona snapshot.
 # daytona-v3: install the SCM credential-helper shim and configure
 # git system-wide so per-request token brokerage matches the Modal base image.
-SANDBOX_VERSION = "daytona-v3-rtk-0.35.0"
+# daytona-v4: remove RTK
+SANDBOX_VERSION = "daytona-v4-remove-rtk"
 
 
 def build_base_image(repo_root: Path) -> Image:
@@ -58,12 +58,6 @@ def build_base_image(repo_root: Path) -> Image:
             "npm install -g typescript-language-server@5.3.0",
             # web-tree-sitter + grammars for ast-anchor / validate-suggestion tools.
             "npm install -g web-tree-sitter@^0.25.10 tree-sitter-typescript tree-sitter-ruby",
-            f"curl -fsSL -o /tmp/rtk.tar.gz "
-            f"https://github.com/rtk-ai/rtk/releases/download/v{RTK_VERSION}/rtk-x86_64-unknown-linux-musl.tar.gz",
-            "tar -xzf /tmp/rtk.tar.gz -C /usr/local/bin rtk",
-            "chmod +x /usr/local/bin/rtk",
-            "rm /tmp/rtk.tar.gz",
-            "rtk --version",
             f"curl -fsSL -o /tmp/code-server.deb "
             f"https://github.com/coder/code-server/releases/download/v{CODE_SERVER_VERSION}/"
             f"code-server_{CODE_SERVER_VERSION}_amd64.deb",
