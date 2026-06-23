@@ -86,4 +86,46 @@ describe("dispatchPreview", () => {
       expect.objectContaining({ method: "POST" })
     );
   });
+
+  it("uses the commit SHA as the dispatch ref when provided", async () => {
+    vi.useFakeTimers();
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ dispatch_id: "dispatch-1" }, { status: 201 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          status: "ready",
+          runs: [{ run_id: "3", run_url: "https://cloud.rwx.com/mint/org/runs/3" }],
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const promise = dispatchPreview({ RWX_ACCESS_TOKEN: "token" } as never, {
+      repoOwner: "onboardiq",
+      repoName: "background-agents",
+      branchName: "main",
+      commitSha: "abc123",
+      slug: "stable-preview-slug",
+    });
+
+    await vi.runAllTimersAsync();
+
+    await expect(promise).resolves.toEqual({
+      dispatchId: "dispatch-1",
+      runUrl: "https://cloud.rwx.com/mint/org/runs/3",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://cloud.rwx.com/mint/api/runs/dispatches",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          key: "onboardiq-background-agents",
+          ref: "abc123",
+          params: { slug: "stable-preview-slug", reason: "reef_general" },
+        }),
+      })
+    );
+  });
 });
