@@ -61,6 +61,14 @@ interface SafeMarkdownProps {
   className?: string;
 }
 
+// Convert Slack mrkdwn links (<url|label>) to Markdown ([label](url)).
+// Agents in Slack sessions are instructed to use Slack's mrkdwn format, but
+// their token stream is rendered here with react-markdown, which doesn't
+// understand the Slack format. Bare <url> autolinks are already valid GFM.
+function normalizeMrkdwnLinks(text: string): string {
+  return text.replace(/<(https?:\/\/[^|>\s]+)\|([^>]+)>/g, "[$2]($1)");
+}
+
 export function SafeMarkdown({ content, className = "" }: SafeMarkdownProps) {
   return (
     <div className={`prose prose-sm dark:prose-invert max-w-none break-words ${className}`}>
@@ -151,7 +159,7 @@ export function SafeMarkdown({ content, className = "" }: SafeMarkdownProps) {
           ),
         }}
       >
-        {content}
+        {normalizeMrkdwnLinks(content)}
       </ReactMarkdown>
     </div>
   );
