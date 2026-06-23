@@ -14,18 +14,36 @@ export interface DispatchPreviewResult {
   previewUrls?: Record<string, string>;
 }
 
+export interface DispatchPreviewDispatchOnlyResult {
+  dispatchId: string;
+  runUrl?: string;
+  /** Map of product name → frontend preview URL, set when RWX_ORG_SLUG is configured. */
+  previewUrls?: Record<string, string>;
+}
+
+interface DispatchPreviewInput {
+  repoOwner: string;
+  repoName: string;
+  branchName: string;
+  commitSha?: string;
+  slug: string;
+  sessionId?: string;
+  reason?: string;
+  waitForRunUrl?: boolean;
+}
+
 export async function dispatchPreview(
   env: Env,
-  input: {
-    repoOwner: string;
-    repoName: string;
-    branchName: string;
-    commitSha?: string;
-    slug: string;
-    sessionId?: string;
-    reason?: string;
-  }
-): Promise<DispatchPreviewResult> {
+  input: DispatchPreviewInput & { waitForRunUrl: false }
+): Promise<DispatchPreviewDispatchOnlyResult>;
+export async function dispatchPreview(
+  env: Env,
+  input: DispatchPreviewInput
+): Promise<DispatchPreviewResult>;
+export async function dispatchPreview(
+  env: Env,
+  input: DispatchPreviewInput
+): Promise<DispatchPreviewResult | DispatchPreviewDispatchOnlyResult> {
   if (!env.RWX_ACCESS_TOKEN) throw new Error("RWX_ACCESS_TOKEN is required for preview dispatches");
 
   const client = createRwxRestClient({
@@ -54,6 +72,9 @@ export async function dispatchPreview(
   });
   if (createRunUrl) {
     return { dispatchId: result.dispatch_id, runUrl: createRunUrl, previewUrls };
+  }
+  if (input.waitForRunUrl === false) {
+    return { dispatchId: result.dispatch_id, previewUrls };
   }
 
   const startMs = Date.now();

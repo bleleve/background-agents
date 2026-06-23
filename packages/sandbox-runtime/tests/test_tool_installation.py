@@ -2,6 +2,7 @@
 
 import errno
 import json
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -294,7 +295,7 @@ class TestInstallTools:
 
 
 class TestMaterializeNodeModules:
-    """Cases for _materialize_node_modules() — hardlink with cross-device fallback."""
+    """Cases for _materialize_node_modules() — symlink with copy fallback."""
 
     def _build_src(self, root: Path) -> Path:
         """Create a small node_modules-like tree with a file and an internal symlink."""
@@ -308,47 +309,45 @@ class TestMaterializeNodeModules:
         (bin_dir / "plugin").symlink_to("../@opencode-ai/plugin/index.js")
         return src
 
-    def test_files_are_hardlinked_same_device(self, tmp_path):
-        """On one device, files share an inode with the source (no data copy)."""
+    def test_creates_symlink_to_source(self, tmp_path):
+        """dest is a single symlink to the image deps — no data copied — and files resolve through it."""
         sup = _make_supervisor()
         src = self._build_src(tmp_path / "cache")
         dest = tmp_path / "workspace" / ".opencode" / "node_modules"
+        dest.parent.mkdir(parents=True)  # .opencode exists by this point in _install_tools
 
         sup._materialize_node_modules(src, dest)
 
-        src_file = src / "@opencode-ai" / "plugin" / "index.js"
-        dest_file = dest / "@opencode-ai" / "plugin" / "index.js"
-        assert dest_file.exists()
-        assert src_file.samefile(dest_file)
-        assert dest_file.stat().st_ino == src_file.stat().st_ino
+        assert dest.is_symlink()
+        assert dest.readlink() == src
+        # Modules resolve through the symlink into the source tree.
+        assert (dest / "@opencode-ai" / "plugin" / "index.js").read_text() == "module.exports = {}"
 
-    def test_internal_symlinks_preserved(self, tmp_path):
-        """Symlinks inside the tree are recreated as symlinks, not hardlinked."""
+    def test_falls_back_to_copy_on_symlink_failure(self, tmp_path):
+        """If os.symlink fails, fall back to a real copy (a real dir, not a symlink)."""
         sup = _make_supervisor()
         src = self._build_src(tmp_path / "cache")
         dest = tmp_path / "workspace" / ".opencode" / "node_modules"
+        dest.parent.mkdir(parents=True)
 
-        sup._materialize_node_modules(src, dest)
+        # Fail only the top-level symlink; let copytree(symlinks=True) recreate
+        # the tree's internal .bin symlink via the real os.symlink.
+        real_symlink = os.symlink
+        calls = {"n": 0}
 
-        link = dest / ".bin" / "plugin"
-        assert link.is_symlink()
-        assert str(link.readlink()) == "../@opencode-ai/plugin/index.js"
+        def flaky_symlink(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError(errno.EPERM, "operation not permitted")
+            return real_symlink(*args, **kwargs)
 
-    def test_falls_back_to_copy_on_cross_device(self, tmp_path):
-        """EXDEV from os.link must fall back to a real copy (distinct inode)."""
-        sup = _make_supervisor()
-        src = self._build_src(tmp_path / "cache")
-        dest = tmp_path / "workspace" / ".opencode" / "node_modules"
-
-        with patch("os.link", side_effect=OSError(errno.EXDEV, "cross-device link")):
+        with patch("os.symlink", side_effect=flaky_symlink):
             sup._materialize_node_modules(src, dest)
 
-        src_file = src / "@opencode-ai" / "plugin" / "index.js"
-        dest_file = dest / "@opencode-ai" / "plugin" / "index.js"
-        # Copied, not hardlinked: same content but a separate inode.
-        assert dest_file.read_text() == "module.exports = {}"
-        assert dest_file.stat().st_ino != src_file.stat().st_ino
-        # The internal symlink survives the fallback path too.
+        assert not dest.is_symlink()
+        assert dest.is_dir()
+        assert (dest / "@opencode-ai" / "plugin" / "index.js").read_text() == "module.exports = {}"
+        # The internal symlink survives the fallback copy.
         assert (dest / ".bin" / "plugin").is_symlink()
 
 

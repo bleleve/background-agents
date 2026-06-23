@@ -783,6 +783,7 @@ export class SessionDO extends DurableObject<Env> {
             slug: sessionId,
             sessionId,
             reason,
+            waitForRunUrl: false,
           });
         },
       });
