@@ -92,6 +92,10 @@ function createProcessor() {
   };
 }
 
+async function drainWaitUntil(h: ReturnType<typeof createProcessor>): Promise<void> {
+  await Promise.all(h.waitUntil.mock.calls.map((call) => call[0] as Promise<unknown>));
+}
+
 describe("SessionSandboxEventProcessor", () => {
   it("dispatches a preview when a completed turn fires and preview is enabled", async () => {
     const h = createProcessor();
@@ -131,6 +135,7 @@ describe("SessionSandboxEventProcessor", () => {
     });
 
     expect(h.dispatchPreview).toHaveBeenCalledWith("push_complete", "3".repeat(40));
+    await drainWaitUntil(h);
     expect(h.repository.updatePreviewDispatchedSha).toHaveBeenCalledWith("3".repeat(40));
   });
 
@@ -701,6 +706,36 @@ describe("SessionSandboxEventProcessor", () => {
 
       await h.processor.processSandboxEvent(event);
 
+      expect(h.wsManager.send).toHaveBeenCalledWith(sandboxWs, {
+        type: "ack",
+        ackId: "push_complete:msg-2",
+      });
+    });
+
+    it("does not wait for push preview dispatch before ACKing push_complete", async () => {
+      const h = createProcessor();
+      const sandboxWs = {} as WebSocket;
+      h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+      h.repository.getSession.mockReturnValue({
+        opencode_session_id: null,
+        preview_enabled: 1,
+        current_sha: null,
+        preview_dispatched_sha: null,
+      });
+      h.dispatchPreview.mockImplementation(() => new Promise(() => {}));
+
+      const event = {
+        type: "push_complete",
+        branchName: "feature/test",
+        commitSha: "6".repeat(40),
+        timestamp: 2000,
+        ackId: "push_complete:msg-2",
+      } as unknown as SandboxEvent;
+
+      await h.processor.processSandboxEvent(event);
+
+      expect(h.dispatchPreview).toHaveBeenCalledWith("push_complete", "6".repeat(40));
+      expect(h.waitUntil).toHaveBeenCalledTimes(1);
       expect(h.wsManager.send).toHaveBeenCalledWith(sandboxWs, {
         type: "ack",
         ackId: "push_complete:msg-2",

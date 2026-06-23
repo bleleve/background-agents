@@ -87,6 +87,27 @@ describe("dispatchPreview", () => {
     );
   });
 
+  it("can dispatch without waiting for a run URL", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ dispatch_id: "dispatch-1" }, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      dispatchPreview({ RWX_ACCESS_TOKEN: "token" } as never, {
+        repoOwner: "onboardiq",
+        repoName: "background-agents",
+        branchName: "my-feature-branch",
+        slug: "stable-preview-slug",
+        waitForRunUrl: false,
+      })
+    ).resolves.toEqual({
+      dispatchId: "dispatch-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the commit SHA as the dispatch ref when provided", async () => {
     vi.useFakeTimers();
 

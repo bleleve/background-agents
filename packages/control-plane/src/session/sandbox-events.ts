@@ -73,7 +73,7 @@ export class SessionSandboxEventProcessor {
       if (event.commitSha) {
         this.deps.repository.updateSessionCurrentSha(event.commitSha);
       }
-      await this.dispatchPreviewIfNeeded("sandbox_ready");
+      this.deps.ctx.waitUntil(this.dispatchPreviewIfNeeded("sandbox_ready"));
       // Re-store the tunnel URLs the sandbox reports on (re)connect. A transient
       // connecting/heartbeat timeout can clear the stored URLs while the sandbox
       // is still alive (its Modal tunnels stay valid); the bridge re-reports the
@@ -333,7 +333,7 @@ export class SessionSandboxEventProcessor {
       if (event.commitSha) {
         this.deps.repository.updateSessionCurrentSha(event.commitSha);
       }
-      await this.dispatchPreviewIfNeeded("push_complete", event.commitSha);
+      this.deps.ctx.waitUntil(this.dispatchPreviewIfNeeded("push_complete", event.commitSha));
     }
 
     this.deps.broadcast({ type: "sandbox_event", event });
