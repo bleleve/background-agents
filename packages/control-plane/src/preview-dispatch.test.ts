@@ -43,7 +43,7 @@ describe("dispatchPreview", () => {
         body: JSON.stringify({
           key: "onboardiq-background-agents",
           ref: "my-feature-branch",
-          params: { slug: "stable-preview-slug" },
+          params: { slug: "stable-preview-slug", reason: "reef_general" },
           title: "Preview for Reef session session-1",
         }),
       })
@@ -52,6 +52,38 @@ describe("dispatchPreview", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "https://cloud.rwx.com/mint/api/runs/dispatches/dispatch-1",
       expect.objectContaining({ method: "GET" })
+    );
+  });
+
+  it("returns the run URL from the create response without polling", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      Response.json(
+        {
+          dispatch_id: "dispatch-1",
+          run_url: "https://cloud.rwx.com/mint/org/runs/3",
+        },
+        { status: 201 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      dispatchPreview({ RWX_ACCESS_TOKEN: "token" } as never, {
+        repoOwner: "onboardiq",
+        repoName: "background-agents",
+        branchName: "my-feature-branch",
+        slug: "stable-preview-slug",
+        sessionId: "session-1",
+      })
+    ).resolves.toEqual({
+      dispatchId: "dispatch-1",
+      runUrl: "https://cloud.rwx.com/mint/org/runs/3",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://cloud.rwx.com/mint/api/runs/dispatches",
+      expect.objectContaining({ method: "POST" })
     );
   });
 });

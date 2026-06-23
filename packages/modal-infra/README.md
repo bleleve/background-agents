@@ -177,6 +177,7 @@ Set via Modal secrets:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `IMAGE_SNAPSHOT_TIMEOUT_SECONDS` | `900` | Max seconds to wait for a repo-image / session filesystem snapshot. Raise for repos whose built filesystem is very large (big `node_modules`, baked Docker images) and fails with `Timed out waiting for image to be created`. Set it as a plain key on the `internal-api` secret (like `ALLOWED_CONTROL_PLANE_HOSTS`). |
+| `MODAL_PROXY_NAME` | `main-proxy` | Name of a Modal Proxy resource to route all sandbox egress traffic through. Follows the `<environment>-proxy` naming convention (Modal's default environment is `main`). Set as a plain key on the `internal-api` secret. Set to empty string to disable proxy attachment. |
 
 ## Verification Criteria
 

@@ -34,7 +34,7 @@ export async function dispatchPreview(
   });
 
   const params: Record<string, string> = { slug: input.slug };
-    params["reason"] = input.reason || 'reef_general';
+  params["reason"] = input.reason || "reef_general";
 
   const previewUrls = env.RWX_ORG_SLUG
     ? { hire: `https://hire-${input.slug}--${env.RWX_ORG_SLUG}.r1.rwx.run/` }
@@ -46,7 +46,15 @@ export async function dispatchPreview(
     params,
     title: input.sessionId ? `Preview for Reef session ${input.sessionId}` : undefined,
   });
-  log.info("preview.dispatched", { ...input, dispatch_id: result.dispatch_id });
+  const createRunUrl = result.run_url ?? result.runs?.[0]?.run_url;
+  log.info("preview.dispatched", {
+    ...input,
+    dispatch_id: result.dispatch_id,
+    run_url: createRunUrl,
+  });
+  if (createRunUrl) {
+    return { dispatchId: result.dispatch_id, runUrl: createRunUrl, previewUrls };
+  }
 
   const startMs = Date.now();
   while (Date.now() - startMs < POLL_TIMEOUT_MS) {
