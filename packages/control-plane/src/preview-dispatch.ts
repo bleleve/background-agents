@@ -46,7 +46,15 @@ export async function dispatchPreview(
     params,
     title: input.sessionId ? `Preview for Reef session ${input.sessionId}` : undefined,
   });
-  log.info("preview.dispatched", { ...input, dispatch_id: result.dispatch_id });
+  const createRunUrl = result.run_url ?? result.runs?.[0]?.run_url;
+  log.info("preview.dispatched", {
+    ...input,
+    dispatch_id: result.dispatch_id,
+    run_url: createRunUrl,
+  });
+  if (createRunUrl) {
+    return { dispatchId: result.dispatch_id, runUrl: createRunUrl, previewUrls };
+  }
 
   const startMs = Date.now();
   while (Date.now() - startMs < POLL_TIMEOUT_MS) {

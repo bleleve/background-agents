@@ -63,11 +63,13 @@ export function SessionRightSidebarContent({
   }, [sessionState?.previewEnabled]);
 
   useEffect(() => {
-    const linkArtifact = artifacts.find(
-      (a) =>
-        a.type === "link" &&
-        (a.metadata as Record<string, unknown> | undefined)?.label === "RWX Run URL"
-    );
+    const linkArtifact = [...artifacts]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .find(
+        (a) =>
+          a.type === "link" &&
+          (a.metadata as Record<string, unknown> | undefined)?.label === "RWX Run URL"
+      );
     if (linkArtifact?.url) setRwxRunUrl(linkArtifact.url);
   }, [artifacts]);
 

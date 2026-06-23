@@ -35,6 +35,9 @@ const DEFAULT_RWX_BASE_URL = "https://cloud.rwx.com";
 
 export interface RwxCreateDispatchResponse {
   dispatch_id: string;
+  /** Available immediately when RWX has already created the run for this dispatch. */
+  run_url?: string;
+  runs?: RwxDispatchRun[];
 }
 
 export interface RwxDispatchRun {
