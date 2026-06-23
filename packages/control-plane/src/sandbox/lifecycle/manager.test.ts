@@ -1517,6 +1517,279 @@ describe("SandboxLifecycleManager", () => {
 
       expect(onSandboxTerminating).toHaveBeenCalledWith("connecting_timeout");
     });
+
+    // ── In-flight silence backstop ──────────────────────────────────────────
+    // A turn that is processing must not be terminally failed on the short
+    // connect/heartbeat windows: a mid-run respawn re-enters connecting and a
+    // slow restore can go silent past 120s, but the agent is alive and likely
+    // to complete. Defer terminal until the (much longer) silence backstop, so a
+    // real completion lands on a still-"processing" message and the status never
+    // flips failed→completed. Replays the [Auto] wx-system incident.
+
+    it("defers connecting timeout while a turn is in flight (silence < backstop)", async () => {
+      const now = Date.now();
+      const sandbox = createMockSandbox({
+        status: "connecting" as SandboxStatus,
+        created_at: now - 130_000, // 130s: past the 120s connect window…
+        last_heartbeat: null,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      // …but a message is processing (mid-run respawn), and 130s < 10min backstop.
+      storage.getIsProcessing = vi.fn(() => true);
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+      const alarmScheduler = createMockAlarmScheduler();
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        alarmScheduler,
+        createMockIdGenerator(),
+        createTestConfig(),
+        { onSandboxTerminating }
+      );
+
+      await manager.handleAlarm();
+
+      // No terminal action: not failed, no breaker hit, turn left intact.
+      expect(onSandboxTerminating).not.toHaveBeenCalled();
+      expect(storage.calls).not.toContain("updateSandboxStatus:failed");
+      expect(storage.calls).not.toContain("incrementCircuitBreakerFailure");
+      // Re-armed so the backstop is re-evaluated on a later tick.
+      expect(alarmScheduler.alarms.length).toBe(1);
+    });
+
+    it("terminates connecting timeout once the in-flight silence backstop is exceeded", async () => {
+      const now = Date.now();
+      const sandbox = createMockSandbox({
+        status: "connecting" as SandboxStatus,
+        created_at: now - 11 * 60 * 1000, // 11min of silence > 10min backstop
+        last_heartbeat: null,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      storage.getIsProcessing = vi.fn(() => true);
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig(),
+        { onSandboxTerminating }
+      );
+
+      await manager.handleAlarm();
+
+      expect(onSandboxTerminating).toHaveBeenCalledWith("connecting_timeout");
+      expect(storage.calls).toContain("updateSandboxStatus:failed");
+    });
+
+    it("still fails a cold-boot connect timeout immediately (no turn in flight)", async () => {
+      const now = Date.now();
+      const sandbox = createMockSandbox({
+        status: "connecting" as SandboxStatus,
+        created_at: now - 130_000,
+        last_heartbeat: null,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      // Default getIsProcessing() === false: the triggering prompt is still
+      // "pending", nothing is in flight to lose, so the 120s terminal stands.
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig(),
+        { onSandboxTerminating }
+      );
+
+      await manager.handleAlarm();
+
+      expect(onSandboxTerminating).toHaveBeenCalledWith("connecting_timeout");
+      expect(storage.calls).toContain("updateSandboxStatus:failed");
+    });
+
+    it("defers heartbeat-stale terminal while a turn is in flight (silence < backstop)", async () => {
+      const now = Date.now();
+      const sandbox = createMockSandbox({
+        status: "ready",
+        last_heartbeat: now - 100_000, // 100s: stale (>90s) but < 10min backstop
+        last_activity: now - 5_000,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      storage.getIsProcessing = vi.fn(() => true);
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+      const provider = createMockProvider();
+      const wsManager = createMockWebSocketManager();
+      const alarmScheduler = createMockAlarmScheduler();
+
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        wsManager,
+        alarmScheduler,
+        createMockIdGenerator(),
+        createTestConfig(),
+        { onSandboxTerminating }
+      );
+
+      await manager.handleAlarm();
+
+      // Not failed, not snapshotted/stopped — the live turn is left alone.
+      expect(onSandboxTerminating).not.toHaveBeenCalled();
+      expect(storage.calls).not.toContain("updateSandboxStatus:stale");
+      expect(provider.takeSnapshot).not.toHaveBeenCalled();
+      expect(wsManager.closeSandboxWebSocket).not.toHaveBeenCalled();
+      expect(alarmScheduler.alarms.length).toBe(1);
+    });
+
+    it("terminates heartbeat-stale once the in-flight silence backstop is exceeded", async () => {
+      const now = Date.now();
+      const sandbox = createMockSandbox({
+        status: "ready",
+        last_heartbeat: now - 11 * 60 * 1000, // 11min silence > 10min backstop
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      storage.getIsProcessing = vi.fn(() => true);
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig(),
+        { onSandboxTerminating }
+      );
+
+      await manager.handleAlarm();
+
+      expect(onSandboxTerminating).toHaveBeenCalledWith("heartbeat_stale");
+      expect(storage.calls).toContain("updateSandboxStatus:stale");
+    });
+  });
+
+  describe("onBootProgress", () => {
+    it("refreshes the heartbeat and re-arms the connecting alarm while connecting", async () => {
+      const now = Date.now();
+      const sandbox = createMockSandbox({
+        status: "connecting" as SandboxStatus,
+        created_at: now - 110_000, // 110s into a slow boot, near the 120s window
+        last_heartbeat: now - 100_000,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      const alarmScheduler = createMockAlarmScheduler();
+      const config = createTestConfig();
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        alarmScheduler,
+        createMockIdGenerator(),
+        config
+      );
+
+      const before = Date.now();
+      await manager.onBootProgress();
+      const after = Date.now();
+
+      // Heartbeat refreshed to ~now (mock writes the timestamp onto the sandbox).
+      expect(storage.calls).toContain("updateSandboxHeartbeat");
+      expect(sandbox.last_heartbeat).toBeGreaterThanOrEqual(before);
+
+      // Connecting deadline actively pushed to ~now + timeout, not left at the
+      // stale created_at + timeout that would fire mid-boot.
+      expect(alarmScheduler.alarms.length).toBe(1);
+      const armed = alarmScheduler.alarms[0];
+      expect(armed).toBeGreaterThanOrEqual(before + config.connectingTimeout.timeoutMs);
+      expect(armed).toBeLessThanOrEqual(after + config.connectingTimeout.timeoutMs);
+    });
+
+    it("re-arms while spawning (before the provider call returns)", async () => {
+      const sandbox = createMockSandbox({ status: "spawning" as SandboxStatus });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      const alarmScheduler = createMockAlarmScheduler();
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        alarmScheduler,
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.onBootProgress();
+
+      expect(storage.calls).toContain("updateSandboxHeartbeat");
+      expect(alarmScheduler.alarms.length).toBe(1);
+    });
+
+    it("is a no-op once the sandbox has connected (status ready)", async () => {
+      // After the bridge connects the sandbox sends real heartbeats; refreshing
+      // here would mask a dead agent, and re-arming would fight the inactivity alarm.
+      const sandbox = createMockSandbox({ status: "ready" as SandboxStatus });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      const alarmScheduler = createMockAlarmScheduler();
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        alarmScheduler,
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.onBootProgress();
+
+      expect(storage.calls).not.toContain("updateSandboxHeartbeat");
+      expect(alarmScheduler.alarms.length).toBe(0);
+    });
+
+    it("keeps a long boot alive: a ping past the original window prevents the timeout", async () => {
+      // Reproduces the prod failure shape: a boot created >120s ago that keeps
+      // pinging must not be failed. The ping re-arms the alarm AND refreshes the
+      // heartbeat, so the subsequent watchdog evaluation sees a live sandbox.
+      const now = Date.now();
+      const sandbox = createMockSandbox({
+        status: "connecting" as SandboxStatus,
+        created_at: now - 150_000, // already past the 120s window from creation
+        last_heartbeat: now - 5_000,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      const alarmScheduler = createMockAlarmScheduler();
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        alarmScheduler,
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.onBootProgress();
+      await manager.handleAlarm();
+
+      expect(storage.calls).not.toContain("updateSandboxStatus:failed");
+    });
   });
 
   describe("scheduleDisconnectCheck", () => {

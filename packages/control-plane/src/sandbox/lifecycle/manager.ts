@@ -26,11 +26,13 @@ import {
   DEFAULT_INACTIVITY_CONFIG,
   DEFAULT_HEARTBEAT_CONFIG,
   DEFAULT_CONNECTING_TIMEOUT_CONFIG,
+  DEFAULT_IN_FLIGHT_SILENCE_CONFIG,
   type CircuitBreakerConfig,
   type SpawnConfig,
   type InactivityConfig,
   type HeartbeatConfig,
   type ConnectingTimeoutConfig,
+  type InFlightSilenceConfig,
 } from "./decisions";
 import { extractProviderAndModel } from "../../utils/models";
 import { createLogger, type Logger } from "../../logger";
@@ -165,6 +167,10 @@ export interface SandboxLifecycleConfig {
   inactivity: InactivityConfig;
   heartbeat: HeartbeatConfig;
   connectingTimeout: ConnectingTimeoutConfig;
+  /** Continuous-silence backstop before an IN-FLIGHT turn is terminally failed.
+   *  See InFlightSilenceConfig: a connecting/heartbeat blip mid-turn is a
+   *  recoverable reconnection, not a death, until this much silence elapses. */
+  inFlightSilence: InFlightSilenceConfig;
   controlPlaneUrl: string;
   /** Default model ID used when the session has no model override. */
   model: string;
@@ -187,6 +193,7 @@ export const DEFAULT_LIFECYCLE_CONFIG: Omit<SandboxLifecycleConfig, "controlPlan
   inactivity: DEFAULT_INACTIVITY_CONFIG,
   heartbeat: DEFAULT_HEARTBEAT_CONFIG,
   connectingTimeout: DEFAULT_CONNECTING_TIMEOUT_CONFIG,
+  inFlightSilence: DEFAULT_IN_FLIGHT_SILENCE_CONFIG,
 };
 
 /** Child (agent-spawned) sessions get a shorter sandbox timeout. */
@@ -1069,10 +1076,42 @@ export class SandboxLifecycleManager {
     );
 
     if (connectingResult.isTimedOut) {
+      // While a turn is in flight, a sandbox that fell back to connecting/
+      // spawning is a slow restore/respawn, not a death: the agent has already
+      // run and is likely about to complete. Defer the terminal decision to the
+      // in-flight silence backstop (measured on the same last-sign-of-life
+      // clock) instead of failing on the 120s connect window — failing here
+      // would terminate a turn that then completes, leaving the timeline
+      // ("Execution complete") disagreeing with the status chip ("Failed"). The
+      // primary death signal during a restore is spawn_failed (handled above on
+      // a terminal "failed" status); this only defers the silent-provider case.
+      // getIsProcessing() is false on a cold boot (the triggering prompt is
+      // still "pending"), so a first-connect that never lands keeps the original
+      // 120s terminal — nothing is in flight to lose.
+      if (
+        this.storage.getIsProcessing() &&
+        connectingResult.elapsedMs < this.config.inFlightSilence.timeoutMs
+      ) {
+        this.log.info("Connecting timeout deferred: turn in flight, awaiting reconnect", {
+          event: "sandbox.connecting_timeout_deferred",
+          elapsed_ms: connectingResult.elapsedMs,
+          silence_backstop_ms: this.config.inFlightSilence.timeoutMs,
+        });
+        await this.alarmScheduler.scheduleAlarm(now + this.config.connectingTimeout.timeoutMs);
+        return;
+      }
+
       this.log.warn("Connecting timeout", {
         event: "sandbox.connecting_timeout",
         elapsed_ms: connectingResult.elapsedMs,
         timeout_ms: this.config.connectingTimeout.timeoutMs,
+        // Captured so a timeout on a boot that WAS reporting progress is
+        // diagnosable: elapsed measures from max(created_at, last_heartbeat), so
+        // a fresh last_heartbeat here means a boot-progress ping landed yet the
+        // watchdog still fired (a keep-alive bug, not a genuinely stuck boot).
+        created_at: sandbox.created_at,
+        last_heartbeat: sandbox.last_heartbeat,
+        now,
       });
       await this.callbacks.onSandboxTerminating?.("connecting_timeout");
       // A sandbox that never connects is a spawn failure — count it toward the
@@ -1124,6 +1163,30 @@ export class SandboxLifecycleManager {
       : evaluateHeartbeatHealth(sandbox.last_heartbeat, this.config.heartbeat, now);
 
     if (heartbeatHealth.isStale) {
+      // Same in-flight tolerance as the connecting path: while a message is
+      // processing, a stale heartbeat is a recoverable blip (the box may be
+      // restoring/reconnecting or briefly unreachable), not a death. Don't
+      // terminalize — and don't snapshot/stop the box, which would kill a live
+      // turn — until the silence reaches the backstop. A real completion that
+      // arrives before then lands on a still-"processing" message and completes
+      // normally, so the status never flips failed→completed.
+      if (
+        this.storage.getIsProcessing() &&
+        // ?? Infinity (not 0) so a missing ageMs fails *safe*: fall through to
+        // the terminal path rather than deferring forever. Unreachable in
+        // practice (evaluateHeartbeatHealth only sets isStale with ageMs set),
+        // but the fail-safe direction matters if that ever changes.
+        (heartbeatHealth.ageMs ?? Infinity) < this.config.inFlightSilence.timeoutMs
+      ) {
+        this.log.info("Heartbeat stale deferred: turn in flight, awaiting recovery", {
+          event: "sandbox.heartbeat_stale_deferred",
+          last_heartbeat_ms: heartbeatHealth.ageMs ?? 0,
+          silence_backstop_ms: this.config.inFlightSilence.timeoutMs,
+        });
+        await this.alarmScheduler.scheduleAlarm(now + this.config.heartbeat.timeoutMs);
+        return;
+      }
+
       this.log.warn("Heartbeat stale", {
         event: "sandbox.heartbeat_stale",
         last_heartbeat_ms: heartbeatHealth.ageMs || 0,
@@ -1288,20 +1351,40 @@ export class SandboxLifecycleManager {
    * The supervisor posts these throughout a long setup.sh — before the bridge
    * WebSocket exists — so the connecting-timeout watchdog can tell a
    * slow-but-healthy boot apart from a stuck one. Each ping refreshes the
-   * heartbeat, which is the "last sign of life" the connecting timeout measures
-   * from (see evaluateConnectingTimeout). The existing alarm re-evaluates on its
-   * normal cadence and sees the fresh timestamp, so no reschedule is needed.
+   * heartbeat (the "last sign of life" evaluateConnectingTimeout measures from)
+   * AND re-arms the connecting-timeout alarm from now.
+   *
+   * Re-arming actively is deliberate. The pre-armed alarm is set once at spawn
+   * (created_at + timeout); relying on it to "re-evaluate on its normal cadence"
+   * is fragile — a single alarm can fire and fail a healthy-but-slow boot at
+   * created_at + timeout even while pings are arriving (observed in prod: a
+   * ~3-min wx-system boot emitting 200-OK boot-progress every 20s was still
+   * killed at created_at + 120s). Re-arming from the latest ping means the
+   * watchdog fires only after a full window of genuine silence — a truly stuck
+   * boot — which is the documented intent.
    *
    * No-op once the sandbox has left the spawning/connecting phase: after the
    * bridge connects it sends real heartbeats, and refreshing the heartbeat here
-   * would mask a dead agent.
+   * would mask a dead agent. The no-op is logged so a ping arriving against an
+   * unexpected status is observable rather than silently dropped.
    */
-  onBootProgress(): void {
+  async onBootProgress(): Promise<void> {
     const sandbox = this.storage.getSandbox();
     if (!sandbox) return;
-    if (sandbox.status !== "spawning" && sandbox.status !== "connecting") return;
-    this.storage.updateSandboxHeartbeat(Date.now());
-    this.log.debug("Boot progress ping", { event: "sandbox.boot_progress" });
+    if (sandbox.status !== "spawning" && sandbox.status !== "connecting") {
+      this.log.debug("Boot progress ping ignored (sandbox not booting)", {
+        event: "sandbox.boot_progress_ignored",
+        sandbox_status: sandbox.status,
+      });
+      return;
+    }
+    const now = Date.now();
+    this.storage.updateSandboxHeartbeat(now);
+    await this.alarmScheduler.scheduleAlarm(now + this.config.connectingTimeout.timeoutMs);
+    this.log.debug("Boot progress ping", {
+      event: "sandbox.boot_progress",
+      sandbox_status: sandbox.status,
+    });
   }
 
   /**

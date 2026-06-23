@@ -497,6 +497,41 @@ export const DEFAULT_CONNECTING_TIMEOUT_CONFIG: ConnectingTimeoutConfig = {
   timeoutMs: 120_000,
 };
 
+// ==================== In-flight silence backstop ====================
+
+/**
+ * Configuration for the in-flight silence backstop.
+ *
+ * While a turn is in flight (a message is `processing`), a sandbox that drops
+ * back to `connecting`/`spawning` or stops heart-beating is treated as a slow
+ * restore/respawn — a recoverable reconnection — rather than a death. The agent
+ * has demonstrably run, so failing the turn on the short 90s heartbeat / 120s
+ * connect windows would terminate a turn that is about to complete, producing
+ * the failed-then-completed contradiction (a watchdog-minted failure, then the
+ * real completion arrives and the timeline disagrees with the status chip).
+ *
+ * Only after this much *continuous silence* — measured on the last sign of life
+ * (`last_heartbeat`: bridge heartbeats and boot-progress pings), never on total
+ * turn duration — is an in-flight turn terminally failed. So an agent that keeps
+ * producing activity never dies regardless of how long the turn runs; only a
+ * genuinely unreachable box does.
+ *
+ * The primary death signal during a restore remains `spawn_failed` (an immediate
+ * provider failure terminates at once); this backstop covers a provider that
+ * goes silent without reporting either success or failure. Sized to comfortably
+ * exceed the worst legitimate restore/respawn silence — far longer than the
+ * 90s/120s windows, far shorter than the ~95min total execution cap.
+ */
+export interface InFlightSilenceConfig {
+  /** Max continuous silence (ms since last sign of life) tolerated for an
+   *  in-flight turn before it is terminally failed. */
+  timeoutMs: number;
+}
+
+export const DEFAULT_IN_FLIGHT_SILENCE_CONFIG: InFlightSilenceConfig = {
+  timeoutMs: 10 * 60 * 1000, // 10 minutes of continuous silence
+};
+
 /**
  * Result of connecting timeout evaluation.
  */
