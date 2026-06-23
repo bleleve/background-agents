@@ -163,7 +163,7 @@ describe("resolveSessionModelSettings", () => {
     });
 
     expect(result.model).toBe("anthropic/claude-opus-4-6");
-    expect(result.reasoningEffort).toBe("high");
+    expect(result.reasoningEffort).toBe("medium");
   });
 
   it("falls back to model default reasoning effort when invalid", () => {
@@ -177,7 +177,7 @@ describe("resolveSessionModelSettings", () => {
     });
 
     expect(result.model).toBe("anthropic/claude-opus-4-6");
-    expect(result.reasoningEffort).toBe("high");
+    expect(result.reasoningEffort).toBe("medium");
   });
 
   it("uses config reasoning effort when config model is selected", () => {

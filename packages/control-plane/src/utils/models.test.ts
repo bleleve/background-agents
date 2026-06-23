@@ -325,28 +325,28 @@ describe("model utilities", () => {
       expect(getDefaultReasoningEffort("anthropic/claude-haiku-4-5")).toBe("max");
       expect(getDefaultReasoningEffort("anthropic/claude-sonnet-4-5")).toBe("max");
       expect(getDefaultReasoningEffort("anthropic/claude-opus-4-5")).toBe("max");
-      expect(getDefaultReasoningEffort("anthropic/claude-opus-4-6")).toBe("high");
-      expect(getDefaultReasoningEffort("anthropic/claude-opus-4-7")).toBe("high");
+      expect(getDefaultReasoningEffort("anthropic/claude-opus-4-6")).toBe("medium");
+      expect(getDefaultReasoningEffort("anthropic/claude-opus-4-7")).toBe("medium");
     });
 
     it("returns expected defaults for bare Claude model names via normalization", () => {
       expect(getDefaultReasoningEffort("claude-haiku-4-5")).toBe("max");
       expect(getDefaultReasoningEffort("claude-sonnet-4-5")).toBe("max");
       expect(getDefaultReasoningEffort("claude-opus-4-5")).toBe("max");
-      expect(getDefaultReasoningEffort("claude-opus-4-6")).toBe("high");
-      expect(getDefaultReasoningEffort("claude-opus-4-7")).toBe("high");
+      expect(getDefaultReasoningEffort("claude-opus-4-6")).toBe("medium");
+      expect(getDefaultReasoningEffort("claude-opus-4-7")).toBe("medium");
     });
 
-    it("returns high for OpenAI codex models", () => {
-      expect(getDefaultReasoningEffort("openai/gpt-5.2-codex")).toBe("high");
-      expect(getDefaultReasoningEffort("openai/gpt-5.3-codex")).toBe("high");
-      expect(getDefaultReasoningEffort("openai/gpt-5.3-codex-spark")).toBe("high");
+    it("returns medium for OpenAI codex models", () => {
+      expect(getDefaultReasoningEffort("openai/gpt-5.2-codex")).toBe("medium");
+      expect(getDefaultReasoningEffort("openai/gpt-5.3-codex")).toBe("medium");
+      expect(getDefaultReasoningEffort("openai/gpt-5.3-codex-spark")).toBe("medium");
     });
 
-    it("returns undefined for GPT 5.2, GPT 5.4, and GPT 5.5", () => {
-      expect(getDefaultReasoningEffort("openai/gpt-5.2")).toBeUndefined();
-      expect(getDefaultReasoningEffort("openai/gpt-5.4")).toBeUndefined();
-      expect(getDefaultReasoningEffort("openai/gpt-5.5")).toBeUndefined();
+    it("returns medium for GPT 5.2, GPT 5.4, and GPT 5.5", () => {
+      expect(getDefaultReasoningEffort("openai/gpt-5.2")).toBe("medium");
+      expect(getDefaultReasoningEffort("openai/gpt-5.4")).toBe("medium");
+      expect(getDefaultReasoningEffort("openai/gpt-5.5")).toBe("medium");
     });
 
     it("returns undefined for DeepSeek models", () => {
@@ -371,25 +371,25 @@ describe("model utilities", () => {
       const opus46Config = getReasoningConfig("anthropic/claude-opus-4-6");
       expect(opus46Config).toEqual({
         efforts: ["low", "medium", "high", "max"],
-        default: "high",
+        default: "medium",
       });
 
       const opus47Config = getReasoningConfig("anthropic/claude-opus-4-7");
       expect(opus47Config).toEqual({
         efforts: ["low", "medium", "high", "xhigh", "max"],
-        default: "high",
+        default: "medium",
       });
 
       const opus48Config = getReasoningConfig("anthropic/claude-opus-4-8");
       expect(opus48Config).toEqual({
         efforts: ["low", "medium", "high", "xhigh", "max"],
-        default: "high",
+        default: "medium",
       });
 
       const fable5Config = getReasoningConfig("anthropic/claude-fable-5");
       expect(fable5Config).toEqual({
         efforts: ["low", "medium", "high", "xhigh", "max"],
-        default: "high",
+        default: "medium",
       });
     });
 
@@ -405,31 +405,31 @@ describe("model utilities", () => {
       const config = getReasoningConfig("openai/gpt-5.2-codex");
       expect(config).toEqual({
         efforts: ["low", "medium", "high", "xhigh"],
-        default: "high",
+        default: "medium",
       });
     });
 
-    it("returns config for GPT 5.2 with none effort", () => {
+    it("returns config for GPT 5.2 with medium effort", () => {
       const config = getReasoningConfig("openai/gpt-5.2");
       expect(config).toEqual({
         efforts: ["none", "low", "medium", "high", "xhigh"],
-        default: undefined,
+        default: "medium",
       });
     });
 
-    it("returns config for GPT 5.4 with none effort", () => {
+    it("returns config for GPT 5.4 with medium effort", () => {
       const config = getReasoningConfig("openai/gpt-5.4");
       expect(config).toEqual({
         efforts: ["none", "low", "medium", "high", "xhigh"],
-        default: undefined,
+        default: "medium",
       });
     });
 
-    it("returns config for GPT 5.5 with none effort", () => {
+    it("returns config for GPT 5.5 with medium effort", () => {
       const config = getReasoningConfig("openai/gpt-5.5");
       expect(config).toEqual({
         efforts: ["none", "low", "medium", "high", "xhigh"],
-        default: undefined,
+        default: "medium",
       });
     });
 
