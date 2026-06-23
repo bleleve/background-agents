@@ -1165,7 +1165,11 @@ export class SandboxLifecycleManager {
       // normally, so the status never flips failed→completed.
       if (
         this.storage.getIsProcessing() &&
-        (heartbeatHealth.ageMs ?? 0) < this.config.inFlightSilence.timeoutMs
+        // ?? Infinity (not 0) so a missing ageMs fails *safe*: fall through to
+        // the terminal path rather than deferring forever. Unreachable in
+        // practice (evaluateHeartbeatHealth only sets isStale with ageMs set),
+        // but the fail-safe direction matters if that ever changes.
+        (heartbeatHealth.ageMs ?? Infinity) < this.config.inFlightSilence.timeoutMs
       ) {
         this.log.info("Heartbeat stale deferred: turn in flight, awaiting recovery", {
           event: "sandbox.heartbeat_stale_deferred",
