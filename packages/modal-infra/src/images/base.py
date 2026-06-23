@@ -63,7 +63,10 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v89: boot-time autostash is popped after checkout so uncommitted edits survive restore
 # v90: bridge reports HEAD from the cloned repo for preview dispatches
 # v93: opencode node_modules symlinked (hardlink was copied-up by overlayfs)
-CACHE_BUSTER = "v93-opencode-node-modules-symlink"
+# v94: merge upstream — bake OpenCode global config deps at build time to skip
+#      the boot-time global-deps seed/reify (#790/#795); keep langfuse plugin in
+#      the staged tree and the SCM credential helper.
+CACHE_BUSTER = "v94-bake-opencode-global-deps-with-langfuse"
 
 # Base image with all development tools
 base_image = (
@@ -246,15 +249,31 @@ base_image = (
     # OpenCode's Npm.install() finds package-lock.json in sync and skips
     # the slow arborist reify() call (2-22s) that would otherwise block
     # the first prompt and exceed the bridge's HTTP timeout.
+    #
     # opencode-plugin-langfuse is included here so its transitive deps are
     # in the lockfile — without this, OpenCode reifies langfuse at session
     # creation time, hitting npm registry and causing intermittent ReadTimeout.
+    #
+    # Also bake the same tree into OpenCode's GLOBAL config dir. OpenCode installs
+    # @opencode-ai/plugin into every config directory it discovers — including the
+    # global one (HOME=/root, so ~/.config/opencode), which it creates empty on
+    # startup — so without this the runtime _seed_global_opencode_deps() pays a
+    # multi-second node_modules copy on every boot. Baking it makes that seed a
+    # no-op (it skips when node_modules already exists). See #767 / #790 / #795.
     .run_commands(
         "mkdir -p /app/opencode-deps",
-        'echo \'{"name":"opencode-tools","type":"module",'
-        '"dependencies":{"@opencode-ai/plugin":"*","opencode-plugin-langfuse":"latest"}}\''
+        # Pin staged plugin to OPENCODE_VERSION so the pre-staged tree copied
+        # into .opencode/ at boot matches the globally installed plugin (#567).
+        # opencode-plugin-langfuse stays pinned to latest so our langfuse
+        # tracing keeps working with whatever the global install resolves.
+        f'echo \'{{"name":"opencode-tools","type":"module",'
+        f'"dependencies":{{"@opencode-ai/plugin":"{OPENCODE_VERSION}",'
+        f'"opencode-plugin-langfuse":"latest"}}}}\''
         " > /app/opencode-deps/package.json",
         "cd /app/opencode-deps && npm install --ignore-scripts --no-audit --no-fund",
+        # Bake the in-sync tree into the global config dir so the runtime seed is a no-op.
+        "mkdir -p /root/.config/opencode",
+        "cp -a /app/opencode-deps/. /root/.config/opencode/",
     )
     # Install code-server for browser-based VS Code editing (direct .deb from GitHub releases)
     .run_commands(

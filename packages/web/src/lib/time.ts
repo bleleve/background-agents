@@ -58,7 +58,7 @@ export const INACTIVE_SESSION_DAYS = 7;
  * Group sessions by activity: those whose last activity is older than
  * INACTIVE_SESSION_DAYS are inactive (shown under the "Older" divider).
  */
-export function isInactiveSession(updatedAt: number): boolean {
-  const cutoff = Date.now() - INACTIVE_SESSION_DAYS * 24 * 60 * 60 * 1000;
+export function isInactiveSession(updatedAt: number, now: number): boolean {
+  const cutoff = now - INACTIVE_SESSION_DAYS * 24 * 60 * 60 * 1000;
   return updatedAt < cutoff;
 }

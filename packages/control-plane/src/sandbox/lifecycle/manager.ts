@@ -10,7 +10,11 @@
  * spawn attempts within the same request.
  */
 
-import { type McpServerConfig, type SandboxSettings } from "@open-inspect/shared";
+import {
+  extractProviderAndModel,
+  type McpServerConfig,
+  type SandboxSettings,
+} from "@open-inspect/shared";
 import type { SandboxStatus } from "../../types";
 import type { SandboxRow, SessionRow } from "../../session/types";
 import { SandboxProviderError, type SandboxProvider, type CreateSandboxConfig } from "../provider";
@@ -34,7 +38,6 @@ import {
   type ConnectingTimeoutConfig,
   type InFlightSilenceConfig,
 } from "./decisions";
-import { extractProviderAndModel } from "../../utils/models";
 import { createLogger, type Logger } from "../../logger";
 import { hashToken } from "../../auth/crypto";
 import { mintJwt } from "../../auth/jwt";

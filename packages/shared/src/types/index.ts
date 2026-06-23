@@ -2,6 +2,8 @@
  * Shared type definitions used across Open-Inspect packages.
  */
 
+import { z } from "zod";
+
 // Session states
 export type SessionStatus =
   | "created"
@@ -120,6 +122,18 @@ export type SpawnSource =
   | "linear-bot"
   | "slack-bot";
 export type ConfidenceLevel = "high" | "medium" | "low";
+
+const gitSyncStatusSchema = z.enum(["pending", "in_progress", "completed", "failed"]);
+const spawnSourceSchema = z.enum([
+  "user",
+  "agent",
+  "automation",
+  "github-bot",
+  "linear-bot",
+  "slack-bot",
+]);
+
+const recordSchema = z.record(z.string(), z.unknown());
 
 // Participant in a session
 export interface SessionParticipant {
@@ -291,137 +305,133 @@ export interface PullRequest {
   updatedAt: string;
 }
 
+const sandboxEventBaseSchema = z.object({
+  sandboxId: z.string(),
+  timestamp: z.number(),
+  ackId: z.string().optional(),
+});
+
+const messageSandboxEventBaseSchema = sandboxEventBaseSchema.extend({
+  messageId: z.string(),
+});
+
 // Sandbox events (from Modal / control-plane synthesized)
-export type SandboxEvent =
-  | { type: "heartbeat"; sandboxId: string; status: string; timestamp: number }
-  | {
-      type: "token";
-      content: string;
-      messageId: string;
-      sandboxId: string;
-      timestamp: number;
-    }
-  | {
-      type: "tool_call";
-      tool: string;
-      args: Record<string, unknown>;
-      callId: string;
-      status?: string;
-      output?: string;
-      messageId: string;
-      sandboxId: string;
-      timestamp: number;
-    }
-  | {
-      type: "step_start";
-      messageId: string;
-      sandboxId: string;
-      timestamp: number;
-      isSubtask?: boolean;
-    }
-  | {
-      type: "step_finish";
-      cost?: number;
-      tokens?: number;
-      reason?: string;
-      messageId: string;
-      sandboxId: string;
-      timestamp: number;
-      isSubtask?: boolean;
-    }
-  | {
-      type: "tool_result";
-      callId: string;
-      result: string;
-      error?: string;
-      messageId: string;
-      sandboxId: string;
-      timestamp: number;
-    }
-  | {
-      type: "git_sync";
-      status: GitSyncStatus;
-      sha?: string;
-      sandboxId: string;
-      timestamp: number;
-    }
-  | {
-      type: "error";
-      error: string;
-      messageId: string;
-      sandboxId: string;
-      timestamp: number;
-      /**
-       * True when the error originates from a child/sub-task session rather than
-       * the parent turn. Sub-task errors are surfaced for visibility but must
-       * NOT be treated as terminal — the parent stream keeps running and can
-       * still complete successfully.
-       */
-      isSubtask?: boolean;
-    }
-  | {
-      type: "execution_complete";
-      messageId: string;
-      success: boolean;
-      // true = deliberate stop/cancel (vs failure). Drives the neutral render in the session flow.
-      cancelled?: boolean;
-      error?: string;
-      sandboxId: string;
-      timestamp: number;
-      commitSha?: string;
-    }
-  | {
-      type: "artifact";
-      artifactType: string;
-      artifactId?: string;
-      url: string;
-      metadata?: Record<string, unknown>;
-      messageId?: string;
-      sandboxId: string;
-      timestamp: number;
-    }
-  | {
-      type: "push_complete";
-      branchName: string;
-      commitSha?: string;
-      sandboxId?: string;
-      timestamp: number;
-    }
-  | {
-      type: "push_error";
-      branchName: string;
-      error: string;
-      sandboxId?: string;
-      timestamp: number;
-    }
-  | {
-      type: "session_title";
-      title: string;
-      sandboxId: string;
-      timestamp: number;
-    }
-  | {
-      type: "ready";
-      sandboxId: string;
-      opencodeSessionId?: string;
-      // Tunnel URLs the sandbox re-reports on (re)connect, parsed from its
-      // /workspace/.tunnels.env. Lets the control plane restore the preview
-      // links if a transient timeout cleared them while the sandbox was alive.
-      tunnelUrls?: Record<string, string>;
-      commitSha?: string;
-      timestamp: number;
-    }
-  | {
-      type: "user_message";
-      content: string;
-      messageId: string;
-      timestamp: number;
-      author?: {
-        participantId: string;
-        name: string;
-        avatar?: string;
-      };
-    };
+//
+// Defined as a Zod discriminated union (upstream) so boundary payloads are
+// validated at runtime, with `SandboxEvent` derived via `z.infer`. Fork-local
+// fields/events (the `ready` event, `error.isSubtask`, `execution_complete`
+// `cancelled`/`commitSha`, and `push_complete.commitSha`) are folded into the
+// schema so they remain validated rather than dropped.
+export const sandboxEventSchema = z.discriminatedUnion("type", [
+  sandboxEventBaseSchema.extend({
+    type: z.literal("heartbeat"),
+    status: z.string(),
+  }),
+  messageSandboxEventBaseSchema.extend({
+    type: z.literal("token"),
+    content: z.string(),
+  }),
+  messageSandboxEventBaseSchema.extend({
+    type: z.literal("tool_call"),
+    tool: z.string(),
+    args: recordSchema,
+    callId: z.string(),
+    status: z.string().optional(),
+    output: z.string().optional(),
+  }),
+  messageSandboxEventBaseSchema.extend({
+    type: z.literal("step_start"),
+    isSubtask: z.boolean().optional(),
+  }),
+  messageSandboxEventBaseSchema.extend({
+    type: z.literal("step_finish"),
+    cost: z.number().optional(),
+    tokens: z.number().optional(),
+    reason: z.string().optional(),
+    isSubtask: z.boolean().optional(),
+  }),
+  messageSandboxEventBaseSchema.extend({
+    type: z.literal("tool_result"),
+    callId: z.string(),
+    result: z.string(),
+    error: z.string().optional(),
+  }),
+  sandboxEventBaseSchema.extend({
+    type: z.literal("git_sync"),
+    status: gitSyncStatusSchema,
+    sha: z.string().optional(),
+  }),
+  messageSandboxEventBaseSchema.extend({
+    type: z.literal("error"),
+    error: z.string(),
+    // True when the error originates from a child/sub-task session rather than
+    // the parent turn. Sub-task errors are surfaced for visibility but must
+    // NOT be treated as terminal — the parent stream keeps running and can
+    // still complete successfully.
+    isSubtask: z.boolean().optional(),
+  }),
+  messageSandboxEventBaseSchema.extend({
+    type: z.literal("execution_complete"),
+    success: z.boolean(),
+    // true = deliberate stop/cancel (vs failure). Drives the neutral render in the session flow.
+    cancelled: z.boolean().optional(),
+    error: z.string().optional(),
+    commitSha: z.string().optional(),
+  }),
+  sandboxEventBaseSchema.extend({
+    type: z.literal("artifact"),
+    artifactType: z.string(),
+    artifactId: z.string().optional(),
+    url: z.string(),
+    metadata: recordSchema.optional(),
+    messageId: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("push_complete"),
+    branchName: z.string(),
+    commitSha: z.string().optional(),
+    sandboxId: z.string().optional(),
+    timestamp: z.number(),
+    ackId: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("push_error"),
+    branchName: z.string(),
+    error: z.string(),
+    sandboxId: z.string().optional(),
+    timestamp: z.number(),
+    ackId: z.string().optional(),
+  }),
+  sandboxEventBaseSchema.extend({
+    type: z.literal("session_title"),
+    title: z.string(),
+  }),
+  sandboxEventBaseSchema.extend({
+    type: z.literal("ready"),
+    opencodeSessionId: z.string().optional(),
+    // Tunnel URLs the sandbox re-reports on (re)connect, parsed from its
+    // /workspace/.tunnels.env. Lets the control plane restore the preview
+    // links if a transient timeout cleared them while the sandbox was alive.
+    tunnelUrls: z.record(z.string(), z.string()).optional(),
+    commitSha: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("user_message"),
+    content: z.string(),
+    messageId: z.string(),
+    timestamp: z.number(),
+    ackId: z.string().optional(),
+    author: z
+      .object({
+        participantId: z.string(),
+        name: z.string(),
+        avatar: z.string().optional(),
+      })
+      .optional(),
+  }),
+]);
+
+export type SandboxEvent = z.infer<typeof sandboxEventSchema>;
 
 // WebSocket message types
 export type ClientMessage =
@@ -672,6 +682,13 @@ export interface UserPreferences {
   updatedAt: number;
 }
 
+export const userPreferencesRequestSchema = z.object({
+  model: z.string().optional(),
+  reasoningEffort: z.string().optional(),
+});
+
+export type UserPreferencesRequest = z.infer<typeof userPreferencesRequestSchema>;
+
 export interface Logger {
   debug(msg: string, data?: Record<string, unknown>): void;
   info(msg: string, data?: Record<string, unknown>): void;
@@ -733,24 +750,29 @@ export type CallbackContext =
   | GitHubCallbackContext;
 
 // API response types
-export interface CreateSessionRequest {
-  repoOwner: string;
-  repoName: string;
-  title?: string;
-  model?: string;
-  reasoningEffort?: string;
-  branch?: string;
+//
+// `CreateSessionRequest` is a Zod schema (upstream) so request bodies are
+// validated at the boundary. Fork-local fields (PR descriptor, plan-mode, and
+// preview-mode options) are folded into the schema so they remain validated
+// rather than dropped.
+export const createSessionRequestSchema = z.object({
+  repoOwner: z.string(),
+  repoName: z.string(),
+  title: z.string().optional(),
+  model: z.string().optional(),
+  reasoningEffort: z.string().optional(),
+  branch: z.string().optional(),
   /** GitHub PR number this session reviews/acts on (github-bot sessions only). */
-  prNumber?: number;
+  prNumber: z.number().optional(),
   /**
    * PR descriptor for github-bot sessions, used to seed a `pr` artifact at
    * session init so the web UI links the session to its PR (review sessions
    * don't open a PR themselves, so they'd otherwise have no artifact to link).
    */
-  prUrl?: string;
-  prState?: string;
-  prHeadRef?: string;
-  prBaseRef?: string;
+  prUrl: z.string().optional(),
+  prState: z.string().optional(),
+  prHeadRef: z.string().optional(),
+  prBaseRef: z.string().optional(),
   /**
    * When true, the session is gated on an explicit human approval of a plan
    * before any implementation step runs. The agent must call the save_plan
@@ -758,15 +780,50 @@ export interface CreateSessionRequest {
    * mode (read-only tools) until POST /sessions/:id/plan/approve flips the
    * gate to approved.
    */
-  planMode?: boolean;
+  planMode: z.boolean().optional(),
   /**
    * Model used for planning turns. Ignored when planMode is false. When
    * planMode is true and this is unset, the control plane falls back to
    * DEFAULT_PLAN_MODEL.
    */
-  planModel?: string;
-  previewEnabled?: boolean;
-}
+  planModel: z.string().optional(),
+  previewEnabled: z.boolean().optional(),
+});
+
+export type CreateSessionRequest = z.infer<typeof createSessionRequestSchema>;
+
+export const createSessionInputSchema = createSessionRequestSchema.extend({
+  userId: z.string().optional(),
+  spawnSource: spawnSourceSchema.optional(),
+  authProvider: z.enum(["github", "google"]).optional(),
+  authUserId: z.string().optional(),
+  authEmail: z.string().optional(),
+  authName: z.string().optional(),
+  authAvatarUrl: z.string().optional(),
+  scmUserId: z.string().optional(),
+  scmLogin: z.string().optional(),
+  scmName: z.string().optional(),
+  scmEmail: z.string().optional(),
+  scmAvatarUrl: z.string().optional(),
+  actorUserId: z.string().optional(),
+  actorDisplayName: z.string().optional(),
+  actorEmail: z.string().optional(),
+  actorAvatarUrl: z.string().optional(),
+  scmToken: z.string().optional(),
+  scmRefreshToken: z.string().optional(),
+  scmTokenExpiresAt: z.number().optional(),
+});
+
+export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
+
+export const createMediaArtifactRequestSchema = z.object({
+  artifactId: z.string(),
+  artifactType: z.string(),
+  objectKey: z.string(),
+  metadata: recordSchema.optional(),
+});
+
+export type CreateMediaArtifactRequest = z.infer<typeof createMediaArtifactRequestSchema>;
 
 export interface CreateSessionResponse {
   sessionId: string;

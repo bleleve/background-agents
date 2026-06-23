@@ -23,6 +23,12 @@ import type { Logger } from "./logger";
 import { createLogger, parseLogLevel } from "./logger";
 import { verifyWebhookSignature } from "./verify";
 import {
+  issueCommentPayloadSchema,
+  pullRequestOpenedPayloadSchema,
+  reviewCommentPayloadSchema,
+  reviewRequestedPayloadSchema,
+} from "./payload-schemas";
+import {
   handlePullRequestOpened,
   handlePullRequestLabeled,
   handlePullRequestSynchronized,
@@ -34,6 +40,7 @@ import {
   handleCheckSuiteCompleted,
   handlePullRequestReview,
   handleReviewRequestInternal,
+  isReviewRequestedForBot,
   type HandlerResult,
   type InternalReviewRequest,
 } from "./handlers";
@@ -333,9 +340,19 @@ function dispatchHandler(
   switch (event) {
     case "pull_request":
       if (p.action === "opened" || p.action === "ready_for_review") {
+        // Validate the minimal shape upstream gates on, but pass the full
+        // richly-typed payload so our handler retains fields the Zod schema
+        // intentionally omits (html_url, state, labels, head.repo, etc.).
+        const parsed = pullRequestOpenedPayloadSchema.safeParse(payload);
+        if (!parsed.success) throw new Error("Malformed pull_request opened payload");
         return handlePullRequestOpened(env, log, payload as PullRequestOpenedPayload, traceId);
       }
       if (p.action === "review_requested") {
+        if (!isReviewRequestedForBot(payload, env.GITHUB_BOT_USERNAME)) {
+          return Promise.resolve({ outcome: "skipped", skip_reason: "review_not_for_bot" });
+        }
+        const parsed = reviewRequestedPayloadSchema.safeParse(payload);
+        if (!parsed.success) throw new Error("Malformed pull_request review_requested payload");
         return handleReviewRequested(env, log, payload as ReviewRequestedPayload, traceId);
       }
       if (p.action === "labeled") {
@@ -363,6 +380,8 @@ function dispatchHandler(
       });
     case "issue_comment":
       if (p.action === "created") {
+        const parsed = issueCommentPayloadSchema.safeParse(payload);
+        if (!parsed.success) throw new Error("Malformed issue_comment created payload");
         return handleIssueComment(env, log, payload as IssueCommentPayload, traceId);
       }
       return Promise.resolve({
@@ -371,6 +390,9 @@ function dispatchHandler(
       });
     case "pull_request_review_comment":
       if (p.action === "created") {
+        const parsed = reviewCommentPayloadSchema.safeParse(payload);
+        if (!parsed.success)
+          throw new Error("Malformed pull_request_review_comment created payload");
         return handleReviewComment(env, log, payload as ReviewCommentPayload, traceId);
       }
       return Promise.resolve({

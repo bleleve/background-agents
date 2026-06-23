@@ -64,6 +64,11 @@ export interface Env {
 /**
  * Webhook payload types — narrow types extracted from the GitHub webhook
  * event schema containing only the fields the bot reads.
+ *
+ * NOTE: Runtime validation of a subset of these payloads is performed in
+ * index.ts via the Zod schemas in ./payload-schemas. Those schemas intentionally
+ * cover only the minimal fields needed to gate dispatch; these interfaces remain
+ * the source of truth for the richer fields the handlers actually read.
  */
 
 export interface PullRequestOpenedPayload {

@@ -249,21 +249,25 @@ access.
    - Issues: **Read & Write** _(required if enabling GitHub bot)_
    - Pull requests: **Read & Write**
    - Metadata: **Read-only**
-6. Click **"Create GitHub App"**
-7. Note the **App ID** and **Client ID** (top of page)
-8. Under **"Client secrets"**, click **"Generate a new client secret"** and note the **Client
+6. If using `ALLOWED_GITHUB_ORGS`/`allowed_github_orgs`, set **Organization permissions**:
+   - Members: **Read-only**
+   - For existing GitHub Apps, republish the permission change and request/approve installation
+     updates before testing org membership sign-in.
+7. Click **"Create GitHub App"**
+8. Note the **App ID** and **Client ID** (top of page)
+9. Under **"Client secrets"**, click **"Generate a new client secret"** and note the **Client
    Secret**
-9. Scroll down to **"Private keys"** and click **"Generate a private key"** (downloads a .pem file)
-10. **Convert the key to PKCS#8 format** (required for Cloudflare Workers):
+10. Scroll down to **"Private keys"** and click **"Generate a private key"** (downloads a .pem file)
+11. **Convert the key to PKCS#8 format** (required for Cloudflare Workers):
     ```bash
     openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt \
       -in ~/Downloads/your-app-name.*.private-key.pem \
       -out private-key-pkcs8.pem
     ```
-11. **Install the app** on your account/organization:
+12. **Install the app** on your account/organization:
     - Click "Install App" in the sidebar
     - Select the repositories you want Open-Inspect to access
-12. Note the **Installation ID** from the URL after installing:
+13. Note the **Installation ID** from the URL after installing:
     ```
     https://github.com/settings/installations/INSTALLATION_ID
     ```
@@ -461,6 +465,7 @@ enable_service_bindings        = false
 allowed_users         = "your-github-username"  # Comma-separated GitHub usernames, or empty
 allowed_email_domains = ""                      # Comma-separated domains (e.g., "example.com,corp.io")
 allowed_emails        = ""                      # Exact addresses (e.g., "pm@gmail.com") — for users on shared domains
+allowed_github_orgs   = ""                      # Comma-separated orgs whose active members can sign in
 
 # Explicitly opt into open access only if you want any authenticated user to be
 # able to sign in when all allowlists are empty.
@@ -471,10 +476,15 @@ unsafe_allow_all_users = false
 # automation_delete_admins = "alice,bob"
 ```
 
-> **Note**: Review `allowed_users`, `allowed_email_domains`, and `allowed_emails` carefully — these
-> control who can sign in. Terraform fails if all three are empty unless you explicitly set
-> `unsafe_allow_all_users = true`. Use `allowed_emails` for individual users on shared domains (e.g.
-> a specific `person@gmail.com`) where `allowed_email_domains` would admit too many.
+> **Note**: Review `allowed_users`, `allowed_email_domains`, `allowed_emails`, and
+> `allowed_github_orgs` carefully — these control who can sign in. Terraform fails if all are empty
+> unless you explicitly set `unsafe_allow_all_users = true`. **Allowlists use OR semantics**:
+> matching any configured username, email domain, exact email, or active GitHub org membership
+> grants access. Use `allowed_emails` for individual users on shared domains (e.g. a specific
+> `person@gmail.com`) where `allowed_email_domains` would admit too many. `allowed_github_orgs`
+> checks membership at sign-in only with the signing-in user's OAuth token; existing sessions last
+> until session expiry. The `read:org` OAuth scope is requested only when org access is configured,
+> and GitHub Apps using org access need Organization permissions: Members read-only.
 
 ### Enable Google Login (Optional)
 
@@ -822,6 +832,7 @@ Go to your fork's Settings → Secrets and variables → Actions (or per-environ
 | `ALLOWED_USERS`                  | Comma-separated GitHub usernames (or empty for all users)                                                                                                                  |
 | `ALLOWED_EMAIL_DOMAINS`          | Comma-separated email domains (or empty for all domains)                                                                                                                   |
 | `ALLOWED_EMAILS`                 | Comma-separated exact email addresses (for individual users on shared domains)                                                                                             |
+| `ALLOWED_GITHUB_ORGS`            | Comma-separated GitHub orgs whose active members can sign in                                                                                                               |
 | `AUTOMATION_DELETE_ADMINS`       | Comma-separated GitHub usernames allowed to delete any automation (optional)                                                                                               |
 | `ENABLE_DURABLE_OBJECT_BINDINGS` | Optional Terraform CI flag for Durable Object phase 1 (defaults to `true`)                                                                                                 |
 | `ENABLE_GITHUB_BOT`              | `true` to deploy GitHub bot worker (or empty to skip)                                                                                                                      |

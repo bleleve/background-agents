@@ -1,10 +1,14 @@
 import type { Logger } from "../../../logger";
 import type { ParticipantRow, SandboxRow, SessionRow } from "../../types";
 import type { SandboxSettings, SessionArtifact } from "@open-inspect/shared";
-import { TERMINAL_SESSION_STATUSES } from "@open-inspect/shared";
+import {
+  DEFAULT_PLAN_MODEL,
+  getValidModelOrDefault,
+  isValidModel,
+  TERMINAL_SESSION_STATUSES,
+} from "@open-inspect/shared";
 import type { SandboxStatus, SessionStatus, SpawnSource } from "../../../types";
 import type { SessionRepository } from "../../repository";
-import { DEFAULT_PLAN_MODEL, getValidModelOrDefault, isValidModel } from "../../../utils/models";
 import {
   normalizeSessionTitle,
   type SessionTitleUpdateOptions,
