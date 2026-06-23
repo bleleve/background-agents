@@ -34,7 +34,7 @@ export async function dispatchPreview(
   });
 
   const params: Record<string, string> = { slug: input.slug };
-  if (input.reason) params["reason"] = input.reason || 'reef_general';
+    params["reason"] = input.reason || 'reef_general';
 
   const previewUrls = env.RWX_ORG_SLUG
     ? { hire: `https://hire-${input.slug}--${env.RWX_ORG_SLUG}.r1.rwx.run/` }
