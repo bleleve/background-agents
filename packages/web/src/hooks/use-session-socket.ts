@@ -198,6 +198,7 @@ function toUiArtifact(artifact: SessionArtifact): Artifact {
           head: typeof meta.head === "string" ? meta.head : undefined,
           base: typeof meta.base === "string" ? meta.base : undefined,
           provider: typeof meta.provider === "string" ? meta.provider : undefined,
+          label: typeof meta.label === "string" ? meta.label : undefined,
           filename: typeof meta.filename === "string" ? meta.filename : undefined,
           objectKey: typeof meta.objectKey === "string" ? meta.objectKey : undefined,
           mimeType:

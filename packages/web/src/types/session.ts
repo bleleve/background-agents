@@ -18,6 +18,7 @@ export interface Artifact {
     head?: string;
     base?: string;
     provider?: string;
+    label?: string;
     filename?: string;
     previewStatus?: "active" | "outdated" | "stopped";
   };

@@ -73,6 +73,13 @@ export function SessionRightSidebarContent({
     if (linkArtifact?.url) setRwxRunUrl(linkArtifact.url);
   }, [artifacts]);
 
+  useEffect(() => {
+    const previewArtifact = [...artifacts]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .find((a) => a.type === "preview" && a.url);
+    if (previewArtifact?.url) setPreviewUrl(previewArtifact.url);
+  }, [artifacts]);
+
   const handlePreviewToggle = async () => {
     const enabled = !previewOn;
     setPreviewOn(enabled);

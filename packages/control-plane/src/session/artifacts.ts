@@ -6,6 +6,7 @@ const VALID_ARTIFACT_TYPES = [
   "video",
   "preview",
   "branch",
+  "link",
 ] as const satisfies readonly ArtifactType[];
 const VALID_ARTIFACT_TYPE_SET = new Set<string>(VALID_ARTIFACT_TYPES);
 
