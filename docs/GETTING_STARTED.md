@@ -301,6 +301,8 @@ Skip this step if you don't need Slack integration.
    - `im:history`
    - `im:read`
    - `reactions:write`
+   - `users:read`
+   - `users:read.email`
 3. Click **"Install to Workspace"**
 4. Note the **Bot Token** (`xoxb-...`)
 

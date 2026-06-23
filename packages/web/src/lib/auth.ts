@@ -212,8 +212,8 @@ const providers: NextAuthOptions["providers"] = [
       url: "https://api.github.com/user",
       async request({ client, tokens }) {
         const profile = (await client.userinfo(tokens.access_token!)) as GithubProfile;
-        profile.email = await getVerifiedPrimaryGitHubEmail(tokens.access_token);
-        return profile as unknown as Profile;
+        const enriched = await buildGitHubProfile(profile, tokens.access_token);
+        return enriched as unknown as Profile;
       },
     },
   }),
