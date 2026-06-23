@@ -151,6 +151,8 @@ tasks:
     run: |
       sudo npm install -g opencode-ai@1.14.41
       sudo npm install -g @opencode-ai/plugin@1.14.41 zod
+      sudo npm install -g playwright@1.61.0
+      sudo env PATH="/usr/local/bin:$PATH" playwright install chromium --with-deps
       opencode --version || true
 
   # Pre-stage OpenCode plugin deps into /app/opencode-deps.

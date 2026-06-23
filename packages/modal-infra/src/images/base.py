@@ -32,6 +32,9 @@ CODE_SERVER_VERSION = "4.109.5"
 # agent-browser version to install (pinned for reproducible images)
 AGENT_BROWSER_VERSION = "0.21.2"
 
+# Playwright version to install (pinned for reproducible images)
+PLAYWRIGHT_VERSION = "1.61.0"
+
 # ttyd version to install (pinned for reproducible images)
 TTYD_VERSION = "1.7.7"
 TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
@@ -58,7 +61,8 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v87: push completion events include HEAD SHA for preview dispatch deduplication
 # v88: opencode node_modules materialized via hardlinks (was a slow per-file copy)
 # v89: boot-time autostash is popped after checkout so uncommitted edits survive restore
-CACHE_BUSTER = "v90-remove-rtk"
+# v90: bridge reports HEAD from the cloned repo for preview dispatches
+CACHE_BUSTER = "v92-preview-head-sha"
 
 # Base image with all development tools
 base_image = (
@@ -274,6 +278,11 @@ base_image = (
         f"npm install -g agent-browser@{AGENT_BROWSER_VERSION}",
         "agent-browser install",
         "agent-browser --version",
+    )
+    # Install Playwright and its Chromium browser + deps.
+    .run_commands(
+        f"npm install -g playwright@{PLAYWRIGHT_VERSION}",
+        "playwright install chromium --with-deps",
     )
     # Create working directories
     .run_commands(

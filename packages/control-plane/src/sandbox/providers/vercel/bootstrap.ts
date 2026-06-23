@@ -18,6 +18,7 @@ set -euo pipefail
 OPENCODE_VERSION="1.14.41"
 CODE_SERVER_VERSION="4.109.5"
 AGENT_BROWSER_VERSION="0.21.2"
+PLAYWRIGHT_VERSION="1.61.0"
 TTYD_VERSION="1.7.7"
 TTYD_SHA256="8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 
@@ -38,11 +39,12 @@ if ! ${VERCEL_PYTHON_BIN} -m pip --version >/dev/null 2>&1; then
 fi
 sudo ${VERCEL_PYTHON_BIN} -m pip install --break-system-packages uv httpx websockets 'pydantic>=2.0' 'PyJWT[crypto]' || sudo ${VERCEL_PYTHON_BIN} -m pip install uv httpx websockets 'pydantic>=2.0' 'PyJWT[crypto]'
 
-sudo npm install -g pnpm@latest opencode-ai@"$OPENCODE_VERSION" @opencode-ai/plugin@"$OPENCODE_VERSION" zod agent-browser@"$AGENT_BROWSER_VERSION"
+sudo npm install -g pnpm@latest opencode-ai@"$OPENCODE_VERSION" @opencode-ai/plugin@"$OPENCODE_VERSION" zod agent-browser@"$AGENT_BROWSER_VERSION" playwright@"$PLAYWRIGHT_VERSION"
 if [ ! -x /root/.bun/bin/bun ]; then
   curl -fsSL https://bun.sh/install | sudo -E bash || true
 fi
 sudo env PATH="/root/.bun/bin:$PATH" agent-browser install || true
+sudo env PATH="/usr/local/bin:$PATH" playwright install chromium --with-deps
 
 if ! command -v code-server >/dev/null 2>&1; then
   curl -fsSL https://code-server.dev/install.sh | sudo sh -s -- --version "$CODE_SERVER_VERSION" || true

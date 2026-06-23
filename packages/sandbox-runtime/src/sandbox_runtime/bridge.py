@@ -368,13 +368,27 @@ class AgentBridge:
             self.log.debug("bridge.tunnel_urls_read_failed", exc=e)
         return urls
 
+    def _resolve_repo_dir(self) -> Path | None:
+        if (self.repo_path / ".git").exists():
+            return self.repo_path
+
+        repo_dirs = sorted(self.repo_path.glob("*/.git"))
+        if not repo_dirs:
+            return None
+        return repo_dirs[0].parent
+
     async def _get_head_sha(self) -> str | None:
         """Return the checked-out repository HEAD without blocking the event loop."""
+        repo_dir = self._resolve_repo_dir()
+        if not repo_dir:
+            self.log.debug("bridge.head_sha_skip", reason="no_repository")
+            return None
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git",
                 "-C",
-                str(self.repo_path),
+                str(repo_dir),
                 "rev-parse",
                 "HEAD",
                 stdout=asyncio.subprocess.PIPE,
@@ -1946,8 +1960,8 @@ class AgentBridge:
             mode="push_spec",
         )
 
-        repo_dirs = list(self.repo_path.glob("*/.git"))
-        if not repo_dirs:
+        repo_dir = self._resolve_repo_dir()
+        if not repo_dir:
             self.log.warn("git.push_error", reason="no_repository")
             await self._send_event(
                 {
@@ -1962,8 +1976,6 @@ class AgentBridge:
                 }
             )
             return
-
-        repo_dir = repo_dirs[0].parent
 
         try:
             if not push_spec:
@@ -2118,12 +2130,10 @@ class AgentBridge:
         """Configure git identity for commit attribution."""
         self.log.debug("git.identity_configure", git_name=user.name, git_email=user.email)
 
-        repo_dirs = list(self.repo_path.glob("*/.git"))
-        if not repo_dirs:
+        repo_dir = self._resolve_repo_dir()
+        if not repo_dir:
             self.log.debug("git.identity_skip", reason="no_repository")
             return
-
-        repo_dir = repo_dirs[0].parent
 
         async def _run_git_config(*args: str) -> None:
             cmd = ["git", "config", "--local", *args]
