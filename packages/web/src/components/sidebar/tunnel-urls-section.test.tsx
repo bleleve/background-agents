@@ -37,11 +37,11 @@ describe("TunnelUrlsSection", () => {
     expect(links[1]).toHaveTextContent("8080");
   });
 
-  it("renders a non-link Preview label when the sandbox is not active", () => {
+  it("renders Preview as a link even when the sandbox is not active", () => {
     render(
       <TunnelUrlsSection urls={{ "3000": "https://app.example.dev" }} sandboxStatus="stopped" />
     );
-    expect(screen.queryByRole("link")).toBeNull();
-    expect(screen.getByText("Preview")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /preview/i });
+    expect(link.getAttribute("href")).toContain("app.example.dev");
   });
 });

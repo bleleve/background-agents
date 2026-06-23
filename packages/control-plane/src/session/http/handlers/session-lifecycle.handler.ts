@@ -340,6 +340,25 @@ export function createSessionLifecycleHandler(
         });
         deps.broadcastArtifactCreated(artifact);
       }
+      const previewUrl = previewUrls?.hire;
+      if (previewUrl) {
+        const artifactId = deps.generateId();
+        const artifact: SessionArtifact = {
+          id: artifactId,
+          type: "preview",
+          url: previewUrl,
+          metadata: { previewStatus: "active" },
+          createdAt: now,
+        };
+        deps.repository.createArtifact({
+          id: artifactId,
+          type: "preview",
+          url: previewUrl,
+          metadata: JSON.stringify({ previewStatus: "active" }),
+          createdAt: now,
+        });
+        deps.broadcastArtifactCreated(artifact);
+      }
       deps.broadcast({ type: "preview_mode", enabled: body.enabled });
       return Response.json({
         enabled: body.enabled,

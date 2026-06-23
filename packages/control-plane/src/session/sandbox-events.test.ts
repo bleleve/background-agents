@@ -50,7 +50,12 @@ function createProcessor() {
   const getIsProcessing = vi.fn(() => false);
   const applySessionTitleUpdate = vi.fn((title: string) => ({ ok: true as const, title }));
   const waitUntil = vi.fn();
-  const dispatchPreview = vi.fn(async () => {});
+  const dispatchPreview = vi.fn(
+    async (
+      _reason: string,
+      _commitSha?: string
+    ): Promise<{ runUrl?: string; previewUrls?: Record<string, string> } | void> => {}
+  );
 
   const processor = new SessionSandboxEventProcessor({
     ctx: { waitUntil } as unknown as DurableObjectState,
@@ -137,6 +142,63 @@ describe("SessionSandboxEventProcessor", () => {
     expect(h.dispatchPreview).toHaveBeenCalledWith("push_complete", "3".repeat(40));
     await drainWaitUntil(h);
     expect(h.repository.updatePreviewDispatchedSha).toHaveBeenCalledWith("3".repeat(40));
+  });
+
+  it("stores and broadcasts RWX run and preview artifacts after automatic dispatch", async () => {
+    const h = createProcessor();
+    h.repository.getSession.mockReturnValue({
+      opencode_session_id: null,
+      preview_enabled: 1,
+      current_sha: null,
+      preview_dispatched_sha: null,
+    });
+    h.dispatchPreview.mockResolvedValueOnce({
+      runUrl: "https://cloud.rwx.com/mint/org/runs/2",
+      previewUrls: { hire: "https://hire-session-1--testorg.r1.rwx.run/" },
+    });
+
+    await h.processor.processSandboxEvent({
+      type: "push_complete",
+      branchName: "my-feature-branch",
+      commitSha: "6".repeat(40),
+      sandboxId: "sb-1",
+      timestamp: 1000,
+    });
+
+    expect(h.repository.createArtifact).toHaveBeenNthCalledWith(1, {
+      id: expect.any(String),
+      type: "link",
+      url: "https://cloud.rwx.com/mint/org/runs/2",
+      metadata: JSON.stringify({ label: "RWX Run URL" }),
+      createdAt: expect.any(Number),
+    });
+    expect(h.repository.createArtifact).toHaveBeenNthCalledWith(2, {
+      id: expect.any(String),
+      type: "preview",
+      url: "https://hire-session-1--testorg.r1.rwx.run/",
+      metadata: JSON.stringify({ previewStatus: "active" }),
+      createdAt: expect.any(Number),
+    });
+    expect(h.broadcast).toHaveBeenNthCalledWith(1, {
+      type: "artifact_created",
+      artifact: {
+        id: expect.any(String),
+        type: "link",
+        url: "https://cloud.rwx.com/mint/org/runs/2",
+        metadata: { label: "RWX Run URL" },
+        createdAt: expect.any(Number),
+      },
+    });
+    expect(h.broadcast).toHaveBeenNthCalledWith(2, {
+      type: "artifact_created",
+      artifact: {
+        id: expect.any(String),
+        type: "preview",
+        url: "https://hire-session-1--testorg.r1.rwx.run/",
+        metadata: { previewStatus: "active" },
+        createdAt: expect.any(Number),
+      },
+    });
   });
 
   it("does not dispatch a preview twice for the same commit", async () => {

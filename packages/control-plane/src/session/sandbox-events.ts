@@ -12,6 +12,10 @@ import type { SessionTitleUpdateOptions, SessionTitleUpdateResult } from "./titl
 
 type PushResolver = { resolve: () => void; reject: (err: Error) => void };
 type SandboxEventWithAck = SandboxEvent & { ackId?: string };
+type PreviewDispatchResult = {
+  runUrl?: string | null;
+  previewUrls?: Record<string, string>;
+};
 
 interface SessionSandboxEventProcessorDeps {
   ctx: DurableObjectState;
@@ -30,7 +34,7 @@ interface SessionSandboxEventProcessorDeps {
   updateLastActivity: (timestamp: number) => void;
   scheduleInactivityCheck: () => Promise<void>;
   processMessageQueue: () => Promise<void>;
-  dispatchPreview: (reason: string, commitSha?: string) => Promise<unknown>;
+  dispatchPreview: (reason: string, commitSha?: string) => Promise<PreviewDispatchResult | void>;
 }
 
 /** Event types that require delivery acknowledgement. */
@@ -447,7 +451,8 @@ export class SessionSandboxEventProcessor {
     }
     if (sha) this.previewDispatchesInFlight.add(sha);
     try {
-      await this.deps.dispatchPreview(reason, sha ?? undefined);
+      const result = await this.deps.dispatchPreview(reason, sha ?? undefined);
+      this.persistPreviewDispatchArtifacts(result);
       if (sha) {
         this.deps.repository.updatePreviewDispatchedSha(sha);
       }
@@ -462,5 +467,49 @@ export class SessionSandboxEventProcessor {
 
   private normalizeBranchName(name: string): string {
     return name.trim().toLowerCase();
+  }
+
+  private persistPreviewDispatchArtifacts(result: PreviewDispatchResult | void): void {
+    if (!result) return;
+    const now = Date.now();
+
+    if (result.runUrl) {
+      const artifactId = generateId();
+      const artifact: SessionArtifact = {
+        id: artifactId,
+        type: "link",
+        url: result.runUrl,
+        metadata: { label: "RWX Run URL" },
+        createdAt: now,
+      };
+      this.deps.repository.createArtifact({
+        id: artifactId,
+        type: "link",
+        url: result.runUrl,
+        metadata: JSON.stringify({ label: "RWX Run URL" }),
+        createdAt: now,
+      });
+      this.deps.broadcast({ type: "artifact_created", artifact });
+    }
+
+    const previewUrl = result.previewUrls?.hire;
+    if (previewUrl) {
+      const artifactId = generateId();
+      const artifact: SessionArtifact = {
+        id: artifactId,
+        type: "preview",
+        url: previewUrl,
+        metadata: { previewStatus: "active" },
+        createdAt: now,
+      };
+      this.deps.repository.createArtifact({
+        id: artifactId,
+        type: "preview",
+        url: previewUrl,
+        metadata: JSON.stringify({ previewStatus: "active" }),
+        createdAt: now,
+      });
+      this.deps.broadcast({ type: "artifact_created", artifact });
+    }
   }
 }

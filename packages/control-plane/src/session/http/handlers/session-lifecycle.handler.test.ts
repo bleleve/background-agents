@@ -169,10 +169,72 @@ function createHandler() {
     sendToSandbox,
     updateSandboxStatus,
     createSystemMessage,
+    dispatchPreview,
+    broadcastArtifactCreated,
+    broadcast,
   };
 }
 
 describe("createSessionLifecycleHandler", () => {
+  it("stores and broadcasts RWX run and preview artifacts when enabling preview", async () => {
+    const {
+      handler,
+      repository,
+      getSession,
+      generateId,
+      dispatchPreview,
+      broadcastArtifactCreated,
+      broadcast,
+    } = createHandler();
+    getSession.mockReturnValue(createSession());
+    generateId.mockReturnValueOnce("rwx-artifact").mockReturnValueOnce("preview-artifact");
+
+    const response = await handler.updatePreview(
+      new Request("http://internal/internal/update-preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      enabled: true,
+      runUrl: "https://cloud.rwx.com/mint/org/runs/1",
+      previewUrls: { hire: "https://hire-session-1--testorg.r1.rwx.run/" },
+    });
+    expect(dispatchPreview).toHaveBeenCalledWith(undefined, "head-sha");
+    expect(repository.createArtifact).toHaveBeenNthCalledWith(1, {
+      id: "rwx-artifact",
+      type: "link",
+      url: "https://cloud.rwx.com/mint/org/runs/1",
+      metadata: JSON.stringify({ label: "RWX Run URL" }),
+      createdAt: 1234,
+    });
+    expect(repository.createArtifact).toHaveBeenNthCalledWith(2, {
+      id: "preview-artifact",
+      type: "preview",
+      url: "https://hire-session-1--testorg.r1.rwx.run/",
+      metadata: JSON.stringify({ previewStatus: "active" }),
+      createdAt: 1234,
+    });
+    expect(broadcastArtifactCreated).toHaveBeenNthCalledWith(1, {
+      id: "rwx-artifact",
+      type: "link",
+      url: "https://cloud.rwx.com/mint/org/runs/1",
+      metadata: { label: "RWX Run URL" },
+      createdAt: 1234,
+    });
+    expect(broadcastArtifactCreated).toHaveBeenNthCalledWith(2, {
+      id: "preview-artifact",
+      type: "preview",
+      url: "https://hire-session-1--testorg.r1.rwx.run/",
+      metadata: { previewStatus: "active" },
+      createdAt: 1234,
+    });
+    expect(broadcast).toHaveBeenCalledWith({ type: "preview_mode", enabled: true });
+  });
+
   it("initializes session, sandbox, and owner participant", async () => {
     const {
       handler,

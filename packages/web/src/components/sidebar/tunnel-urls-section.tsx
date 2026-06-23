@@ -3,15 +3,13 @@
 import { getSafeExternalUrl } from "@/lib/urls";
 import { GlobeIcon } from "@/components/ui/icons";
 import type { SandboxStatus } from "@open-inspect/shared";
-import { ACTIVE_SANDBOX_STATUSES } from "./sandbox-statuses";
 
 interface TunnelUrlsSectionProps {
   urls: Record<string, string>;
   sandboxStatus: SandboxStatus;
 }
 
-export function TunnelUrlsSection({ urls, sandboxStatus }: TunnelUrlsSectionProps) {
-  const isActive = ACTIVE_SANDBOX_STATUSES.has(sandboxStatus);
+export function TunnelUrlsSection({ urls }: TunnelUrlsSectionProps) {
   const entries = Object.entries(urls);
   // "Preview" is the user-facing name for the running app's tunnel. When more
   // than one port is exposed, keep the port as a muted suffix to disambiguate.
@@ -30,9 +28,9 @@ export function TunnelUrlsSection({ urls, sandboxStatus }: TunnelUrlsSectionProp
         return (
           <div key={port} className="flex items-center gap-2 text-sm">
             <GlobeIcon
-              className={`w-4 h-4 shrink-0 ${isActive && safeUrl ? "text-muted-foreground" : "text-muted-foreground/50"}`}
+              className={`w-4 h-4 shrink-0 ${safeUrl ? "text-muted-foreground" : "text-muted-foreground/50"}`}
             />
-            {isActive && safeUrl ? (
+            {safeUrl ? (
               <a
                 href={safeUrl}
                 target="_blank"
