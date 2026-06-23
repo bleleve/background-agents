@@ -62,7 +62,8 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v88: opencode node_modules materialized via hardlinks (was a slow per-file copy)
 # v89: boot-time autostash is popped after checkout so uncommitted edits survive restore
 # v90: bridge reports HEAD from the cloned repo for preview dispatches
-CACHE_BUSTER = "v92-preview-head-sha"
+# v93: opencode node_modules symlinked (hardlink was copied-up by overlayfs)
+CACHE_BUSTER = "v93-opencode-node-modules-symlink"
 
 # Base image with all development tools
 base_image = (
