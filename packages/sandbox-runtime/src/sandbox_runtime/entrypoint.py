@@ -658,29 +658,35 @@ class SandboxSupervisor:
         """Make the pre-built OpenCode node_modules available at ``dest``.
 
         These deps are read-only reference data baked into the image and are
-        identical for every session. A plain ``shutil.copytree`` copies file
-        *data* for thousands of small files, which on the repo-image filesystem
-        can take minutes and silently dominate boot (no timing log previously
-        bracketed this step). Hardlinking each file only creates directory
-        entries — no data copy — turning that into roughly a second.
+        identical for every session. Symlink the whole tree rather than copying
+        it: Node resolves modules through the symlink, the files stay in the
+        read-only image layer, and the writable workspace layer — hence the Modal
+        filesystem snapshot — stays small.
 
-        Hardlinks require ``src`` and ``dest`` on the same device; if they live
-        on different mounts the per-file ``os.link`` fails with ``EXDEV``, so we
-        fall back to a normal copy. Either way the duration and the path taken
-        are logged so this step is observable.
+        The earlier approaches materialized the tree into the workspace and were
+        dominated by data movement: a plain ``shutil.copytree`` ran for minutes
+        on the repo-image filesystem, and even a hardlink walk
+        (``copy_function=os.link``) was copied up by overlayfs (link of a
+        lower-layer file triggers copy-up), still costing ~80-105s. A single
+        ``os.symlink`` is one syscall and moves no data.
+
+        Falls back to a real copy if the symlink can't be created, so boot still
+        succeeds. Either way the duration and the path taken are logged.
         """
         start = time.monotonic()
         try:
-            shutil.copytree(src, dest, symlinks=True, copy_function=os.link)
-            mode = "hardlink"
-        except (OSError, shutil.Error) as exc:
-            # Cross-device (EXDEV) or partial link failure: drop whatever the
-            # aborted attempt created and fall back to a real copy so boot still
-            # succeeds — just slowly.
-            shutil.rmtree(dest, ignore_errors=True)
+            dest.symlink_to(src)
+            mode = "symlink"
+        except OSError as exc:
+            # Symlink creation failed (rare). Clear any partial entry — symlink,
+            # file, or dir — and fall back to a real copy so boot still succeeds.
+            if dest.is_symlink() or dest.is_file():
+                dest.unlink(missing_ok=True)
+            elif dest.is_dir():
+                shutil.rmtree(dest, ignore_errors=True)
             shutil.copytree(src, dest, symlinks=True)
             mode = "copy"
-            self.log.warn("opencode.node_modules_hardlink_fallback", error=str(exc))
+            self.log.warn("opencode.node_modules_symlink_fallback", error=str(exc))
         self.log.info(
             "opencode.node_modules_ready",
             mode=mode,
@@ -1214,14 +1220,14 @@ class SandboxSupervisor:
         if self.repo_path.exists() and (self.repo_path / ".git").exists():
             workdir = self.repo_path
 
-        # Tool/skill/agent/plugin installation does synchronous, potentially
-        # heavy filesystem work — most notably _install_tools materializing the
-        # OpenCode node_modules (hardlink walk over thousands of files, or a
-        # full copy on the cross-device fallback). Run it off the event loop:
-        # while start_opencode() runs, the concurrent _boot_progress_loop must
-        # keep pinging the control plane. A multi-second blocking call here
-        # would otherwise freeze the loop, stall the pings, and let the 90s
-        # heartbeat watchdog mark a healthy-but-slow boot as stale.
+        # Tool/skill/agent/plugin installation does synchronous filesystem work.
+        # _install_tools now symlinks the OpenCode node_modules (cheap), but the
+        # skills/agents copytrees and the rare node_modules copy fallback can
+        # still block. Run it off the event loop: while start_opencode() runs,
+        # the concurrent _boot_progress_loop must keep pinging the control plane.
+        # A multi-second blocking call here would otherwise freeze the loop,
+        # stall the pings, and let the 90s heartbeat watchdog mark a
+        # healthy-but-slow boot as stale.
         await asyncio.to_thread(self._install_tools, workdir)
         await asyncio.to_thread(self._install_skills, workdir)
         await asyncio.to_thread(self._install_agents)
