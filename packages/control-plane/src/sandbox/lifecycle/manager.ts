@@ -1073,6 +1073,13 @@ export class SandboxLifecycleManager {
         event: "sandbox.connecting_timeout",
         elapsed_ms: connectingResult.elapsedMs,
         timeout_ms: this.config.connectingTimeout.timeoutMs,
+        // Captured so a timeout on a boot that WAS reporting progress is
+        // diagnosable: elapsed measures from max(created_at, last_heartbeat), so
+        // a fresh last_heartbeat here means a boot-progress ping landed yet the
+        // watchdog still fired (a keep-alive bug, not a genuinely stuck boot).
+        created_at: sandbox.created_at,
+        last_heartbeat: sandbox.last_heartbeat,
+        now,
       });
       await this.callbacks.onSandboxTerminating?.("connecting_timeout");
       // A sandbox that never connects is a spawn failure — count it toward the
@@ -1288,20 +1295,40 @@ export class SandboxLifecycleManager {
    * The supervisor posts these throughout a long setup.sh — before the bridge
    * WebSocket exists — so the connecting-timeout watchdog can tell a
    * slow-but-healthy boot apart from a stuck one. Each ping refreshes the
-   * heartbeat, which is the "last sign of life" the connecting timeout measures
-   * from (see evaluateConnectingTimeout). The existing alarm re-evaluates on its
-   * normal cadence and sees the fresh timestamp, so no reschedule is needed.
+   * heartbeat (the "last sign of life" evaluateConnectingTimeout measures from)
+   * AND re-arms the connecting-timeout alarm from now.
+   *
+   * Re-arming actively is deliberate. The pre-armed alarm is set once at spawn
+   * (created_at + timeout); relying on it to "re-evaluate on its normal cadence"
+   * is fragile — a single alarm can fire and fail a healthy-but-slow boot at
+   * created_at + timeout even while pings are arriving (observed in prod: a
+   * ~3-min wx-system boot emitting 200-OK boot-progress every 20s was still
+   * killed at created_at + 120s). Re-arming from the latest ping means the
+   * watchdog fires only after a full window of genuine silence — a truly stuck
+   * boot — which is the documented intent.
    *
    * No-op once the sandbox has left the spawning/connecting phase: after the
    * bridge connects it sends real heartbeats, and refreshing the heartbeat here
-   * would mask a dead agent.
+   * would mask a dead agent. The no-op is logged so a ping arriving against an
+   * unexpected status is observable rather than silently dropped.
    */
-  onBootProgress(): void {
+  async onBootProgress(): Promise<void> {
     const sandbox = this.storage.getSandbox();
     if (!sandbox) return;
-    if (sandbox.status !== "spawning" && sandbox.status !== "connecting") return;
-    this.storage.updateSandboxHeartbeat(Date.now());
-    this.log.debug("Boot progress ping", { event: "sandbox.boot_progress" });
+    if (sandbox.status !== "spawning" && sandbox.status !== "connecting") {
+      this.log.debug("Boot progress ping ignored (sandbox not booting)", {
+        event: "sandbox.boot_progress_ignored",
+        sandbox_status: sandbox.status,
+      });
+      return;
+    }
+    const now = Date.now();
+    this.storage.updateSandboxHeartbeat(now);
+    await this.alarmScheduler.scheduleAlarm(now + this.config.connectingTimeout.timeoutMs);
+    this.log.debug("Boot progress ping", {
+      event: "sandbox.boot_progress",
+      sandbox_status: sandbox.status,
+    });
   }
 
   /**

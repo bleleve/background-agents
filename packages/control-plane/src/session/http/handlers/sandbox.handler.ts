@@ -28,7 +28,7 @@ export interface SandboxHandlerDeps {
   refreshOpenAIToken: (session: SessionRow) => Promise<OpenAITokenRefreshResult>;
   isOpenAISecretsConfigured: () => boolean;
   getScmCredentials: () => Promise<ScmCredentialsResult>;
-  recordBootProgress: () => void;
+  recordBootProgress: () => void | Promise<void>;
   broadcast: (message: ServerMessage) => void;
   generateId: () => string;
   now: () => number;
@@ -268,7 +268,7 @@ export function createSandboxHandler(deps: SandboxHandlerDeps): SandboxHandler {
     },
 
     async bootProgress(): Promise<Response> {
-      deps.recordBootProgress();
+      await deps.recordBootProgress();
       return Response.json({ status: "ok" });
     },
   };
