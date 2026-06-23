@@ -75,6 +75,17 @@ SNAPSHOT_FILESYSTEM_TIMEOUT_SECONDS = _resolve_snapshot_timeout_seconds()
 MAX_TUNNEL_PORTS = 10
 DOCKER_EXPERIMENTAL_OPTIONS = {"enable_docker": True}
 
+# Proxy name for outbound egress routing. Follows the "<env>-proxy" convention;
+# defaults to disabled. Override via MODAL_PROXY_NAME;
+_MODAL_PROXY_NAME: str = os.environ.get("MODAL_PROXY_NAME", "")
+
+
+def _proxy_kwargs() -> dict:
+    """Return proxy kwarg for Sandbox.create when a proxy name is configured."""
+    if _MODAL_PROXY_NAME:
+        return {"proxy": modal.Proxy.from_name(_MODAL_PROXY_NAME)}
+    return {}
+
 
 def build_function_timeout_seconds(build_timeout_seconds: int) -> int:
     """Modal function timeout for the build worker (build_repo_image).
@@ -628,6 +639,7 @@ class SandboxManager:
             # Enable Docker-in-Sandboxes support per Modal docs.
             "experimental_options": DOCKER_EXPERIMENTAL_OPTIONS,
             **_resource_kwargs(config.settings),
+            **_proxy_kwargs(),
         }
         if exposed_ports:
             create_kwargs["encrypted_ports"] = exposed_ports
@@ -750,6 +762,7 @@ class SandboxManager:
             env=env_vars,
             # Enable Docker-in-Sandboxes support per Modal docs.
             experimental_options=DOCKER_EXPERIMENTAL_OPTIONS,
+            **_proxy_kwargs(),
         )
 
         modal_object_id = sandbox.object_id
@@ -1005,6 +1018,7 @@ class SandboxManager:
             # Enable Docker-in-Sandboxes support per Modal docs.
             "experimental_options": DOCKER_EXPERIMENTAL_OPTIONS,
             **_resource_kwargs(settings),
+            **_proxy_kwargs(),
         }
         if exposed_ports:
             create_kwargs["encrypted_ports"] = exposed_ports
