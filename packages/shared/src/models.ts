@@ -170,27 +170,27 @@ export interface ModelReasoningConfig {
 export const MODEL_REASONING_CONFIG: Partial<Record<ValidModel, ModelReasoningConfig>> = {
   "anthropic/claude-haiku-4-5": { efforts: ["high", "max"], default: "max" },
   "anthropic/claude-sonnet-4-5": { efforts: ["high", "max"], default: "max" },
-  "anthropic/claude-sonnet-4-6": { efforts: ["low", "medium", "high", "max"], default: "high" },
+  "anthropic/claude-sonnet-4-6": { efforts: ["low", "medium", "high", "max"], default: "medium" },
   "anthropic/claude-opus-4-5": { efforts: ["high", "max"], default: "max" },
-  "anthropic/claude-opus-4-6": { efforts: ["low", "medium", "high", "max"], default: "high" },
+  "anthropic/claude-opus-4-6": { efforts: ["low", "medium", "high", "max"], default: "medium" },
   "anthropic/claude-opus-4-7": {
     efforts: ["low", "medium", "high", "xhigh", "max"],
-    default: "high",
+    default: "medium",
   },
   "anthropic/claude-opus-4-8": {
     efforts: ["low", "medium", "high", "xhigh", "max"],
-    default: "high",
+    default: "medium",
   },
   "anthropic/claude-fable-5": {
     efforts: ["low", "medium", "high", "xhigh", "max"],
-    default: "high",
+    default: "medium",
   },
-  "openai/gpt-5.2": { efforts: ["none", "low", "medium", "high", "xhigh"], default: undefined },
-  "openai/gpt-5.4": { efforts: ["none", "low", "medium", "high", "xhigh"], default: undefined },
-  "openai/gpt-5.5": { efforts: ["none", "low", "medium", "high", "xhigh"], default: undefined },
-  "openai/gpt-5.2-codex": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "openai/gpt-5.3-codex": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "openai/gpt-5.3-codex-spark": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
+  "openai/gpt-5.2": { efforts: ["none", "low", "medium", "high", "xhigh"], default: "medium" },
+  "openai/gpt-5.4": { efforts: ["none", "low", "medium", "high", "xhigh"], default: "medium" },
+  "openai/gpt-5.5": { efforts: ["none", "low", "medium", "high", "xhigh"], default: "medium" },
+  "openai/gpt-5.2-codex": { efforts: ["low", "medium", "high", "xhigh"], default: "medium" },
+  "openai/gpt-5.3-codex": { efforts: ["low", "medium", "high", "xhigh"], default: "medium" },
+  "openai/gpt-5.3-codex-spark": { efforts: ["low", "medium", "high", "xhigh"], default: "medium" },
 };
 
 export interface ModelDisplayInfo {
