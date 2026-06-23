@@ -39,9 +39,6 @@ TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 # rwx CLI — pinned Linux x86_64 binary; see https://github.com/rwx-cloud/rwx/releases
 RWX_VERSION = "3.13.1"
 
-# RTK CLI — pinned Linux x86_64 musl binary; see https://github.com/rtk-ai/rtk/releases
-RTK_VERSION = "0.37.2"
-
 # kubectl — pinned Linux x86_64 binary; see https://dl.k8s.io/release/stable.txt
 KUBECTL_VERSION = "v1.35.0"
 
@@ -61,7 +58,7 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v87: push completion events include HEAD SHA for preview dispatch deduplication
 # v88: opencode node_modules materialized via hardlinks (was a slow per-file copy)
 # v89: boot-time autostash is popped after checkout so uncommitted edits survive restore
-CACHE_BUSTER = "v89-restore-uncommitted-edits"
+CACHE_BUSTER = "v90-remove-rtk"
 
 # Base image with all development tools
 base_image = (
@@ -129,14 +126,6 @@ base_image = (
         f"curl -fsSL https://github.com/rwx-cloud/rwx/releases/download/v{RWX_VERSION}/rwx-linux-x86_64 -o /usr/local/bin/rwx",
         "chmod +x /usr/local/bin/rwx",
         "rwx --version",
-    )
-    # RTK CLI (used by RTK OpenCode plugin to rewrite shell commands)
-    .run_commands(
-        f"curl -fsSL https://github.com/rtk-ai/rtk/releases/download/v{RTK_VERSION}/rtk-x86_64-unknown-linux-musl.tar.gz -o /tmp/rtk.tar.gz",
-        "tar -xzf /tmp/rtk.tar.gz -C /usr/local/bin rtk",
-        "chmod +x /usr/local/bin/rtk",
-        "rm /tmp/rtk.tar.gz",
-        "rtk --version",
     )
     # Install GitHub CLI (for agent-direct GitHub interaction via gh API)
     .run_commands(

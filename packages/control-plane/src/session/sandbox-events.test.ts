@@ -110,7 +110,7 @@ describe("SessionSandboxEventProcessor", () => {
       commitSha: "2".repeat(40),
     });
 
-    expect(h.dispatchPreview).toHaveBeenCalledWith("execution_complete");
+    expect(h.dispatchPreview).toHaveBeenCalledWith("execution_complete", "2".repeat(40));
   });
 
   it("dispatches a preview immediately on push_complete when preview is enabled", async () => {
@@ -130,7 +130,7 @@ describe("SessionSandboxEventProcessor", () => {
       timestamp: 1000,
     });
 
-    expect(h.dispatchPreview).toHaveBeenCalledWith("push_complete");
+    expect(h.dispatchPreview).toHaveBeenCalledWith("push_complete", "3".repeat(40));
     expect(h.repository.updatePreviewDispatchedSha).toHaveBeenCalledWith("3".repeat(40));
   });
 
@@ -151,6 +151,27 @@ describe("SessionSandboxEventProcessor", () => {
       sandboxId: "sb-1",
       timestamp: 1000,
       commitSha: sha,
+    });
+
+    expect(h.dispatchPreview).not.toHaveBeenCalled();
+    expect(h.repository.updatePreviewDispatchedSha).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch an end-of-turn preview without the event commit SHA", async () => {
+    const h = createProcessor();
+    h.repository.getSession.mockReturnValue({
+      opencode_session_id: null,
+      preview_enabled: 1,
+      current_sha: "5".repeat(40),
+      preview_dispatched_sha: null,
+    });
+
+    await h.processor.processSandboxEvent({
+      type: "execution_complete",
+      messageId: "message-1",
+      success: true,
+      sandboxId: "sb-1",
+      timestamp: 1000,
     });
 
     expect(h.dispatchPreview).not.toHaveBeenCalled();

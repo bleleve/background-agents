@@ -30,7 +30,7 @@ interface SessionSandboxEventProcessorDeps {
   updateLastActivity: (timestamp: number) => void;
   scheduleInactivityCheck: () => Promise<void>;
   processMessageQueue: () => Promise<void>;
-  dispatchPreview: (reason: string) => Promise<unknown>;
+  dispatchPreview: (reason: string, commitSha?: string) => Promise<unknown>;
 }
 
 /** Event types that require delivery acknowledgement. */
@@ -433,7 +433,12 @@ export class SessionSandboxEventProcessor {
   private async dispatchPreviewIfNeeded(reason: string, commitSha?: string): Promise<void> {
     const session = this.deps.repository.getSession();
     if (!session || session.preview_enabled !== 1) return;
-    const sha = commitSha ?? session.current_sha;
+    const requiresEventSha = reason === "execution_complete" || reason === "push_complete";
+    const sha = commitSha ?? (requiresEventSha ? undefined : session.current_sha);
+    if (requiresEventSha && !sha) {
+      this.deps.log.warn("preview.dispatch_skipped_missing_commit_sha", { reason });
+      return;
+    }
     if (
       sha &&
       (session.preview_dispatched_sha === sha || this.previewDispatchesInFlight.has(sha))
@@ -442,7 +447,7 @@ export class SessionSandboxEventProcessor {
     }
     if (sha) this.previewDispatchesInFlight.add(sha);
     try {
-      await this.deps.dispatchPreview(reason);
+      await this.deps.dispatchPreview(reason, sha ?? undefined);
       if (sha) {
         this.deps.repository.updatePreviewDispatchedSha(sha);
       }

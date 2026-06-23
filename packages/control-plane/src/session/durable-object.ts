@@ -624,7 +624,7 @@ export class SessionDO extends DurableObject<Env> {
         getSandboxSocket: () => this.wsManager.getSandboxSocket(),
         sendToSandbox: (ws, message) => this.wsManager.send(ws, message),
         updateSandboxStatus: (status) => this.updateSandboxStatus(status),
-        dispatchPreview: async (reason?: string) => {
+        dispatchPreview: async (reason?: string, commitSha?: string) => {
           const session = this.getSession();
           if (!session) throw new Error("Session not found");
           const sessionId = this.getPublicSessionId(session);
@@ -632,6 +632,7 @@ export class SessionDO extends DurableObject<Env> {
             repoOwner: session.repo_owner,
             repoName: session.repo_name,
             branchName: session.branch_name ?? session.base_branch,
+            commitSha,
             slug: sessionId,
             sessionId,
             reason,
@@ -770,7 +771,7 @@ export class SessionDO extends DurableObject<Env> {
         updateLastActivity: (timestamp) => this.updateLastActivity(timestamp),
         scheduleInactivityCheck: () => this.scheduleInactivityCheck(),
         processMessageQueue: () => this.messageQueue.processMessageQueue(),
-        dispatchPreview: async (reason: string) => {
+        dispatchPreview: async (reason: string, commitSha?: string) => {
           const session = this.getSession();
           if (!session) throw new Error("Session not found");
           const sessionId = this.getPublicSessionId(session);
@@ -778,6 +779,7 @@ export class SessionDO extends DurableObject<Env> {
             repoOwner: session.repo_owner,
             repoName: session.repo_name,
             branchName: session.branch_name ?? session.base_branch,
+            commitSha,
             slug: sessionId,
             sessionId,
             reason,

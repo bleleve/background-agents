@@ -143,7 +143,6 @@ class SandboxSupervisor:
     CLONE_DEPTH_COMMITS = 100
     SIDECAR_TIMEOUT_SECONDS = 5
     LANGFUSE_PLUGIN_NAME = "opencode-plugin-langfuse"
-    RTK_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/rtk.ts"
     CODEX_AUTH_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/codex-auth-plugin.js"
     MCP_PACKAGE_INSTALL_TIMEOUT_SECONDS = 180
     # How often to ping the control plane while booting so a long setup.sh
@@ -888,10 +887,6 @@ class SandboxSupervisor:
     def _deploy_opencode_plugins(self, opencode_dir: Path) -> None:
         """Deploy bundled OpenCode plugins into .opencode/plugins."""
         plugins_to_copy: list[tuple[Path, str, str]] = []
-
-        rtk_source = Path(self.RTK_PLUGIN_SOURCE_PATH)
-        if rtk_source.exists():
-            plugins_to_copy.append((rtk_source, "rtk.ts", "rtk.plugin_deployed"))
 
         codex_source = Path(self.CODEX_AUTH_PLUGIN_SOURCE_PATH)
         if codex_source.exists() and os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN"):

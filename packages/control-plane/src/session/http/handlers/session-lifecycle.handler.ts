@@ -102,7 +102,8 @@ export interface SessionLifecycleHandlerDeps {
    */
   createSystemMessage: (content: string) => void;
   dispatchPreview: (
-    reason?: string
+    reason?: string,
+    commitSha?: string
   ) => Promise<{ runUrl: string; previewUrls?: Record<string, string> }>;
   broadcastArtifactCreated: (artifact: SessionArtifact) => void;
   broadcast: (message: { type: "preview_mode"; enabled: boolean }) => void;
@@ -305,7 +306,10 @@ export function createSessionLifecycleHandler(
       let previewUrls: Record<string, string> | undefined;
       if (body.enabled) {
         try {
-          ({ runUrl, previewUrls } = await deps.dispatchPreview(body.reason));
+          ({ runUrl, previewUrls } = await deps.dispatchPreview(
+            body.reason,
+            session.current_sha ?? undefined
+          ));
         } catch (error) {
           deps.getLog().error("preview.dispatch_failed", {
             error: error instanceof Error ? error : String(error),
