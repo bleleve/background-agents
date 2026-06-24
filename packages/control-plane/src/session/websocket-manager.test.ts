@@ -169,6 +169,9 @@ function createSandboxRow(modalSandboxId: string): SandboxRow {
     tunnel_urls: null,
     ttyd_url: null,
     ttyd_token: null,
+    prev_auth_token_hash: null,
+    prev_modal_sandbox_id: null,
+    prev_identity_expires_at: null,
     created_at: Date.now(),
   };
 }

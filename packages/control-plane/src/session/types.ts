@@ -129,6 +129,9 @@ export interface SandboxRow {
   tunnel_urls: string | null; // JSON mapping of port -> tunnel URL
   ttyd_url: string | null;
   ttyd_token: string | null;
+  prev_auth_token_hash: string | null; // Superseded identity's auth-token hash, valid during the grace window
+  prev_modal_sandbox_id: string | null; // Superseded identity's sandbox ID, valid during the grace window
+  prev_identity_expires_at: number | null; // ms epoch until which the previous identity is still accepted (null = none)
   created_at: number;
 }
 

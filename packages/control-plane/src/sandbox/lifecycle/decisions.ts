@@ -124,6 +124,15 @@ export interface SandboxState {
   snapshotImageId: string | null;
   /** Whether an active WebSocket connection exists */
   hasActiveWebSocket: boolean;
+  /**
+   * Last sign of life from the sandbox (last_heartbeat: bridge heartbeats and
+   * boot-progress pings), or null if none yet. The "still booting" guard below
+   * measures from max(createdAt, lastProgressAt) so it uses the SAME clock as the
+   * connecting-timeout watchdog (evaluateConnectingTimeout) — the two can no
+   * longer disagree, so a healthy slow boot that keeps pinging is not respawned
+   * (which would rotate its identity and orphan it) before the watchdog gives up.
+   */
+  lastProgressAt?: number | null;
 }
 
 /**
@@ -229,9 +238,17 @@ export function evaluateSpawnDecision(
   // "connecting" forever — the connecting-timeout alarm may never have been
   // scheduled. Treat a stale spawn/connect as dead so a fresh spawn can recover
   // the session, instead of skipping indefinitely.
+  //
+  // Measure from the last sign of life (max of createdAt and lastProgressAt),
+  // identical to the connecting-timeout watchdog: a healthy slow boot keeps
+  // emitting boot-progress pings, so it stays "booting" (skip) past the raw
+  // createdAt window and is NOT respawned — a respawn would rotate this box's
+  // identity and orphan it. A genuinely stuck boot goes silent, so both this
+  // guard and the watchdog release after the same window (recovery preserved).
+  const sinceLastSignOfLife = now - Math.max(state.createdAt, state.lastProgressAt ?? 0);
   if (
     (state.status === "spawning" || state.status === "connecting") &&
-    timeSinceLastSpawn < config.spawningTimeoutMs
+    sinceLastSignOfLife < config.spawningTimeoutMs
   ) {
     return { action: "skip", reason: `already ${state.status}` };
   }
@@ -496,6 +513,20 @@ export interface ConnectingTimeoutConfig {
 export const DEFAULT_CONNECTING_TIMEOUT_CONFIG: ConnectingTimeoutConfig = {
   timeoutMs: 120_000,
 };
+
+/**
+ * How long a sandbox identity (auth token + sandbox id) superseded by a respawn
+ * stays valid. Each spawn rotates the single stored identity; without this
+ * window a sandbox that booted under the previous identity is rejected (401/403)
+ * the instant a later spawn overwrites it, orphaning a healthy box.
+ *
+ * Sized to comfortably exceed a worst-case healthy boot (wx-system long-setup
+ * boots run ~3 min) while staying far below a session lifetime, so the auth
+ * surface widens to at most two identities for only a few minutes after a
+ * rotation. Measured from the rotation instant (`prev_identity_expires_at`),
+ * not from boot.
+ */
+export const SANDBOX_IDENTITY_GRACE_MS = 5 * 60 * 1000;
 
 // ==================== In-flight silence backstop ====================
 

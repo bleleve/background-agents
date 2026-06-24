@@ -914,6 +914,8 @@ export class SessionDO extends DurableObject<Env> {
       updateSandboxStatus: (status) => this.updateSandboxStatus(status),
       updateSandboxForSpawn: (data) => this.repository.updateSandboxForSpawn(data),
       updateSandboxForResume: (data) => this.repository.updateSandboxForResume(data),
+      clearPreviousSandboxIdentity: () => this.repository.clearPreviousSandboxIdentity(),
+      promotePreviousSandboxIdentity: () => this.repository.promotePreviousSandboxIdentity(),
       updateSandboxModalObjectId: (id) => this.repository.updateSandboxModalObjectId(id),
       updateSandboxSnapshotImageId: (sandboxId, imageId) =>
         this.repository.updateSandboxSnapshotImageId(sandboxId, imageId),
@@ -1173,6 +1175,10 @@ export class SessionDO extends DurableObject<Env> {
   private async handleWebSocketUpgrade(request: Request, url: URL): Promise<Response> {
     this.log.debug("WebSocket upgrade requested");
     const isSandbox = url.searchParams.get("type") === "sandbox";
+    // Which stored identity the connecting sandbox authenticated as. A
+    // "previous" match means it booted under an identity a later spawn
+    // superseded; the accept path adopts it (see below).
+    let matchedSandboxIdentity: "current" | "previous" = "current";
 
     // Validate sandbox authentication
     if (isSandbox) {
@@ -1207,8 +1213,26 @@ export class SessionDO extends DurableObject<Env> {
         return new Response("Sandbox is stopped", { status: 410 });
       }
 
-      // Validate sandbox ID first (catches stale sandboxes reconnecting after restore)
-      if (expectedSandboxId && sandboxId !== expectedSandboxId) {
+      // Resolve which stored identity the presented (sandboxId, token) pair
+      // authenticates as. Every spawn rotates the single stored identity; the
+      // prior one is retained in the prev_* columns until prev_identity_expires_at
+      // so a healthy sandbox still booting under it is not orphaned by a later
+      // spawn. The id and token are bound to the SAME identity, so a
+      // current-id/previous-token (or vice-versa) splice cannot authenticate.
+      const now = Date.now();
+      const prevHash = sandbox?.prev_auth_token_hash ?? null;
+      const prevValid =
+        !!prevHash &&
+        sandbox?.prev_identity_expires_at != null &&
+        now < sandbox.prev_identity_expires_at;
+      const prevExpired = !!sandbox?.prev_modal_sandbox_id && !prevValid;
+      const tokenHash = providedToken ? await hashToken(providedToken) : null;
+
+      // ID check: matches the current identity (or a legacy row with no stored
+      // id), or the previous identity while still within its grace window.
+      const idIsCurrent = !expectedSandboxId || sandboxId === expectedSandboxId;
+      const idIsPrevious = prevValid && sandboxId === sandbox?.prev_modal_sandbox_id;
+      if (!idIsCurrent && !idIsPrevious) {
         this.log.warn("ws.connect", {
           event: "ws.connect",
           ws_type: "sandbox",
@@ -1216,25 +1240,58 @@ export class SessionDO extends DurableObject<Env> {
           reject_reason: "sandbox_id_mismatch",
           expected_sandbox_id: expectedSandboxId,
           sandbox_id: sandboxId,
+          matched_previous: false,
+          prev_identity_expired: prevExpired,
+          ms_until_prev_expiry:
+            sandbox?.prev_identity_expires_at != null
+              ? sandbox.prev_identity_expires_at - now
+              : null,
           duration_ms: Date.now() - wsStartTime,
         });
         return new Response("Forbidden: Wrong sandbox ID", { status: 403 });
       }
 
-      // Validate auth token
-      const tokenMatches = await this.isValidSandboxToken(providedToken, sandbox);
+      // Token check, bound to whichever identity the id selected.
+      const usePreviousIdentity = !idIsCurrent;
+      const tokenMatches = usePreviousIdentity
+        ? !!tokenHash && !!prevHash && timingSafeEqual(tokenHash, prevHash)
+        : sandbox?.auth_token_hash
+          ? !!tokenHash && timingSafeEqual(tokenHash, sandbox.auth_token_hash)
+          : !!sandbox?.auth_token &&
+            !!providedToken &&
+            timingSafeEqual(providedToken, sandbox.auth_token);
       if (!tokenMatches) {
         this.log.warn("ws.connect", {
           event: "ws.connect",
           ws_type: "sandbox",
           outcome: "auth_failed",
           reject_reason: "token_mismatch",
+          matched_previous: usePreviousIdentity,
+          prev_identity_expired: prevExpired,
           duration_ms: Date.now() - wsStartTime,
         });
         return new Response("Unauthorized: Invalid auth token", { status: 401 });
       }
 
-      // Auth passed — continue to WebSocket accept below
+      // A sandbox that authenticated as the PREVIOUS identity booted under an
+      // identity a later spawn superseded. If a current-identity sandbox is
+      // already connected, that one owns the session — reject this stale one.
+      // Otherwise it is the healthy box the newer spawn never produced: the
+      // accept path below adopts it (promotes its identity to current).
+      if (usePreviousIdentity && this.wsManager.getSandboxSocket() !== null) {
+        this.log.warn("ws.connect", {
+          event: "ws.connect",
+          ws_type: "sandbox",
+          outcome: "rejected",
+          reject_reason: "superseded_by_current",
+          sandbox_id: sandboxId,
+          duration_ms: Date.now() - wsStartTime,
+        });
+        return new Response("Superseded by current sandbox", { status: 409 });
+      }
+      matchedSandboxIdentity = usePreviousIdentity ? "previous" : "current";
+
+      // Auth passed — continue to WebSocket accept below.
       // The success ws.connect event is emitted after the WebSocket is accepted
     }
 
@@ -1245,6 +1302,18 @@ export class SessionDO extends DurableObject<Env> {
       const sandboxId = request.headers.get("X-Sandbox-ID");
 
       if (isSandbox) {
+        // Adopt a healthy sandbox that booted under the superseded identity: the
+        // newer spawn never connected (verified above — no current socket), so
+        // realign the stored identity to this box before accepting, so its later
+        // callbacks authenticate as current.
+        if (matchedSandboxIdentity === "previous") {
+          this.repository.promotePreviousSandboxIdentity();
+          this.log.info("sandbox.previous_identity_promoted", {
+            event: "sandbox.previous_identity_promoted",
+            sandbox_id: sandboxId,
+          });
+        }
+
         const { replaced } = this.wsManager.acceptAndSetSandboxSocket(
           server,
           sandboxId ?? undefined
@@ -1267,6 +1336,7 @@ export class SessionDO extends DurableObject<Env> {
           outcome: "success",
           sandbox_id: sandboxId,
           replaced_existing: replaced,
+          matched_previous: matchedSandboxIdentity === "previous",
           duration_ms: Date.now() - now,
         });
 
@@ -1753,6 +1823,20 @@ export class SessionDO extends DurableObject<Env> {
     const session = this.getSession();
     if (!session) {
       return Response.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    // Coalesce relaunches onto an in-flight boot. A spawn/restore that has not
+    // yet connected holds the in-flight guard across the whole boot window, so a
+    // duplicate Retry (rapid clicks, or bot + UI together) must NOT start a
+    // second spawn — that would rotate the booting sandbox's identity and orphan
+    // the healthy box. Return 200 so the slack/linear "200 = relaunching|skipped"
+    // handling stays happy.
+    if (this.lifecycleManager.isSpawning()) {
+      this.log.info("sandbox.relaunch_coalesced", {
+        event: "sandbox.relaunch_coalesced",
+        sandbox_status: this.getSandbox()?.status ?? null,
+      });
+      return Response.json({ status: "relaunch_in_progress" });
     }
 
     const sandboxStatus = this.getSandbox()?.status;
@@ -2381,19 +2465,35 @@ export class SessionDO extends DurableObject<Env> {
    * Verify a provided sandbox token against stored credentials.
    *
    * Preferred path uses auth_token_hash. Plaintext auth_token is only used
-   * as a compatibility fallback for older rows.
+   * as a compatibility fallback for older rows. The previously-rotated identity
+   * (prev_auth_token_hash) is also accepted while still within its grace window,
+   * so a healthy sandbox that booted under it is not orphaned on its id-less HTTP
+   * callbacks (boot-progress, scm-credentials, verifySandboxToken). This is
+   * id-less so there is no splice concern — the token is the sole bearer secret.
    */
   private async isValidSandboxToken(
     token: string | null,
-    sandbox: SandboxRow | null
+    sandbox: SandboxRow | null,
+    now: number = Date.now()
   ): Promise<boolean> {
     if (!token || !sandbox) {
       return false;
     }
 
-    if (sandbox.auth_token_hash) {
+    if (sandbox.auth_token_hash || sandbox.prev_auth_token_hash) {
       const tokenHash = await hashToken(token);
-      return timingSafeEqual(tokenHash, sandbox.auth_token_hash);
+      if (sandbox.auth_token_hash && timingSafeEqual(tokenHash, sandbox.auth_token_hash)) {
+        return true;
+      }
+      if (
+        sandbox.prev_auth_token_hash &&
+        sandbox.prev_identity_expires_at != null &&
+        now < sandbox.prev_identity_expires_at &&
+        timingSafeEqual(tokenHash, sandbox.prev_auth_token_hash)
+      ) {
+        return true;
+      }
+      return false;
     }
 
     if (sandbox.auth_token) {

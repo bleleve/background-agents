@@ -241,6 +241,45 @@ describe("evaluateSpawnDecision", () => {
     expect(decision.action).toBe("spawn");
   });
 
+  it('returns "skip" for a slow boot still pinging past the createdAt window (lastProgressAt fresh)', () => {
+    // Regression for the relaunch-orphaning bug: a healthy slow boot that keeps
+    // posting boot-progress pings must stay "booting" past created_at + window,
+    // so it is NOT respawned (which would rotate its identity and orphan it).
+    const now = Date.now();
+    const state: SandboxState = {
+      status: "spawning",
+      createdAt: now - (config.spawningTimeoutMs + 60000), // 3 min ago: past the 120s createdAt window…
+      lastProgressAt: now - 10000, // …but a ping landed 10s ago — still alive.
+      snapshotImageId: null,
+      hasActiveWebSocket: false,
+    };
+
+    const decision = evaluateSpawnDecision(state, config, now, false);
+
+    expect(decision.action).toBe("skip");
+    if (decision.action === "skip") {
+      expect(decision.reason).toContain("spawning");
+    }
+  });
+
+  it('returns "spawn" for a boot whose last ping went silent past the window (recovery preserved)', () => {
+    // A genuinely stuck boot pinged early then went silent: lastProgressAt stops
+    // advancing, so the guard releases after the window exactly like the
+    // connecting-timeout watchdog (both measure from max(createdAt, lastProgressAt)).
+    const now = Date.now();
+    const state: SandboxState = {
+      status: "connecting",
+      createdAt: now - (config.spawningTimeoutMs + 60000), // 3 min ago
+      lastProgressAt: now - (config.spawningTimeoutMs + 1000), // last ping 121s ago — silent > window
+      snapshotImageId: null,
+      hasActiveWebSocket: false,
+    };
+
+    const decision = evaluateSpawnDecision(state, config, now, false);
+
+    expect(decision.action).toBe("spawn");
+  });
+
   it('still skips a stale "spawning" when a spawn is in progress in-memory', () => {
     const now = Date.now();
     const state: SandboxState = {

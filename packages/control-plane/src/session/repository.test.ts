@@ -249,12 +249,13 @@ describe("SessionRepository", () => {
   });
 
   describe("updateSandboxForSpawn", () => {
-    it("sets all spawn fields atomically", () => {
+    it("sets all spawn fields atomically and demotes the prior identity to prev_*", () => {
       repo.updateSandboxForSpawn({
         status: "spawning",
         createdAt: 1000,
         authTokenHash: "token-hash-123",
         modalSandboxId: "modal-sb-1",
+        prevIdentityExpiresAt: 301000,
       });
 
       expect(mock.calls.length).toBe(1);
@@ -264,7 +265,17 @@ describe("SessionRepository", () => {
       expect(mock.calls[0].query).toContain("modal_sandbox_id");
       expect(mock.calls[0].query).toContain("auth_token = NULL");
       expect(mock.calls[0].query).toContain("modal_object_id = NULL");
-      expect(mock.calls[0].params).toEqual(["spawning", 1000, "token-hash-123", "modal-sb-1"]);
+      // Prior identity is captured into the prev_* slots in the same statement.
+      expect(mock.calls[0].query).toContain("prev_auth_token_hash = auth_token_hash");
+      expect(mock.calls[0].query).toContain("prev_modal_sandbox_id = modal_sandbox_id");
+      // prevIdentityExpiresAt is the first bound param (CASE arm), then the rest.
+      expect(mock.calls[0].params).toEqual([
+        301000,
+        "spawning",
+        1000,
+        "token-hash-123",
+        "modal-sb-1",
+      ]);
     });
   });
 

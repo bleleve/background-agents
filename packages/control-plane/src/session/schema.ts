@@ -115,6 +115,9 @@ CREATE TABLE IF NOT EXISTS sandbox (
   tunnel_urls TEXT,                                 -- JSON mapping of port -> tunnel URL for extra ports
   ttyd_url TEXT,                                    -- ttyd proxy tunnel URL
   ttyd_token TEXT,                                  -- Encrypted JWT token for ttyd auth
+  prev_auth_token_hash TEXT,                        -- Superseded identity's auth-token hash, accepted during the grace window
+  prev_modal_sandbox_id TEXT,                       -- Superseded identity's sandbox ID, accepted during the grace window
+  prev_identity_expires_at INTEGER,                 -- ms epoch until which the previous identity is still valid (null = none)
   created_at INTEGER NOT NULL
 );
 
@@ -469,6 +472,19 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
         `ALTER TABLE session ADD COLUMN preview_enabled INTEGER NOT NULL DEFAULT 0`
       );
       runMigration(sql, `ALTER TABLE session ADD COLUMN preview_dispatched_sha TEXT`);
+    },
+  },
+  {
+    id: 37,
+    description: "Retain the previous sandbox identity for a grace window (relaunch orphaning fix)",
+    run: (sql) => {
+      // A respawn rotates the sandbox identity (auth token + sandbox id). Keeping
+      // the superseded identity valid for a short grace window lets a healthy
+      // sandbox that booted under it still authenticate, instead of being orphaned
+      // with 401/403 when a later spawn overwrote the single identity record.
+      runMigration(sql, `ALTER TABLE sandbox ADD COLUMN prev_auth_token_hash TEXT`);
+      runMigration(sql, `ALTER TABLE sandbox ADD COLUMN prev_modal_sandbox_id TEXT`);
+      runMigration(sql, `ALTER TABLE sandbox ADD COLUMN prev_identity_expires_at INTEGER`);
     },
   },
 ];
