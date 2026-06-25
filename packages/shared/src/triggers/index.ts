@@ -32,12 +32,8 @@ export { conditionRegistry, triggerSources } from "./registry";
 // Glob utility
 export { matchGlob } from "./glob";
 
-export {
-  githubSource,
-  normalizeGitHubEvent,
-  buildGitHubContextBlock,
-  GITHUB_WEBHOOK_EVENT_CATALOG,
-} from "./github";
+// GitHub source module
+export { githubSource, normalizeGitHubEvent, GITHUB_WEBHOOK_EVENT_CATALOG } from "./github";
 
 // Sentry source module
 export {

@@ -15,6 +15,7 @@ import { useRepos } from "@/hooks/use-repos";
 import { useBranches } from "@/hooks/use-branches";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
 import { formatModelNameLower } from "@/lib/format";
+import { resolveEnabledModel } from "@/lib/model-selection";
 import { Combobox, type ComboboxGroup } from "@/components/ui/combobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -102,7 +103,12 @@ interface AutomationFormProps {
 
 export function AutomationForm({ mode, initialValues, onSubmit, submitting }: AutomationFormProps) {
   const { repos, loading: loadingRepos } = useRepos();
-  const { enabledModelOptions, defaultModel } = useEnabledModels();
+  const {
+    enabledModels,
+    enabledModelOptions,
+    defaultModel,
+    loading: loadingModels,
+  } = useEnabledModels();
 
   const [name, setName] = useState(initialValues?.name ?? "");
   const [selectedRepo, setSelectedRepo] = useState(
@@ -143,6 +149,17 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
   const isSchedule = triggerType === "schedule";
   const isScheduleValid = !isSchedule || isValidCron(scheduleCron);
 
+  // The model we display and submit. The selector only lists enabled models, so
+  // a disabled default (blank create), a disabled saved model (edit), or a
+  // disabled template suggestion is coerced to an enabled one. Until preferences
+  // load we can't know the enabled set, so the raw selection stands and submit
+  // is blocked — keeping display, reasoning, and the payload in agreement
+  // without relying on a post-load effect.
+  const resolvedModel = useMemo(
+    () => (loadingModels ? model : resolveEnabledModel(model, enabledModels)),
+    [loadingModels, model, enabledModels]
+  );
+
   const triggerMetadata = useMemo(
     () => triggerSources.find((sourceDef) => sourceDef.triggerType === triggerType),
     [triggerType]
@@ -177,6 +194,9 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Block until enabled models load: resolvedModel can't coerce against an
+    // unknown set, so submitting now could persist a disabled model.
+    if (loadingModels) return;
     if (!name.trim() || !selectedRepo || !instructions.trim() || !isScheduleValid) return;
     if (triggerType === "sentry" && mode === "create" && !sentryClientSecret.trim()) return;
     if (showEventTypeSelector && !eventType) {
@@ -189,8 +209,11 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
       repoOwner,
       repoName,
       baseBranch,
-      model,
-      reasoningEffort: reasoningEffort || null,
+      model: resolvedModel,
+      reasoningEffort:
+        reasoningEffort && isValidReasoningEffort(resolvedModel, reasoningEffort)
+          ? reasoningEffort
+          : null,
       scheduleCron,
       scheduleTz,
       instructions: instructions.trim(),
@@ -224,7 +247,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
   const displayRepoName = selectedRepoObj
     ? selectedRepoObj.name
     : selectedRepo || "Select repository";
-  const reasoningConfig = getReasoningConfig(model);
+  const reasoningConfig = getReasoningConfig(resolvedModel);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -339,7 +362,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
       <div>
         <label className="block text-sm font-medium text-foreground mb-1.5">Model</label>
         <Combobox
-          value={model}
+          value={resolvedModel}
           onChange={(nextModel) => {
             userPickedModelRef.current = true;
             setModel(nextModel);
@@ -361,7 +384,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
           triggerClassName="flex w-full items-center gap-1.5 px-3 py-2 text-sm border border-border bg-input text-foreground hover:border-foreground/20 transition"
         >
           <ModelIcon className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="truncate flex-1 text-left">{formatModelNameLower(model)}</span>
+          <span className="truncate flex-1 text-left">{formatModelNameLower(resolvedModel)}</span>
           <ChevronDownIcon className="w-3 h-3 text-muted-foreground" />
         </Combobox>
         <FieldDescription>
@@ -556,6 +579,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
           type="submit"
           disabled={
             submitting ||
+            loadingModels ||
             !name.trim() ||
             !selectedRepo ||
             !instructions.trim() ||

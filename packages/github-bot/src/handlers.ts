@@ -81,6 +81,13 @@ function prCloneBranch(
   return headRef;
 }
 
+export function isReviewRequestedForBot(payload: unknown, botUsername: string): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const reviewer = (payload as Record<string, unknown>).requested_reviewer;
+  if (!reviewer || typeof reviewer !== "object") return false;
+  return (reviewer as Record<string, unknown>).login === botUsername;
+}
+
 async function getAuthHeaders(env: Env, traceId: string): Promise<Record<string, string>> {
   return {
     "Content-Type": "application/json",

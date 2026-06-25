@@ -6,7 +6,7 @@ import {
   type PlanService,
   type SavePlanRequest,
 } from "../../services/plan.service";
-import { getValidModelOrDefault, isValidModel } from "../../../utils/models";
+import { getValidModelOrDefault, isValidModel } from "@open-inspect/shared";
 
 export interface PlansHandlerDeps {
   planService: PlanService;

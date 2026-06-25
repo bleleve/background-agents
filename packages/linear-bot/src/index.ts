@@ -18,6 +18,7 @@ import {
   escapeHtml,
   fetchModelDefaults,
   resolveAppName,
+  userPreferencesRequestSchema,
   verifyInternalToken,
 } from "@open-inspect/shared";
 import type { LinearWebhookPayload } from "@open-inspect/shared";
@@ -343,7 +344,12 @@ app.get("/config/team-repos", async (c) => {
 });
 
 app.put("/config/team-repos", async (c) => {
-  const body = await c.req.json();
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid request body" }, 400);
+  }
   await c.env.LINEAR_KV.put("config:team-repos", JSON.stringify(body));
   return c.json({ ok: true });
 });
@@ -353,7 +359,12 @@ app.get("/config/triggers", async (c) => {
 });
 
 app.put("/config/triggers", async (c) => {
-  const body = await c.req.json();
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid request body" }, 400);
+  }
   await c.env.LINEAR_KV.put("config:triggers", JSON.stringify(body));
   return c.json({ ok: true });
 });
@@ -363,7 +374,12 @@ app.get("/config/project-repos", async (c) => {
 });
 
 app.put("/config/project-repos", async (c) => {
-  const body = await c.req.json();
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid request body" }, 400);
+  }
   await c.env.LINEAR_KV.put("config:project-repos", JSON.stringify(body));
   return c.json({ ok: true });
 });
@@ -377,7 +393,15 @@ app.get("/config/user-prefs/:userId", async (c) => {
 
 app.put("/config/user-prefs/:userId", async (c) => {
   const userId = c.req.param("userId");
-  const body = (await c.req.json()) as Partial<UserPreferences>;
+  let rawBody: unknown;
+  try {
+    rawBody = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid request body" }, 400);
+  }
+  const parsedBody = userPreferencesRequestSchema.safeParse(rawBody);
+  if (!parsedBody.success) return c.json({ error: "invalid request body" }, 400);
+  const body = parsedBody.data;
   const { defaultModel } = await fetchModelDefaults(c.env);
   const prefs: UserPreferences = {
     userId,

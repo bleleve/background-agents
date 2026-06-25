@@ -272,6 +272,7 @@ jobs:
           TF_VAR_allowed_users: ${{ vars.ALLOWED_USERS }}
           TF_VAR_allowed_email_domains: ${{ vars.ALLOWED_EMAIL_DOMAINS }}
           TF_VAR_allowed_emails: ${{ secrets.ALLOWED_EMAILS }}
+          TF_VAR_allowed_github_orgs: ${{ secrets.ALLOWED_GITHUB_ORGS }}
           TF_VAR_automation_delete_admins: ${{ vars.AUTOMATION_DELETE_ADMINS }}
           TF_VAR_deployment_name: ${{ vars.DEPLOYMENT_NAME }}
           TF_VAR_enable_github_bot: "${{ vars.ENABLE_GITHUB_BOT || 'false' }}"
@@ -431,6 +432,7 @@ jobs:
           TF_VAR_allowed_users: ${{ vars.ALLOWED_USERS }}
           TF_VAR_allowed_email_domains: ${{ vars.ALLOWED_EMAIL_DOMAINS }}
           TF_VAR_allowed_emails: ${{ secrets.ALLOWED_EMAILS }}
+          TF_VAR_allowed_github_orgs: ${{ secrets.ALLOWED_GITHUB_ORGS }}
           TF_VAR_automation_delete_admins: ${{ vars.AUTOMATION_DELETE_ADMINS }}
           TF_VAR_deployment_name: ${{ vars.DEPLOYMENT_NAME }}
           TF_VAR_enable_github_bot: "${{ vars.ENABLE_GITHUB_BOT || 'false' }}"

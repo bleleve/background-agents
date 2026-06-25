@@ -11,7 +11,6 @@ SECURITY: All sensitive endpoints require authentication via HMAC-signed tokens.
 The control plane must include an Authorization header with a valid token.
 """
 
-import os
 import time
 
 from fastapi import Header, HTTPException
@@ -27,6 +26,7 @@ from .app import (
 )
 from .auth import AuthConfigurationError, verify_internal_token
 from .aws_credentials import AwsRoleConfig
+from .clone_token import resolve_clone_token
 from .log_config import configure_logging, get_logger
 
 configure_logging()
@@ -55,41 +55,6 @@ def require_auth(authorization: str | None) -> None:
             status_code=503,
             detail=f"Service unavailable: Authentication not configured. {e}",
         )
-
-
-def _resolve_clone_token() -> str | None:
-    """Resolve a VCS clone token based on SCM_PROVIDER.
-
-    - "gitlab": reads GITLAB_ACCESS_TOKEN from the environment.
-    - "github" (default): generates a short-lived GitHub App installation token.
-
-    Returns None if credentials are missing or token generation fails.
-    """
-    from .auth import generate_installation_token
-
-    scm_provider = os.environ.get("SCM_PROVIDER", "github")
-
-    if scm_provider == "gitlab":
-        token = os.environ.get("GITLAB_ACCESS_TOKEN")
-        if not token:
-            log.warn("gitlab.token_missing")
-        return token
-
-    try:
-        app_id = os.environ.get("GITHUB_APP_ID")
-        private_key = os.environ.get("GITHUB_APP_PRIVATE_KEY")
-        installation_id = os.environ.get("GITHUB_APP_INSTALLATION_ID")
-
-        if app_id and private_key and installation_id:
-            return generate_installation_token(
-                app_id=app_id,
-                private_key=private_key,
-                installation_id=installation_id,
-            )
-    except Exception as e:
-        log.warn("github.token_error", exc=e)
-
-    return None
 
 
 def _parse_aws_role_configs(sandbox_settings: dict | None) -> list[AwsRoleConfig] | None:
@@ -193,7 +158,7 @@ async def api_create(
 
         snapshot_id = request.get("snapshot_id")
         repo_image_id = request.get("repo_image_id") or None
-        clone_token = _resolve_clone_token() if snapshot_id or repo_image_id else None
+        fallback_clone_token = resolve_clone_token() if snapshot_id else None
 
         session_config = SessionConfig(
             session_id=request.get("session_id"),
@@ -215,7 +180,7 @@ async def api_create(
             session_config=session_config,
             control_plane_url=control_plane_url,
             sandbox_auth_token=request.get("sandbox_auth_token"),
-            clone_token=clone_token,
+            fallback_clone_token=fallback_clone_token,
             user_env_vars=request.get("user_env_vars") or None,
             repo_image_id=repo_image_id,
             repo_image_sha=request.get("repo_image_sha") or None,
@@ -510,7 +475,7 @@ async def api_restore(
         timeout_seconds = int(request.get("timeout_seconds", DEFAULT_SANDBOX_TIMEOUT_SECONDS))
 
         manager = SandboxManager()
-        clone_token = _resolve_clone_token()
+        clone_token = resolve_clone_token()
 
         code_server_enabled = bool(request.get("code_server_enabled", False))
         agent_slack_notify_enabled = bool(request.get("agent_slack_notify_enabled", False))

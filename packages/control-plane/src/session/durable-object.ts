@@ -12,6 +12,8 @@ import { initSchema } from "./schema";
 import { reEnqueueInterruptedTurnForRelaunch, decideRelaunchAction } from "./relaunch";
 import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
 import {
+  DEFAULT_MODEL,
+  isValidReasoningEffort,
   resolveAppName,
   timingSafeEqual,
   RESUMABLE_SESSION_STATUSES,
@@ -55,7 +57,6 @@ import {
   type SourceControlProvider,
   type GitPushSpec,
 } from "../source-control";
-import { DEFAULT_MODEL, isValidReasoningEffort } from "../utils/models";
 import type {
   Env,
   ClientInfo,

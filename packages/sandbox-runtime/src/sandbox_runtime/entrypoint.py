@@ -636,23 +636,44 @@ class SandboxSupervisor:
                     continue
                 shutil.copy(tool_file, tool_dest / tool_file.name)
 
-        # Copy pre-built deps (package.json, package-lock.json, node_modules)
-        # from the image staging directory.  This gives OpenCode a lockfile
-        # that matches the declared dependencies so Npm.install() finds
-        # everything in sync and skips arborist reify() entirely.
-        deps_cache = Path("/app/opencode-deps")
+        # Copy pre-built deps (package.json, package-lock.json, node_modules) from the image
+        # staging directory so OpenCode's Npm.install() finds the tree in sync and skips the
+        # arborist reify() that would otherwise block the first request.
+        staged_at = time.monotonic()
+        self._stage_opencode_deps(Path("/app/opencode-deps"), opencode_dir)
+        self.log.info(
+            "opencode.repo_deps_staged",
+            dir=str(opencode_dir),
+            duration_ms=round((time.monotonic() - staged_at) * 1000),
+        )
+
+        # Keep the staged .opencode/ tree out of the user's git status. Mirrors the
+        # call in _install_skills so either installer leaves the repo clean.
+        self._exclude_opencode_from_git(workdir)
+
+    def _stage_opencode_deps(self, deps_cache: Path, dest_dir: Path) -> None:
+        """Copy the pre-staged OpenCode plugin deps into dest_dir.
+
+        Copies package.json, package-lock.json and node_modules from the image staging
+        directory (base.py's /app/opencode-deps) into dest_dir, per file and only when the
+        destination is absent. This gives OpenCode a lockfile that matches node_modules so
+        Npm.install() finds @opencode-ai/plugin in sync and skips the arborist reify() that
+        would otherwise block the first request.
+
+        Shared by both _install_tools (repo .opencode/) and _seed_global_opencode_deps
+        (the global config dir). node_modules is materialized via _materialize_node_modules,
+        which symlinks the baked tree rather than copying it — a copytree here would be
+        copied-up by overlayfs and lose the v93 symlink optimization.
+        """
         for name in ("package.json", "package-lock.json"):
             src = deps_cache / name
-            dest = opencode_dir / name
+            dest = dest_dir / name
             if src.exists() and not dest.exists():
                 shutil.copy2(src, dest)
         cached_modules = deps_cache / "node_modules"
-        local_modules = opencode_dir / "node_modules"
+        local_modules = dest_dir / "node_modules"
         if cached_modules.is_dir() and not local_modules.exists():
             self._materialize_node_modules(cached_modules, local_modules)
-
-        # Ensure .opencode is excluded from git tracking in the cloned repo.
-        self._exclude_opencode_from_git(workdir)
 
     def _materialize_node_modules(self, src: Path, dest: Path) -> None:
         """Make the pre-built OpenCode node_modules available at ``dest``.
@@ -692,6 +713,81 @@ class SandboxSupervisor:
             mode=mode,
             duration_ms=int((time.monotonic() - start) * 1000),
         )
+
+    @staticmethod
+    def _resolve_opencode_global_config_dir() -> Path:
+        """Resolve OpenCode's global config directory the way OpenCode does.
+
+        OpenCode (via xdg-basedir) uses OPENCODE_CONFIG_DIR when set, otherwise
+        $XDG_CONFIG_HOME/opencode, otherwise ~/.config/opencode.
+        """
+        override = os.environ.get("OPENCODE_CONFIG_DIR")
+        if override:
+            return Path(override)
+        xdg = os.environ.get("XDG_CONFIG_HOME")
+        base = Path(xdg) if xdg else Path.home() / ".config"
+        return base / "opencode"
+
+    def _seed_global_opencode_deps(self) -> None:
+        """Fallback seed of OpenCode's global config dir with the staged plugin tree.
+
+        OpenCode bootstraps every directory in its config search path and forks
+        ``npm install @opencode-ai/plugin`` for each. The global config dir is created empty and
+        is never seeded by _install_tools (which only covers the repo's .opencode/), so with a
+        plugin configured the first POST /session would block on an arborist reify() of it.
+
+        The image bakes this tree into the global dir at build time (base.py), so this is
+        normally a no-op (we skip when node_modules already exists); it stays as a fallback for
+        environments where the baked dir is absent (e.g. a different HOME).
+        """
+        deps_cache = Path("/app/opencode-deps")
+        if not deps_cache.is_dir():
+            return
+        config_dir = self._resolve_opencode_global_config_dir()
+        # Only seed a pristine dir — never mix our modules into a user's manifest. The image
+        # bakes this tree in (base.py), so node_modules is normally already present and we skip.
+        nm_exists = (config_dir / "node_modules").exists()
+        if nm_exists or (config_dir / "package.json").exists():
+            self.log.info(
+                "opencode.global_deps_skip",
+                config_dir=str(config_dir),
+                reason="already_present" if nm_exists else "foreign_manifest",
+            )
+            return
+        seeded_at = time.monotonic()
+        config_dir.mkdir(parents=True, exist_ok=True)
+        self._stage_opencode_deps(deps_cache, config_dir)
+        self.log.info(
+            "opencode.global_deps_seeded",
+            config_dir=str(config_dir),
+            duration_ms=round((time.monotonic() - seeded_at) * 1000),
+        )
+
+    def _seed_global_opencode_deps_safe(self) -> None:
+        """Best-effort wrapper around _seed_global_opencode_deps for the boot path.
+
+        start_opencode() offloads each install step individually via
+        asyncio.to_thread (so the boot-progress heartbeat loop keeps pinging).
+        The global seed must not abort boot on failure — it only degrades to a
+        slower arborist reify() — so swallow and log any error here.
+        """
+        try:
+            self._seed_global_opencode_deps()
+        except Exception as e:
+            self.log.warn("opencode.global_deps_seed_failed", exc=e)
+
+    def _prepare_opencode_filesystem(self, workdir: Path) -> None:
+        """Stage OpenCode's filesystem assets (tools, deps, skills, bin) before launch.
+
+        The global seed is best-effort (degrades to a slower reify); the rest fail fast.
+        """
+        self._install_tools(workdir)
+        try:
+            self._seed_global_opencode_deps()
+        except Exception as e:
+            self.log.warn("opencode.global_deps_seed_failed", exc=e)
+        self._install_skills(workdir)
+        self._install_bin_scripts()
 
     def _install_bin_scripts(self) -> None:
         """Install standalone CLI scripts into /usr/local/bin.
@@ -1223,12 +1319,19 @@ class SandboxSupervisor:
         # Tool/skill/agent/plugin installation does synchronous filesystem work.
         # _install_tools now symlinks the OpenCode node_modules (cheap), but the
         # skills/agents copytrees and the rare node_modules copy fallback can
-        # still block. Run it off the event loop: while start_opencode() runs,
-        # the concurrent _boot_progress_loop must keep pinging the control plane.
-        # A multi-second blocking call here would otherwise freeze the loop,
-        # stall the pings, and let the 90s heartbeat watchdog mark a
+        # still block. Run each step off the event loop: while start_opencode()
+        # runs, the concurrent _boot_progress_loop must keep pinging the control
+        # plane. A multi-second blocking call here would otherwise freeze the
+        # loop, stall the pings, and let the 90s heartbeat watchdog mark a
         # healthy-but-slow boot as stale.
+        #
+        # _seed_global_opencode_deps (from upstream) is a best-effort fallback:
+        # the image normally bakes the staged plugin tree into the global config
+        # dir at build time (base.py), so it's usually a no-op, but the node
+        # copy it may perform is blocking — so it is offloaded here too and
+        # failures only degrade to a slower reify rather than aborting boot.
         await asyncio.to_thread(self._install_tools, workdir)
+        await asyncio.to_thread(self._seed_global_opencode_deps_safe)
         await asyncio.to_thread(self._install_skills, workdir)
         await asyncio.to_thread(self._install_agents)
         await asyncio.to_thread(self._install_bin_scripts)
