@@ -175,6 +175,12 @@ async function handleCreateSession(
     prHeadRef: body.prHeadRef,
     prBaseRef: body.prBaseRef,
     previewEnabled: body.previewEnabled,
+    // Plan mode: gate the session on human plan approval before any
+    // code-changing turn. Without this the home-page "Plan" toggle is silently
+    // dropped and the first turn dispatches as a normal build (regression from
+    // the router-module refactor #692, which lost these two lines).
+    planMode: body.planMode === true,
+    planModel: body.planMode === true ? body.planModel : undefined,
   };
 
   try {
