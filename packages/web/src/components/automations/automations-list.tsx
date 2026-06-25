@@ -59,7 +59,7 @@ function describeTrigger(automation: Automation): string {
 export function AutomationsList({
   automations,
   emptyMessage = "No automations yet.",
-  emptyDescription = "Create one to run tasks on a schedule or in response to events.",
+  emptyDescription = "Start from a template, or create one to run tasks on a schedule or in response to events.",
   onPause,
   onResume,
   onTrigger,

@@ -776,6 +776,19 @@ class SandboxSupervisor:
         except Exception as e:
             self.log.warn("opencode.global_deps_seed_failed", exc=e)
 
+    def _prepare_opencode_filesystem(self, workdir: Path) -> None:
+        """Stage OpenCode's filesystem assets (tools, deps, skills, bin) before launch.
+
+        The global seed is best-effort (degrades to a slower reify); the rest fail fast.
+        """
+        self._install_tools(workdir)
+        try:
+            self._seed_global_opencode_deps()
+        except Exception as e:
+            self.log.warn("opencode.global_deps_seed_failed", exc=e)
+        self._install_skills(workdir)
+        self._install_bin_scripts()
+
     def _install_bin_scripts(self) -> None:
         """Install standalone CLI scripts into /usr/local/bin.
 

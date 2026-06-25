@@ -2,28 +2,16 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { INTEGRATION_DEFINITIONS, type IntegrationId } from "@open-inspect/shared";
+import { INTEGRATION_DEFINITIONS } from "@open-inspect/shared";
 import { useSidebarContext } from "@/components/sidebar-layout";
 import { SidebarIcon, BackIcon } from "@/components/ui/icons";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { useIsMobile } from "@/hooks/use-media-query";
-import { CodeServerIntegrationSettings } from "@/components/settings/integrations/code-server-integration-settings";
-import { GitHubIntegrationSettings } from "@/components/settings/integrations/github-integration-settings";
-import { LinearIntegrationSettings } from "@/components/settings/integrations/linear-integration-settings";
+import { integrationSettingsComponents } from "@/components/settings/integrations/integration-settings-registry";
 import { SandboxSettingsPage } from "@/components/settings/sandbox-settings";
-import { SlackIntegrationSettings } from "@/components/settings/integrations/slack-integration-settings";
 
 function getIntegration(id: string) {
   return INTEGRATION_DEFINITIONS.find((d) => d.id === id);
-}
-
-function IntegrationDetail({ integrationId }: { integrationId: IntegrationId }) {
-  if (integrationId === "github") return <GitHubIntegrationSettings />;
-  if (integrationId === "linear") return <LinearIntegrationSettings />;
-  if (integrationId === "code-server") return <CodeServerIntegrationSettings />;
-  if (integrationId === "sandbox") return <SandboxSettingsPage />;
-  if (integrationId === "slack") return <SlackIntegrationSettings />;
-  return null;
 }
 
 export default function IntegrationDetailPage() {
@@ -32,6 +20,13 @@ export default function IntegrationDetailPage() {
   const isMobile = useIsMobile();
 
   const integration = getIntegration(params.id);
+  // The sandbox integration is hidden from the integrations list (registry) but its
+  // settings page is still reachable directly, so fall back to it explicitly here.
+  const IntegrationDetail = integration
+    ? integration.id === "sandbox"
+      ? SandboxSettingsPage
+      : integrationSettingsComponents[integration.id]
+    : undefined;
 
   if (!integration) {
     return (
@@ -67,9 +62,7 @@ export default function IntegrationDetailPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 md:p-8">
-        <div className="max-w-2xl">
-          <IntegrationDetail integrationId={integration.id} />
-        </div>
+        <div className="max-w-2xl">{IntegrationDetail ? <IntegrationDetail /> : null}</div>
       </div>
     </div>
   );
