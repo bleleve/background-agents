@@ -74,6 +74,30 @@ export class SessionSandboxEventProcessor {
     }
 
     if (event.type === "ready") {
+      // Self-heal the sandbox connection state. The authoritative
+      // spawning/connecting -> ready transition runs in the WebSocket-upgrade
+      // fetch handler (durable-object.ts onSandboxConnected + updateSandboxStatus),
+      // but that invocation's runtime outcome can be "canceled" for a
+      // hibernatable WS upgrade, dropping its storage writes — leaving the row
+      // stuck at "spawning" with a null last_heartbeat for the life of the box.
+      // The bridge re-sends `ready` on every (re)connect over a committed
+      // webSocketMessage invocation, so treat it as the connected signal and
+      // re-assert status + a heartbeat baseline here. Without this, a lost
+      // upgrade write strands a healthy sandbox until the connecting-timeout
+      // watchdog kills the in-flight turn (~15 min) even though the agent is
+      // running fine. Only promote from a booting status; never resurrect a
+      // watchdog-terminalized box (stopped/failed/stale) from a stray event.
+      const sandbox = this.deps.repository.getSandbox();
+      if (sandbox && (sandbox.status === "spawning" || sandbox.status === "connecting")) {
+        this.deps.repository.updateSandboxStatus("ready");
+        this.deps.broadcast({ type: "sandbox_status", status: "ready" });
+        this.deps.log.info("sandbox.ready_status_recovered", {
+          event: "sandbox.ready_status_recovered",
+          from_status: sandbox.status,
+        });
+      }
+      this.deps.repository.updateSandboxHeartbeat(now);
+
       if (event.commitSha) {
         this.deps.repository.updateSessionCurrentSha(event.commitSha);
       }
