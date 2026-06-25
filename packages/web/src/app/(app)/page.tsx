@@ -66,11 +66,19 @@ export default function Home() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingConfigRef = useRef<{ repo: string; model: string; branch: string } | null>(null);
   const [hasHydratedModelPreferences, setHasHydratedModelPreferences] = useState(false);
-  // Tracks whether the user has explicitly picked a model (either via the
-  // dropdown this session, or via a localStorage value carried over from a
-  // previous session). When false, toggling Plan auto-swaps between the
-  // deployment's defaultModel and defaultPlanModel.
+  // Tracks whether the user explicitly picked a model *in this visit* (via the
+  // dropdown). When false, toggling Plan auto-swaps between the deployment's
+  // defaultModel and defaultPlanModel. A pick remembered from a previous visit
+  // is restored as the initial model but does NOT set this ref — otherwise a
+  // one-time pick would permanently disable the Plan auto-switch on every later
+  // visit (it persisted in localStorage and was replayed into this ref).
   const userPickedModelRef = useRef(false);
+  // Previous Plan-toggle value, so the auto-switch reacts only to real toggles
+  // (not initial hydration or unrelated re-renders) and never clobbers a
+  // remembered/picked model on load.
+  const prevPlanModeRef = useRef(planMode);
+  // Build-mode model captured when entering Plan mode, restored when leaving it.
+  const buildModelRef = useRef<string | null>(null);
   const { enabledModels, enabledModelOptions, defaultModel, defaultPlanModel } = useEnabledModels();
   const selectedRepoOwner = selectedRepo.split("/")[0] ?? "";
   const selectedRepoName = selectedRepo.split("/")[1] ?? "";
@@ -113,9 +121,9 @@ export default function Home() {
         ? initialDefault
         : (enabledModels[0] ?? DEFAULT_MODEL);
 
-    if (storedModelIsValid) {
-      userPickedModelRef.current = true;
-    }
+    // NB: a remembered pick is restored as the initial model above, but we do
+    // NOT replay it into userPickedModelRef — that ref is scoped to picks made
+    // in this visit so a prior pick can't permanently block the Plan auto-switch.
 
     const storedReasoningEffort = localStorage.getItem(LAST_SELECTED_REASONING_EFFORT_STORAGE_KEY);
     const reasoningEffortFromStorage =
@@ -132,12 +140,15 @@ export default function Home() {
   useEffect(() => {
     if (!hasHydratedModelPreferences) return;
 
+    // Persist only a deliberate pick from this visit. Auto-switched values (Plan
+    // toggle / API default) leave userPickedModelRef false and are never
+    // written, so they don't sticky-override the defaults later. We never clear
+    // the remembered model here: a prior pick must survive reloads where the
+    // user hasn't re-picked (clearing would erase the just-restored model on the
+    // first render after hydration).
     if (userPickedModelRef.current) {
       localStorage.setItem(LAST_SELECTED_MODEL_STORAGE_KEY, selectedModel);
       localStorage.setItem(LAST_SELECTED_MODEL_USER_PICKED_STORAGE_KEY, "true");
-    } else {
-      localStorage.removeItem(LAST_SELECTED_MODEL_STORAGE_KEY);
-      localStorage.removeItem(LAST_SELECTED_MODEL_USER_PICKED_STORAGE_KEY);
     }
 
     if (reasoningEffort) {
@@ -259,15 +270,23 @@ export default function Home() {
     planMode,
   ]);
 
-  // Auto-switch selectedModel when the Plan toggle flips, as long as the user
-  // hasn't explicitly picked a model. Switches between defaultModel and
-  // defaultPlanModel; respects user picks once made.
+  // Auto-switch the model when the Plan toggle actually flips, unless the user
+  // deliberately picked a model in this visit. Entering Plan mode switches to
+  // the deployment's defaultPlanModel; leaving it restores the build model we
+  // came in with. The prevPlanModeRef guard means this only reacts to a real
+  // toggle (never initial hydration or unrelated re-renders), so a remembered
+  // model isn't clobbered on load and a pick from a *previous* visit no longer
+  // blocks the switch.
   useEffect(() => {
     if (!hasHydratedModelPreferences) return;
+    if (prevPlanModeRef.current === planMode) return;
+    prevPlanModeRef.current = planMode;
     if (userPickedModelRef.current) return;
 
-    const target = planMode ? defaultPlanModel : defaultModel;
-    if (!enabledModels.includes(target)) return;
+    if (planMode) buildModelRef.current = selectedModel;
+    const target = planMode ? defaultPlanModel : (buildModelRef.current ?? defaultModel);
+    if (!target) return;
+    if (enabledModels.length > 0 && !enabledModels.includes(target)) return;
     if (target === selectedModel) return;
 
     setSelectedModel(target);
