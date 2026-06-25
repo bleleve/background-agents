@@ -212,7 +212,10 @@ These routes are called by the github-bot via its `CONTROL_PLANE` service bindin
     box is still coming up; the web UI renders these as "Starting…".
   - `LIVE_SANDBOX_STATUSES` = `ready` / `running` — bridge connected, serving prompts.
   - `RELAUNCHABLE_SANDBOX_STATUSES` = `stopped` / `failed` / `stale` — the relaunch endpoint acts on
-    these; any other status returns `skipped`.
+    these. When a spawn is already in flight (`isSpawning()` is true) the endpoint returns
+    `{ status: "relaunch_in_progress" }` before reaching this gate, coalescing a duplicate relaunch
+    request onto the in-flight boot rather than starting a second spawn. Any other status that is
+    not relaunchable and has no spawn in flight returns `skipped`.
 - `SessionStatus`: `created`, `active`, `completed`, `failed`, `archived`, `cancelled`.
   - `TERMINAL_SESSION_STATUSES` = `completed` / `failed` / `cancelled` / `archived` — no prompt
     dispatches under these, and entering one reconciles a boot-status sandbox down to `stopped`.
