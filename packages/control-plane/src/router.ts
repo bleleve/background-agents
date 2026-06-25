@@ -89,6 +89,7 @@ const SANDBOX_AUTH_ROUTES: RegExp[] = [
   /^\/sessions\/[^/]+\/boot-progress$/, // Supervisor boot-progress ping during setup
   /^\/sessions\/[^/]+\/plan$/, // Agent-saved plan artifact (POST/GET)
   /^\/sessions\/[^/]+\/plans$/, // Plan history list (GET)
+  /^\/sessions\/[^/]+\/files\/[^/]+$/, // User-uploaded file download (sandbox calls download_file tool)
 ];
 
 type CachedScmProvider =

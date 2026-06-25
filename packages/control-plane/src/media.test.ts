@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMediaObjectKey,
+  buildFileUploadObjectKey,
   detectScreenshotFileType,
   detectVideoFileType,
   isSupportedScreenshotMimeType,
@@ -22,6 +23,18 @@ describe("media helpers", () => {
   it("builds session-scoped media object keys", () => {
     expect(buildMediaObjectKey("session-1", "artifact-1", "png")).toBe(
       "sessions/session-1/media/artifact-1.png"
+    );
+  });
+
+  it("builds session-scoped file upload object keys", () => {
+    expect(buildFileUploadObjectKey("session-1", "artifact-2", "report.csv")).toBe(
+      "sessions/session-1/files/artifact-2/report.csv"
+    );
+  });
+
+  it("sanitizes file names in file upload object keys", () => {
+    expect(buildFileUploadObjectKey("session-1", "artifact-3", "my file (1).csv")).toBe(
+      "sessions/session-1/files/artifact-3/my_file__1_.csv"
     );
   });
 

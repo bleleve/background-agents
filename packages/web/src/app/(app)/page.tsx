@@ -3,7 +3,7 @@
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { mutate } from "swr";
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useSidebarContext } from "@/components/sidebar-layout";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,8 @@ import {
   BranchIcon,
   ChevronDownIcon,
   SendIcon,
+  PaperclipIcon,
+  XIcon,
 } from "@/components/ui/icons";
 import { Combobox, type ComboboxGroup } from "@/components/ui/combobox";
 
@@ -55,17 +57,28 @@ export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const sessionCreationPromise = useRef<Promise<string | null> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingConfigRef = useRef<{ repo: string; model: string; branch: string } | null>(null);
   const [hasHydratedModelPreferences, setHasHydratedModelPreferences] = useState(false);
-  // Tracks whether the user has explicitly picked a model (either via the
-  // dropdown this session, or via a localStorage value carried over from a
-  // previous session). When false, toggling Plan auto-swaps between the
-  // deployment's defaultModel and defaultPlanModel.
+  // Tracks whether the user explicitly picked a model *in this visit* (via the
+  // dropdown). When false, toggling Plan auto-swaps between the deployment's
+  // defaultModel and defaultPlanModel. A pick remembered from a previous visit
+  // is restored as the initial model but does NOT set this ref — otherwise a
+  // one-time pick would permanently disable the Plan auto-switch on every later
+  // visit (it persisted in localStorage and was replayed into this ref).
   const userPickedModelRef = useRef(false);
+  // Previous Plan-toggle value, so the auto-switch reacts only to real toggles
+  // (not initial hydration or unrelated re-renders) and never clobbers a
+  // remembered/picked model on load.
+  const prevPlanModeRef = useRef(planMode);
+  // Build-mode model captured when entering Plan mode, restored when leaving it.
+  const buildModelRef = useRef<string | null>(null);
   const { enabledModels, enabledModelOptions, defaultModel, defaultPlanModel } = useEnabledModels();
   const selectedRepoOwner = selectedRepo.split("/")[0] ?? "";
   const selectedRepoName = selectedRepo.split("/")[1] ?? "";
@@ -108,9 +121,9 @@ export default function Home() {
         ? initialDefault
         : (enabledModels[0] ?? DEFAULT_MODEL);
 
-    if (storedModelIsValid) {
-      userPickedModelRef.current = true;
-    }
+    // NB: a remembered pick is restored as the initial model above, but we do
+    // NOT replay it into userPickedModelRef — that ref is scoped to picks made
+    // in this visit so a prior pick can't permanently block the Plan auto-switch.
 
     const storedReasoningEffort = localStorage.getItem(LAST_SELECTED_REASONING_EFFORT_STORAGE_KEY);
     const reasoningEffortFromStorage =
@@ -127,12 +140,15 @@ export default function Home() {
   useEffect(() => {
     if (!hasHydratedModelPreferences) return;
 
+    // Persist only a deliberate pick from this visit. Auto-switched values (Plan
+    // toggle / API default) leave userPickedModelRef false and are never
+    // written, so they don't sticky-override the defaults later. We never clear
+    // the remembered model here: a prior pick must survive reloads where the
+    // user hasn't re-picked (clearing would erase the just-restored model on the
+    // first render after hydration).
     if (userPickedModelRef.current) {
       localStorage.setItem(LAST_SELECTED_MODEL_STORAGE_KEY, selectedModel);
       localStorage.setItem(LAST_SELECTED_MODEL_USER_PICKED_STORAGE_KEY, "true");
-    } else {
-      localStorage.removeItem(LAST_SELECTED_MODEL_STORAGE_KEY);
-      localStorage.removeItem(LAST_SELECTED_MODEL_USER_PICKED_STORAGE_KEY);
     }
 
     if (reasoningEffort) {
@@ -254,15 +270,23 @@ export default function Home() {
     planMode,
   ]);
 
-  // Auto-switch selectedModel when the Plan toggle flips, as long as the user
-  // hasn't explicitly picked a model. Switches between defaultModel and
-  // defaultPlanModel; respects user picks once made.
+  // Auto-switch the model when the Plan toggle actually flips, unless the user
+  // deliberately picked a model in this visit. Entering Plan mode switches to
+  // the deployment's defaultPlanModel; leaving it restores the build model we
+  // came in with. The prevPlanModeRef guard means this only reacts to a real
+  // toggle (never initial hydration or unrelated re-renders), so a remembered
+  // model isn't clobbered on load and a pick from a *previous* visit no longer
+  // blocks the switch.
   useEffect(() => {
     if (!hasHydratedModelPreferences) return;
+    if (prevPlanModeRef.current === planMode) return;
+    prevPlanModeRef.current = planMode;
     if (userPickedModelRef.current) return;
 
-    const target = planMode ? defaultPlanModel : defaultModel;
-    if (!enabledModels.includes(target)) return;
+    if (planMode) buildModelRef.current = selectedModel;
+    const target = planMode ? defaultPlanModel : (buildModelRef.current ?? defaultModel);
+    if (!target) return;
+    if (enabledModels.length > 0 && !enabledModels.includes(target)) return;
     if (target === selectedModel) return;
 
     setSelectedModel(target);
@@ -304,7 +328,7 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prompt.trim()) return;
+    if (!prompt.trim() && queuedFiles.length === 0) return;
     if (!selectedRepo) {
       setError("Please select a repository");
       return;
@@ -325,11 +349,47 @@ export default function Home() {
         return;
       }
 
+      const uploadedFiles: { artifactId: string; fileName: string }[] = [];
+
+      if (queuedFiles.length > 0) {
+        setUploadingFiles(true);
+
+        for (const file of queuedFiles) {
+          try {
+            const formData = new FormData();
+            formData.append("file", file, file.name);
+            const response = await fetch(`/api/sessions/${sessionId}/files`, {
+              method: "POST",
+              body: formData,
+            });
+            if (response.ok) {
+              const data = (await response.json()) as { artifactId: string; fileName: string };
+              uploadedFiles.push({ artifactId: data.artifactId, fileName: data.fileName });
+            } else {
+              console.error(`Failed to upload file: ${file.name}`);
+            }
+          } catch (uploadError) {
+            console.error(`Error uploading file: ${file.name}`, uploadError);
+          }
+        }
+
+        setUploadingFiles(false);
+        setQueuedFiles([]);
+      }
+
+      let content = prompt;
+      if (uploadedFiles.length > 0) {
+        const fileList = uploadedFiles
+          .map((f) => `- ${f.fileName} (artifact_id: ${f.artifactId})`)
+          .join("\n");
+        content = `${prompt}\n\nUploaded files (use the download_file tool with the artifact_id to access them):\n${fileList}`;
+      }
+
       const res = await fetch(`/api/sessions/${sessionId}/prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: prompt,
+          content,
           model: selectedModel,
           reasoningEffort,
         }),
@@ -370,6 +430,10 @@ export default function Home() {
       handlePromptChange={handlePromptChange}
       creating={creating}
       isCreatingSession={isCreatingSession}
+      uploadingFiles={uploadingFiles}
+      queuedFiles={queuedFiles}
+      setQueuedFiles={setQueuedFiles}
+      fileInputRef={fileInputRef}
       error={error}
       handleSubmit={handleSubmit}
       modelOptions={enabledModelOptions}
@@ -397,6 +461,10 @@ function HomeContent({
   handlePromptChange,
   creating,
   isCreatingSession,
+  uploadingFiles,
+  queuedFiles,
+  setQueuedFiles,
+  fileInputRef,
   error,
   handleSubmit,
   modelOptions,
@@ -420,6 +488,10 @@ function HomeContent({
   handlePromptChange: (value: string) => void;
   creating: boolean;
   isCreatingSession: boolean;
+  uploadingFiles: boolean;
+  queuedFiles: File[];
+  setQueuedFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
   error: string;
   handleSubmit: (e: React.FormEvent) => void;
   modelOptions: ModelCategory[];
@@ -478,6 +550,28 @@ function HomeContent({
               {error && <ErrorBanner className="mb-4">{error}</ErrorBanner>}
 
               <div className="border border-border bg-input">
+                {/* Queued files list */}
+                {queuedFiles.length > 0 && (
+                  <div className="px-4 pt-3 flex flex-wrap gap-2">
+                    {queuedFiles.map((file, idx) => (
+                      <div
+                        key={`${file.name}-${idx}`}
+                        className="flex items-center gap-1.5 bg-muted px-2 py-1 text-xs text-foreground max-w-[200px]"
+                      >
+                        <span className="truncate">{file.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setQueuedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                          className="text-secondary-foreground hover:text-destructive flex-shrink-0 transition"
+                          aria-label={`Remove ${file.name}`}
+                        >
+                          <XIcon className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {/* Text input area */}
                 <div className="relative">
                   <textarea
@@ -490,14 +584,44 @@ function HomeContent({
                     className="w-full resize-none bg-transparent px-4 pt-4 pb-12 focus:outline-none text-foreground placeholder:text-secondary-foreground disabled:opacity-50"
                     rows={3}
                   />
-                  {/* Submit button */}
+                  {/* Hidden file input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files ?? []);
+                      if (files.length > 0) {
+                        setQueuedFiles((prev) => [...prev, ...files]);
+                      }
+                      e.target.value = "";
+                    }}
+                  />
+                  {/* Floating action buttons */}
                   <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                    {isCreatingSession && (
+                    {uploadingFiles && (
+                      <span className="text-xs text-muted-foreground">Uploading...</span>
+                    )}
+                    {isCreatingSession && !uploadingFiles && (
                       <span className="text-xs text-accent">Warming sandbox...</span>
                     )}
+                    {/* Attach file button */}
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={creating}
+                      className="p-2 text-secondary-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      title="Attach file"
+                      aria-label="Attach file"
+                    >
+                      <PaperclipIcon className="w-5 h-5" />
+                    </button>
                     <button
                       type="submit"
-                      disabled={!prompt.trim() || creating || !selectedRepo}
+                      disabled={
+                        (!prompt.trim() && queuedFiles.length === 0) || creating || !selectedRepo
+                      }
                       className="p-2 text-secondary-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition"
                       title={`Send (${SHORTCUT_LABELS.SEND_PROMPT})`}
                       aria-label={`Send (${SHORTCUT_LABELS.SEND_PROMPT})`}

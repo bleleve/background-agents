@@ -137,4 +137,63 @@ describe("handleCreateSession D1 ordering", () => {
     expect(initFetch).toHaveBeenCalledOnce();
     expect(create.mock.invocationCallOrder[0]).toBeLessThan(initFetch.mock.invocationCallOrder[0]);
   });
+
+  it("forwards planMode and planModel from the request to the SessionDO init", async () => {
+    const create = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(SessionIndexStore).mockImplementation(function () {
+      return { create } as never;
+    });
+
+    let initBody: Record<string, unknown> | undefined;
+    const initFetch = vi.fn(async (request: Request) => {
+      initBody = (await request.json()) as Record<string, unknown>;
+      return Response.json({ status: "created" });
+    });
+
+    const token = await generateInternalToken(secret);
+    const response = await handleRequest(
+      new Request("https://test.local/sessions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          repoOwner: "Acme",
+          repoName: "Web-App",
+          title: "Test session",
+          model: "anthropic/claude-haiku-4-5",
+          planMode: true,
+          planModel: "anthropic/claude-opus-4-8",
+        }),
+      }),
+      createEnv(initFetch) as never
+    );
+
+    expect(response.status).toBe(201);
+    expect(initFetch).toHaveBeenCalledOnce();
+    // Regression guard: the router-module refactor (#692) dropped these two
+    // fields from the init input, silently disabling the home-page Plan toggle.
+    expect(initBody?.planMode).toBe(true);
+    expect(initBody?.planModel).toBe("anthropic/claude-opus-4-8");
+  });
+
+  it("defaults planMode to false when omitted from the request", async () => {
+    const create = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(SessionIndexStore).mockImplementation(function () {
+      return { create } as never;
+    });
+
+    let initBody: Record<string, unknown> | undefined;
+    const initFetch = vi.fn(async (request: Request) => {
+      initBody = (await request.json()) as Record<string, unknown>;
+      return Response.json({ status: "created" });
+    });
+
+    const response = await createSessionRequest(createEnv(initFetch));
+
+    expect(response.status).toBe(201);
+    expect(initBody?.planMode).toBe(false);
+    expect(initBody?.planModel).toBeNull();
+  });
 });

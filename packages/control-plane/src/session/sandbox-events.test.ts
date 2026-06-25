@@ -5,6 +5,7 @@ import type { SandboxEvent, ServerMessage } from "../types";
 function createProcessor() {
   const repository = {
     updateSandboxHeartbeat: vi.fn(),
+    getSandbox: vi.fn(() => null as { status: string } | null),
     updateSandboxTunnelUrls: vi.fn(),
     getProcessingMessage: vi.fn(() => null as { id: string } | null),
     upsertTokenEvent: vi.fn(),
@@ -42,6 +43,7 @@ function createProcessor() {
   };
 
   const broadcast = vi.fn((_message: ServerMessage) => {});
+  const updateSandboxStatus = vi.fn();
   const triggerSnapshot = vi.fn(async (_reason: string) => {});
   const reconcileSessionStatusAfterExecution = vi.fn(async (_success: boolean) => {});
   const scheduleInactivityCheck = vi.fn(async () => {});
@@ -70,6 +72,7 @@ function createProcessor() {
     callbackService: callbackService as never,
     wsManager: wsManager as never,
     broadcast,
+    updateSandboxStatus,
     applySessionTitleUpdate,
     getIsProcessing,
     triggerSnapshot,
@@ -86,6 +89,7 @@ function createProcessor() {
     wsManager,
     callbackService,
     broadcast,
+    updateSandboxStatus,
     triggerSnapshot,
     reconcileSessionStatusAfterExecution,
     scheduleInactivityCheck,
@@ -374,6 +378,56 @@ describe("SessionSandboxEventProcessor", () => {
     await h.processor.processSandboxEvent(event);
 
     expect(h.repository.updateOpencodeSessionId).not.toHaveBeenCalled();
+  });
+
+  it("recovers a stuck spawning status to ready on a ready event", async () => {
+    const h = createProcessor();
+    // The WS-upgrade invocation's status->ready write was lost (canceled
+    // outcome), so the row is still "spawning" when the bridge's ready event
+    // arrives over a committed webSocketMessage invocation.
+    h.repository.getSandbox.mockReturnValue({ status: "spawning" });
+    const event: SandboxEvent = { type: "ready", sandboxId: "sb-1", timestamp: 1000 };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.updateSandboxStatus).toHaveBeenCalledWith("ready");
+    expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_status", status: "ready" });
+    // A heartbeat baseline is seeded so the connecting-timeout watchdog has a
+    // sign of life and does not kill the healthy, just-connected sandbox.
+    expect(h.repository.updateSandboxHeartbeat).toHaveBeenCalledWith(expect.any(Number));
+  });
+
+  it("recovers a connecting status to ready on a ready event", async () => {
+    const h = createProcessor();
+    h.repository.getSandbox.mockReturnValue({ status: "connecting" });
+    const event: SandboxEvent = { type: "ready", sandboxId: "sb-1", timestamp: 1000 };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.updateSandboxStatus).toHaveBeenCalledWith("ready");
+  });
+
+  it("does not re-assert status when the sandbox is already ready", async () => {
+    const h = createProcessor();
+    h.repository.getSandbox.mockReturnValue({ status: "ready" });
+    const event: SandboxEvent = { type: "ready", sandboxId: "sb-1", timestamp: 1000 };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.updateSandboxStatus).not.toHaveBeenCalled();
+    // Heartbeat is still refreshed on every (re)connect.
+    expect(h.repository.updateSandboxHeartbeat).toHaveBeenCalledWith(expect.any(Number));
+  });
+
+  it("never resurrects a watchdog-terminalized sandbox from a stray ready event", async () => {
+    const h = createProcessor();
+    h.repository.getSandbox.mockReturnValue({ status: "stopped" });
+    const event: SandboxEvent = { type: "ready", sandboxId: "sb-1", timestamp: 1000 };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.updateSandboxStatus).not.toHaveBeenCalled();
+    expect(h.broadcast).not.toHaveBeenCalledWith({ type: "sandbox_status", status: "ready" });
   });
 
   it("applies session_title without storing a timeline event", async () => {

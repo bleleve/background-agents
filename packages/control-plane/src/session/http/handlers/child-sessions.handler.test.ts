@@ -85,6 +85,9 @@ function createSandbox(overrides: Partial<SandboxRow> = {}): SandboxRow {
     tunnel_urls: null,
     ttyd_url: null,
     ttyd_token: null,
+    prev_auth_token_hash: null,
+    prev_modal_sandbox_id: null,
+    prev_identity_expires_at: null,
     created_at: 1,
     ...overrides,
   };

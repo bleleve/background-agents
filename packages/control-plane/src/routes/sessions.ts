@@ -2,6 +2,7 @@ import type { Route } from "./shared";
 import { sessionCreateRoutes } from "./session-create";
 import { sessionChildRoutes } from "./session-children";
 import { sessionChildSpawnRoutes } from "./session-child-spawn";
+import { sessionFileRoutes } from "./session-files";
 import { sessionIndexRoutes } from "./session-index";
 import { sessionMediaRoutes } from "./session-media";
 import { sessionPromptRoutes } from "./session-prompt";
@@ -15,6 +16,7 @@ export const sessionRoutes: Route[] = [
   ...sessionWsTokenRoutes,
   ...sessionPromptRoutes,
   ...sessionMediaRoutes,
+  ...sessionFileRoutes,
   ...sessionChildSpawnRoutes,
   ...sessionChildRoutes,
 ];

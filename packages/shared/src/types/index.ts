@@ -89,7 +89,14 @@ export type MessageSource =
   | "github"
   | "automation"
   | "system";
-export type ArtifactType = "pr" | "screenshot" | "video" | "preview" | "branch" | "link";
+export type ArtifactType =
+  | "pr"
+  | "screenshot"
+  | "video"
+  | "preview"
+  | "branch"
+  | "link"
+  | "file_upload";
 export type EventType =
   | "heartbeat"
   | "token"
@@ -256,6 +263,18 @@ export interface ScreenshotArtifactMetadata {
   annotated?: boolean;
   /** Caption or description provided by the agent */
   caption?: string;
+}
+
+/** Metadata stored on user-uploaded file artifacts. */
+export interface FileUploadArtifactMetadata {
+  /** R2 object key */
+  objectKey: string;
+  /** Original file name provided by the user */
+  fileName: string;
+  /** MIME type of the uploaded file */
+  mimeType: string;
+  /** File size in bytes */
+  sizeBytes: number;
 }
 
 /** Metadata stored on video recording artifacts. */

@@ -398,6 +398,68 @@ describe("createSandboxHandler", () => {
     expect(log.info).toHaveBeenCalledWith("Sandbox token verified successfully");
   });
 
+  it("creates a file artifact row and broadcasts artifact_created", async () => {
+    const { handler, repository, broadcast, now } = createHandler();
+
+    const metadata = {
+      objectKey: "sessions/session-1/files/artifact-2/report.csv",
+      fileName: "report.csv",
+      mimeType: "text/csv",
+      sizeBytes: 512,
+    };
+
+    const response = await handler.createFileArtifact(
+      new Request("http://internal/internal/create-file-artifact", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          artifactId: "artifact-2",
+          objectKey: "sessions/session-1/files/artifact-2/report.csv",
+          fileName: "report.csv",
+          metadata,
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "ok", artifactId: "artifact-2" });
+    expect(repository.createArtifact).toHaveBeenCalledWith({
+      id: "artifact-2",
+      type: "file_upload",
+      url: "sessions/session-1/files/artifact-2/report.csv",
+      metadata: JSON.stringify(metadata),
+      createdAt: 1234,
+    });
+    expect(broadcast).toHaveBeenCalledOnce();
+    expect(broadcast).toHaveBeenCalledWith({
+      type: "artifact_created",
+      artifact: {
+        id: "artifact-2",
+        type: "file_upload",
+        url: "sessions/session-1/files/artifact-2/report.csv",
+        metadata,
+        createdAt: 1234,
+      },
+    });
+    expect(now).toHaveBeenCalled();
+  });
+
+  it("returns 400 when createFileArtifact is missing required fields", async () => {
+    const { handler, repository, broadcast } = createHandler();
+
+    const response = await handler.createFileArtifact(
+      new Request("http://internal/internal/create-file-artifact", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ artifactId: "artifact-3" }), // missing objectKey and fileName
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(repository.createArtifact).not.toHaveBeenCalled();
+    expect(broadcast).not.toHaveBeenCalled();
+  });
+
   it("returns 404 when openai token refresh has no session", async () => {
     const { handler, getSession } = createHandler();
     getSession.mockReturnValue(null);
