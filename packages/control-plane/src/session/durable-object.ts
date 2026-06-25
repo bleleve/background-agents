@@ -764,6 +764,7 @@ export class SessionDO extends DurableObject<Env> {
         callbackService: this.callbackService,
         wsManager: this.wsManager,
         broadcast: (message) => this.broadcast(message),
+        updateSandboxStatus: (status) => this.updateSandboxStatus(status),
         applySessionTitleUpdate: (title, options) => this.applySessionTitleUpdate(title, options),
         getIsProcessing: () => this.getIsProcessing(),
         triggerSnapshot: (reason) => this.triggerSnapshot(reason),
