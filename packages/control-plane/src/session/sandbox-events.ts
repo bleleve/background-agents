@@ -2,7 +2,7 @@ import type { SessionArtifact } from "@open-inspect/shared";
 import { generateId } from "../auth/crypto";
 import type { Logger } from "../logger";
 import type { GitPushSpec } from "../source-control";
-import type { SandboxEvent, ServerMessage } from "../types";
+import type { SandboxEvent, SandboxStatus, ServerMessage } from "../types";
 import { shouldPersistToolCallEvent } from "./event-persistence";
 import { assertArtifactType } from "./artifacts";
 import type { SessionRepository } from "./repository";
@@ -24,6 +24,11 @@ interface SessionSandboxEventProcessorDeps {
   callbackService: CallbackNotificationService;
   wsManager: SessionWebSocketManager;
   broadcast: (message: ServerMessage) => void;
+  // Persists the sandbox status to the DO's SQLite AND mirrors it to the D1
+  // session index (the DO's own updateSandboxStatus wrapper). Use this rather
+  // than repository.updateSandboxStatus directly so the dashboard list view —
+  // which reads sandbox_status from D1 — does not go stale.
+  updateSandboxStatus: (status: SandboxStatus) => void;
   applySessionTitleUpdate: (
     title: string,
     options?: SessionTitleUpdateOptions
@@ -89,7 +94,7 @@ export class SessionSandboxEventProcessor {
       // watchdog-terminalized box (stopped/failed/stale) from a stray event.
       const sandbox = this.deps.repository.getSandbox();
       if (sandbox && (sandbox.status === "spawning" || sandbox.status === "connecting")) {
-        this.deps.repository.updateSandboxStatus("ready");
+        this.deps.updateSandboxStatus("ready");
         this.deps.broadcast({ type: "sandbox_status", status: "ready" });
         this.deps.log.info("sandbox.ready_status_recovered", {
           event: "sandbox.ready_status_recovered",

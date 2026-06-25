@@ -5,7 +5,6 @@ import type { SandboxEvent, ServerMessage } from "../types";
 function createProcessor() {
   const repository = {
     updateSandboxHeartbeat: vi.fn(),
-    updateSandboxStatus: vi.fn(),
     getSandbox: vi.fn(() => null as { status: string } | null),
     updateSandboxTunnelUrls: vi.fn(),
     getProcessingMessage: vi.fn(() => null as { id: string } | null),
@@ -44,6 +43,7 @@ function createProcessor() {
   };
 
   const broadcast = vi.fn((_message: ServerMessage) => {});
+  const updateSandboxStatus = vi.fn();
   const triggerSnapshot = vi.fn(async (_reason: string) => {});
   const reconcileSessionStatusAfterExecution = vi.fn(async (_success: boolean) => {});
   const scheduleInactivityCheck = vi.fn(async () => {});
@@ -72,6 +72,7 @@ function createProcessor() {
     callbackService: callbackService as never,
     wsManager: wsManager as never,
     broadcast,
+    updateSandboxStatus,
     applySessionTitleUpdate,
     getIsProcessing,
     triggerSnapshot,
@@ -88,6 +89,7 @@ function createProcessor() {
     wsManager,
     callbackService,
     broadcast,
+    updateSandboxStatus,
     triggerSnapshot,
     reconcileSessionStatusAfterExecution,
     scheduleInactivityCheck,
@@ -388,7 +390,7 @@ describe("SessionSandboxEventProcessor", () => {
 
     await h.processor.processSandboxEvent(event);
 
-    expect(h.repository.updateSandboxStatus).toHaveBeenCalledWith("ready");
+    expect(h.updateSandboxStatus).toHaveBeenCalledWith("ready");
     expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_status", status: "ready" });
     // A heartbeat baseline is seeded so the connecting-timeout watchdog has a
     // sign of life and does not kill the healthy, just-connected sandbox.
@@ -402,7 +404,7 @@ describe("SessionSandboxEventProcessor", () => {
 
     await h.processor.processSandboxEvent(event);
 
-    expect(h.repository.updateSandboxStatus).toHaveBeenCalledWith("ready");
+    expect(h.updateSandboxStatus).toHaveBeenCalledWith("ready");
   });
 
   it("does not re-assert status when the sandbox is already ready", async () => {
@@ -412,7 +414,7 @@ describe("SessionSandboxEventProcessor", () => {
 
     await h.processor.processSandboxEvent(event);
 
-    expect(h.repository.updateSandboxStatus).not.toHaveBeenCalled();
+    expect(h.updateSandboxStatus).not.toHaveBeenCalled();
     // Heartbeat is still refreshed on every (re)connect.
     expect(h.repository.updateSandboxHeartbeat).toHaveBeenCalledWith(expect.any(Number));
   });
@@ -424,7 +426,7 @@ describe("SessionSandboxEventProcessor", () => {
 
     await h.processor.processSandboxEvent(event);
 
-    expect(h.repository.updateSandboxStatus).not.toHaveBeenCalled();
+    expect(h.updateSandboxStatus).not.toHaveBeenCalled();
     expect(h.broadcast).not.toHaveBeenCalledWith({ type: "sandbox_status", status: "ready" });
   });
 
