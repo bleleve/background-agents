@@ -179,7 +179,20 @@ describe("SessionSandboxEventProcessor", () => {
       metadata: JSON.stringify({ previewStatus: "active" }),
       createdAt: expect.any(Number),
     });
+    // The incoming push_complete event is broadcast synchronously first; the
+    // RWX run + preview artifacts are produced by the deferred preview dispatch
+    // (ctx.waitUntil) and broadcast afterwards, so they land as calls #2 and #3.
     expect(h.broadcast).toHaveBeenNthCalledWith(1, {
+      type: "sandbox_event",
+      event: {
+        type: "push_complete",
+        branchName: "my-feature-branch",
+        commitSha: "6".repeat(40),
+        sandboxId: "sb-1",
+        timestamp: 1000,
+      },
+    });
+    expect(h.broadcast).toHaveBeenNthCalledWith(2, {
       type: "artifact_created",
       artifact: {
         id: expect.any(String),
@@ -189,7 +202,7 @@ describe("SessionSandboxEventProcessor", () => {
         createdAt: expect.any(Number),
       },
     });
-    expect(h.broadcast).toHaveBeenNthCalledWith(2, {
+    expect(h.broadcast).toHaveBeenNthCalledWith(3, {
       type: "artifact_created",
       artifact: {
         id: expect.any(String),
