@@ -227,6 +227,7 @@ export class SessionDO extends DurableObject<Env> {
     relaunchSandbox: () => this.relaunchSandbox(),
     sandboxEvent: (request) => this.sandboxHandler.sandboxEvent(request),
     createMediaArtifact: (request) => this.sandboxHandler.createMediaArtifact(request),
+    createFileArtifact: (request) => this.sandboxHandler.createFileArtifact(request),
     listParticipants: () => this.participantsHandler.listParticipants(),
     addParticipant: (request) => this.sandboxHandler.addParticipant(request),
     listEvents: (_request, url) => this.messagesHandler.listEvents(url),

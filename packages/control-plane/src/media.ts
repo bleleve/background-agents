@@ -6,6 +6,8 @@ export const VIDEO_MAX_BYTES = 100 * 1024 * 1024;
 export const VIDEO_UPLOAD_LIMIT_PER_SESSION = 20;
 export const VIDEO_MAX_DURATION_MS = 90_000;
 export const VIDEO_TIMESTAMP_TOLERANCE_MS = 1_000;
+export const FILE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+export const FILE_UPLOAD_LIMIT_PER_SESSION = 50;
 
 const SCREENSHOT_EXTENSIONS = {
   "image/png": "png",
@@ -92,6 +94,16 @@ export function buildMediaObjectKey(
   extension: string
 ): string {
   return `sessions/${sessionId}/media/${artifactId}.${extension}`;
+}
+
+export function buildFileUploadObjectKey(
+  sessionId: string,
+  artifactId: string,
+  fileName: string
+): string {
+  // Sanitize fileName: keep only safe characters for use in an R2 key
+  const sanitized = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `sessions/${sessionId}/files/${artifactId}/${sanitized}`;
 }
 
 export function isMultipartFile(value: MultipartFieldValue | null): value is MultipartFileLike {

@@ -11,6 +11,7 @@ export const SessionInternalPaths = {
   relaunchSandbox: "/internal/relaunch-sandbox",
   sandboxEvent: "/internal/sandbox-event",
   createMediaArtifact: "/internal/create-media-artifact",
+  createFileArtifact: "/internal/create-file-artifact",
   participants: "/internal/participants",
   events: "/internal/events",
   artifacts: "/internal/artifacts",

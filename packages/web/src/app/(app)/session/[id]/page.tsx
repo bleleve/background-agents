@@ -64,6 +64,8 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   RefreshIcon,
+  PaperclipIcon,
+  XIcon,
 } from "@/components/ui/icons";
 import { Combobox, type ComboboxGroup } from "@/components/ui/combobox";
 
@@ -351,6 +353,11 @@ function SessionPageContent() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // File upload queue state
+  const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const { enabledModels, enabledModelOptions, defaultModel, defaultPlanModel } = useEnabledModels();
 
   const handleModelChange = useCallback((model: string) => {
@@ -409,11 +416,48 @@ function SessionPageContent() {
     reasoningEffort,
   ]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim() || isProcessing) return;
 
-    sendPrompt(prompt, selectedModel, reasoningEffort, planToggle || undefined);
+    const uploadedFiles: { artifactId: string; fileName: string }[] = [];
+
+    if (queuedFiles.length > 0) {
+      setUploadingFiles(true);
+
+      for (const file of queuedFiles) {
+        try {
+          const formData = new FormData();
+          formData.append("file", file, file.name);
+          const response = await fetch(`/api/sessions/${sessionId}/files`, {
+            method: "POST",
+            body: formData,
+          });
+          if (response.ok) {
+            const data = (await response.json()) as { artifactId: string; fileName: string };
+            uploadedFiles.push({ artifactId: data.artifactId, fileName: data.fileName });
+          } else {
+            console.error(`Failed to upload file: ${file.name}`);
+          }
+        } catch (error) {
+          console.error(`Error uploading file: ${file.name}`, error);
+        }
+      }
+
+      setUploadingFiles(false);
+      setQueuedFiles([]);
+    }
+
+    // Append uploaded file context to the prompt so the agent can use download_file
+    let finalPrompt = prompt;
+    if (uploadedFiles.length > 0) {
+      const fileList = uploadedFiles
+        .map((f) => `- ${f.fileName} (artifact_id: ${f.artifactId})`)
+        .join("\n");
+      finalPrompt = `${prompt}\n\nUploaded files (use the download_file tool with the artifact_id to access them):\n${fileList}`;
+    }
+
+    sendPrompt(finalPrompt, selectedModel, reasoningEffort, planToggle || undefined);
     setPrompt("");
     // Revalidate sidebar so this session bubbles to the top
     mutate(isUnarchivedSessionListKey);
@@ -477,6 +521,10 @@ function SessionPageContent() {
       sessionId={sessionId}
       selectedMediaArtifactId={selectedMediaArtifactId}
       setSelectedMediaArtifactId={setSelectedMediaArtifactId}
+      queuedFiles={queuedFiles}
+      setQueuedFiles={setQueuedFiles}
+      uploadingFiles={uploadingFiles}
+      fileInputRef={fileInputRef}
     />
   );
 }
@@ -517,6 +565,10 @@ function SessionContent({
   sessionId,
   selectedMediaArtifactId,
   setSelectedMediaArtifactId,
+  queuedFiles,
+  setQueuedFiles,
+  uploadingFiles,
+  fileInputRef,
 }: {
   sessionState: SessionState;
   connected: boolean;
@@ -553,6 +605,10 @@ function SessionContent({
   sessionId: string;
   selectedMediaArtifactId: string | null;
   setSelectedMediaArtifactId: (artifactId: string | null) => void;
+  queuedFiles: File[];
+  setQueuedFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  uploadingFiles: boolean;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
 }) {
   const isBelowLg = useMediaQuery("(max-width: 1023px)");
   const isPhone = useMediaQuery("(max-width: 767px)");
@@ -994,6 +1050,28 @@ function SessionContent({
 
           {/* Input container */}
           <div className="border border-border bg-input">
+            {/* Queued files list */}
+            {queuedFiles.length > 0 && (
+              <div className="px-4 pt-3 flex flex-wrap gap-2">
+                {queuedFiles.map((file, idx) => (
+                  <div
+                    key={`${file.name}-${idx}`}
+                    className="flex items-center gap-1.5 bg-muted px-2 py-1 text-xs text-foreground max-w-[200px]"
+                  >
+                    <span className="truncate">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setQueuedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                      className="text-secondary-foreground hover:text-destructive flex-shrink-0 transition"
+                      aria-label={`Remove ${file.name}`}
+                    >
+                      <XIcon className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Text input area with floating send button */}
             <div className="relative">
               <textarea
@@ -1015,9 +1093,27 @@ function SessionContent({
                 className="w-full resize-none bg-transparent px-4 pt-4 pb-12 focus:outline-none text-foreground placeholder:text-secondary-foreground"
                 rows={3}
               />
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length > 0) {
+                    setQueuedFiles((prev) => [...prev, ...files]);
+                  }
+                  // Reset so the same file can be re-selected
+                  e.target.value = "";
+                }}
+              />
               {/* Floating action buttons */}
               <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                {isProcessing && prompt.trim() && (
+                {uploadingFiles && (
+                  <span className="text-xs text-muted-foreground">Uploading...</span>
+                )}
+                {isProcessing && prompt.trim() && !uploadingFiles && (
                   <span className="text-xs text-warning">Waiting...</span>
                 )}
                 {canRelaunchSandbox && (
@@ -1042,9 +1138,22 @@ function SessionContent({
                     <StopIcon className="w-5 h-5" />
                   </button>
                 )}
+                {/* Attach file button */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isProcessing || uploadingFiles}
+                  className="p-2 text-secondary-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition"
+                  title="Attach file"
+                  aria-label="Attach file"
+                >
+                  <PaperclipIcon className="w-5 h-5" />
+                </button>
                 <button
                   type="submit"
-                  disabled={!prompt.trim() || isProcessing}
+                  disabled={
+                    (!prompt.trim() && queuedFiles.length === 0) || isProcessing || uploadingFiles
+                  }
                   className="p-2 text-secondary-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition"
                   title={
                     isProcessing && prompt.trim()

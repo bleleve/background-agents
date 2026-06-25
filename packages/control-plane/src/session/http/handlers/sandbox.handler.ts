@@ -40,9 +40,17 @@ export interface SandboxHandlerDeps {
   getLog: () => Logger;
 }
 
+interface CreateFileArtifactRequest {
+  artifactId: string;
+  objectKey: string;
+  fileName: string;
+  metadata: Record<string, unknown>;
+}
+
 export interface SandboxHandler {
   sandboxEvent: (request: Request) => Promise<Response>;
   createMediaArtifact: (request: Request) => Promise<Response>;
+  createFileArtifact: (request: Request) => Promise<Response>;
   addParticipant: (request: Request) => Promise<Response>;
   verifySandboxToken: (request: Request) => Promise<Response>;
   openaiTokenRefresh: () => Promise<Response>;
@@ -140,6 +148,43 @@ export function createSandboxHandler(deps: SandboxHandlerDeps): SandboxHandler {
 
       deps.broadcast({ type: "artifact_created", artifact });
       deps.broadcast({ type: "sandbox_event", event });
+
+      return Response.json({ status: "ok", artifactId: artifact.id });
+    },
+
+    async createFileArtifact(request: Request): Promise<Response> {
+      let body: CreateFileArtifactRequest;
+      try {
+        body = (await request.json()) as CreateFileArtifactRequest;
+      } catch {
+        return Response.json({ error: "Invalid request body" }, { status: 400 });
+      }
+
+      if (!body.artifactId || !body.objectKey || !body.fileName) {
+        return Response.json(
+          { error: "artifactId, objectKey, and fileName are required" },
+          { status: 400 }
+        );
+      }
+
+      const now = deps.now();
+      const artifact: SessionArtifact = {
+        id: body.artifactId,
+        type: "file_upload",
+        url: body.objectKey,
+        metadata: body.metadata ?? null,
+        createdAt: now,
+      };
+
+      deps.repository.createArtifact({
+        id: artifact.id,
+        type: artifact.type,
+        url: artifact.url,
+        metadata: artifact.metadata ? JSON.stringify(artifact.metadata) : null,
+        createdAt: now,
+      });
+
+      deps.broadcast({ type: "artifact_created", artifact });
 
       return Response.json({ status: "ok", artifactId: artifact.id });
     },
