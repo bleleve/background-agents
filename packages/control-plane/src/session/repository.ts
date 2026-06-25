@@ -60,6 +60,7 @@ export interface SandboxCircuitBreakerState {
   snapshot_image_id: string | null;
   spawn_failure_count: number | null;
   last_spawn_failure: number | null;
+  last_heartbeat: number | null;
 }
 
 /**
@@ -221,6 +222,13 @@ export interface SpawnSandboxData {
   createdAt: number;
   authTokenHash: string;
   modalSandboxId: string;
+  /**
+   * ms epoch until which the identity being superseded by this spawn stays
+   * valid (typically now + grace window). The current identity is demoted into
+   * the prev_* columns so a healthy sandbox still booting under it can finish
+   * authenticating instead of being orphaned.
+   */
+  prevIdentityExpiresAt: number;
 }
 
 export interface ResumeSandboxData {
@@ -449,7 +457,7 @@ export class SessionRepository {
 
   getSandboxWithCircuitBreaker(): SandboxCircuitBreakerState | null {
     const result = this.sql.exec(
-      `SELECT status, created_at, modal_object_id, snapshot_image_id, spawn_failure_count, last_spawn_failure FROM sandbox LIMIT 1`
+      `SELECT status, created_at, modal_object_id, snapshot_image_id, spawn_failure_count, last_spawn_failure, last_heartbeat FROM sandbox LIMIT 1`
     );
     const rows = this.rows<SandboxCircuitBreakerState>(result);
     return rows[0] ?? null;
@@ -474,8 +482,20 @@ export class SessionRepository {
   }
 
   updateSandboxForSpawn(data: SpawnSandboxData): void {
+    // Demote the existing identity into the prev_* columns in the same UPDATE.
+    // SQLite evaluates every RHS against the pre-update row, so
+    // `prev_auth_token_hash = auth_token_hash` captures the OLD current value
+    // before it is overwritten below. The expiry is only meaningful when there
+    // was a real identity to demote, so leave it null when the old identity was
+    // empty (first spawn) to avoid a dangling grace window.
     this.sql.exec(
       `UPDATE sandbox SET
+         prev_auth_token_hash = auth_token_hash,
+         prev_modal_sandbox_id = modal_sandbox_id,
+         prev_identity_expires_at = CASE
+           WHEN auth_token_hash IS NOT NULL OR modal_sandbox_id IS NOT NULL THEN ?
+           ELSE NULL
+         END,
          status = ?,
          created_at = ?,
          auth_token_hash = ?,
@@ -483,10 +503,45 @@ export class SessionRepository {
          modal_sandbox_id = ?,
          modal_object_id = NULL
        WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+      data.prevIdentityExpiresAt,
       data.status,
       data.createdAt,
       data.authTokenHash,
       data.modalSandboxId
+    );
+  }
+
+  /**
+   * Clear the retained previous identity. Called once the current sandbox has
+   * connected (the previous identity can no longer be needed), shrinking the
+   * window during which two tokens are accepted.
+   */
+  clearPreviousSandboxIdentity(): void {
+    this.sql.exec(
+      `UPDATE sandbox SET
+         prev_auth_token_hash = NULL,
+         prev_modal_sandbox_id = NULL,
+         prev_identity_expires_at = NULL
+       WHERE id = (SELECT id FROM sandbox LIMIT 1)`
+    );
+  }
+
+  /**
+   * Promote the retained previous identity back to current and clear the prev_*
+   * slots. Used when a sandbox that booted under the previous identity connects
+   * while the (newer) current identity never did — that healthy sandbox should
+   * own the session, so the stored identity is realigned to it.
+   */
+  promotePreviousSandboxIdentity(): void {
+    this.sql.exec(
+      `UPDATE sandbox SET
+         auth_token_hash = prev_auth_token_hash,
+         auth_token = NULL,
+         modal_sandbox_id = prev_modal_sandbox_id,
+         prev_auth_token_hash = NULL,
+         prev_modal_sandbox_id = NULL,
+         prev_identity_expires_at = NULL
+       WHERE id = (SELECT id FROM sandbox LIMIT 1)`
     );
   }
 

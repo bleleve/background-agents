@@ -31,6 +31,7 @@ import {
   DEFAULT_HEARTBEAT_CONFIG,
   DEFAULT_CONNECTING_TIMEOUT_CONFIG,
   DEFAULT_IN_FLIGHT_SILENCE_CONFIG,
+  SANDBOX_IDENTITY_GRACE_MS,
   type CircuitBreakerConfig,
   type SpawnConfig,
   type InactivityConfig,
@@ -60,6 +61,7 @@ export interface SandboxCircuitBreakerInfo {
   snapshot_image_id: string | null;
   spawn_failure_count: number | null;
   last_spawn_failure: number | null;
+  last_heartbeat: number | null;
 }
 
 /**
@@ -78,15 +80,22 @@ export interface SandboxStorage {
   getOpencodeUserConfig(): Promise<string | undefined>;
   /** Update sandbox status */
   updateSandboxStatus(status: SandboxStatus): void;
-  /** Update sandbox for spawn (status, auth token, sandbox ID, created_at) */
+  /** Update sandbox for spawn (status, auth token, sandbox ID, created_at). Demotes
+   *  the prior identity into the prev_* slots, valid until prevIdentityExpiresAt. */
   updateSandboxForSpawn(data: {
     status: SandboxStatus;
     createdAt: number;
     authTokenHash: string;
     modalSandboxId: string;
+    prevIdentityExpiresAt: number;
   }): void;
   /** Update sandbox state for in-place resume without rotating auth/token identity */
   updateSandboxForResume?(data: { status: SandboxStatus; createdAt: number }): void;
+  /** Clear the retained previous identity (once the current sandbox has connected) */
+  clearPreviousSandboxIdentity?(): void;
+  /** Promote the retained previous identity back to current (a sandbox booted under
+   *  it connected while the newer current identity never did) */
+  promotePreviousSandboxIdentity?(): void;
   /** Update sandbox Modal object ID (for snapshot API) */
   updateSandboxModalObjectId(modalObjectId: string): void;
   /** Update sandbox snapshot image ID */
@@ -345,6 +354,7 @@ export class SandboxLifecycleManager {
       providerObjectId: sandboxState?.modal_object_id || null,
       snapshotImageId: sandboxState?.snapshot_image_id || null,
       hasActiveWebSocket: this.wsManager.getSandboxWebSocket() !== null,
+      lastProgressAt: sandboxState?.last_heartbeat ?? null,
     };
 
     const spawnDecision = evaluateSpawnDecision(
@@ -391,10 +401,38 @@ export class SandboxLifecycleManager {
   }
 
   /**
+   * Emit a signal when a (re)spawn is about to rotate the sandbox identity while
+   * a prior boot is still in flight (status spawning/connecting). That boot is
+   * orphaned by the rotation — the previous-identity grace window keeps it
+   * authenticatable, but this counts how often a spawn slipped past the in-flight
+   * guard so the bypass rate is observable in prod.
+   */
+  private warnIfRotatingInFlightBoot(context: "spawn" | "restore"): void {
+    const prior = this.storage.getSandbox();
+    if (prior && (prior.status === "spawning" || prior.status === "connecting")) {
+      this.log.warn("Rotating sandbox identity over an in-flight boot", {
+        event: "sandbox.identity_rotated_in_flight",
+        context,
+        prior_status: prior.status,
+        prior_sandbox_id: prior.modal_sandbox_id,
+        prior_last_heartbeat: prior.last_heartbeat,
+      });
+    }
+  }
+
+  /**
    * Execute a fresh sandbox spawn.
    */
   private async doSpawn(): Promise<void> {
     this.isSpawningSandbox = true;
+    // Hold the in-flight guard across the WHOLE boot window (spawning →
+    // connecting), not just until createSandbox returns. A respawn during the
+    // connecting phase would rotate this sandbox's identity and orphan the
+    // healthy box. `armed` flips true only once the boot is genuinely in flight
+    // (status "connecting", watchdog scheduled); the finally then releases the
+    // guard ONLY on an early return / synchronous failure. A real connect
+    // (onSandboxConnected) or the connecting-timeout watchdog clears it otherwise.
+    let armed = false;
 
     try {
       const session = this.storage.getSession();
@@ -411,12 +449,16 @@ export class SandboxLifecycleManager {
       const sandboxAuthTokenHash = await hashToken(sandboxAuthToken);
       const expectedSandboxId = `sandbox-${session.repo_owner}-${session.repo_name}-${now}`;
 
-      // Store expected sandbox ID and auth token BEFORE calling provider
+      // Store expected sandbox ID and auth token BEFORE calling provider. The
+      // prior identity is demoted into the prev_* slots and stays valid for the
+      // grace window so a sandbox still booting under it is not orphaned.
+      this.warnIfRotatingInFlightBoot("spawn");
       this.storage.updateSandboxForSpawn({
         status: "spawning",
         createdAt: now,
         authTokenHash: sandboxAuthTokenHash,
         modalSandboxId: expectedSandboxId,
+        prevIdentityExpiresAt: now + SANDBOX_IDENTITY_GRACE_MS,
       });
       this.broadcaster.broadcast({ type: "sandbox_status", status: "spawning" });
 
@@ -546,6 +588,9 @@ export class SandboxLifecycleManager {
       // within the allowed window, handleAlarm() will fail the sandbox.
       // This alarm is naturally replaced by the inactivity alarm on successful connect.
       await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+      // Boot is now genuinely in flight — keep the in-flight guard set past this
+      // method's return (cleared on connect / connecting-timeout, not in finally).
+      armed = true;
 
       // NOTE: the circuit breaker is reset on a genuine bridge connect
       // (onSandboxConnected), NOT here. createSandbox returning OK does not mean
@@ -581,7 +626,13 @@ export class SandboxLifecycleManager {
         error: errorMessage,
       });
     } finally {
-      this.isSpawningSandbox = false;
+      // Release the in-flight guard only when no boot is actually in flight (an
+      // early return or synchronous failure). A successful spawn keeps it set
+      // until connect / connecting-timeout so a concurrent respawn can't rotate
+      // and orphan this booting sandbox — see `armed` above.
+      if (!armed) {
+        this.isSpawningSandbox = false;
+      }
     }
   }
 
@@ -639,6 +690,9 @@ export class SandboxLifecycleManager {
     }
 
     this.isSpawningSandbox = true;
+    // See doSpawn: hold the in-flight guard across the full boot window; the
+    // finally only releases it when no boot is in flight.
+    let armed = false;
 
     try {
       const session = this.storage.getSession();
@@ -654,12 +708,16 @@ export class SandboxLifecycleManager {
       const sandboxAuthTokenHash = await hashToken(sandboxAuthToken);
       const expectedSandboxId = `sandbox-${session.repo_owner}-${session.repo_name}-${now}`;
 
-      // Store expected sandbox ID and auth token
+      // Store expected sandbox ID and auth token. As in doSpawn, demote the prior
+      // identity into the prev_* slots with a grace window so a sandbox still
+      // booting under it is not orphaned by this restore.
+      this.warnIfRotatingInFlightBoot("restore");
       this.storage.updateSandboxForSpawn({
         status: "spawning",
         createdAt: now,
         authTokenHash: sandboxAuthTokenHash,
         modalSandboxId: expectedSandboxId,
+        prevIdentityExpiresAt: now + SANDBOX_IDENTITY_GRACE_MS,
       });
       this.broadcaster.broadcast({ type: "sandbox_status", status: "spawning" });
 
@@ -751,6 +809,8 @@ export class SandboxLifecycleManager {
           type: "sandbox_restored",
           message: "Session restored from snapshot",
         });
+        // Boot in flight — hold the guard past return (see doSpawn).
+        armed = true;
       } else {
         this.log.error("Snapshot restore failed", {
           error: result.error,
@@ -800,7 +860,13 @@ export class SandboxLifecycleManager {
         error: errorMessage,
       });
     } finally {
-      this.isSpawningSandbox = false;
+      // Release the in-flight guard only when no boot is actually in flight (an
+      // early return or synchronous failure). A successful spawn keeps it set
+      // until connect / connecting-timeout so a concurrent respawn can't rotate
+      // and orphan this booting sandbox — see `armed` above.
+      if (!armed) {
+        this.isSpawningSandbox = false;
+      }
     }
   }
 
@@ -814,6 +880,8 @@ export class SandboxLifecycleManager {
     }
 
     this.isSpawningSandbox = true;
+    // See doSpawn: hold the in-flight guard across the full boot window.
+    let armed = false;
 
     try {
       const session = this.storage.getSession();
@@ -857,6 +925,9 @@ export class SandboxLifecycleManager {
             provider_object_id: providerObjectId,
             error: result.error,
           });
+          // doSpawn owns the in-flight guard from here; don't let our finally
+          // clear what it set.
+          armed = true;
           await this.doSpawn();
           return;
         }
@@ -876,6 +947,8 @@ export class SandboxLifecycleManager {
 
       await this.storeAndBroadcastTunnelUrls(result.tunnelUrls);
       await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+      // Boot in flight — hold the guard past return (see doSpawn).
+      armed = true;
       // Breaker reset happens on a genuine bridge connect (onSandboxConnected),
       // not on the resume call returning OK — see doSpawn.
     } catch (error) {
@@ -895,7 +968,13 @@ export class SandboxLifecycleManager {
         error: error instanceof Error ? error : String(error),
       });
     } finally {
-      this.isSpawningSandbox = false;
+      // Release the in-flight guard only when no boot is actually in flight (an
+      // early return or synchronous failure). A successful spawn keeps it set
+      // until connect / connecting-timeout so a concurrent respawn can't rotate
+      // and orphan this booting sandbox — see `armed` above.
+      if (!armed) {
+        this.isSpawningSandbox = false;
+      }
     }
   }
 
@@ -1544,6 +1623,10 @@ export class SandboxLifecycleManager {
   onSandboxConnected(): void {
     this.isSpawningSandbox = false;
     this.storage.setLastSpawnError(null, null);
+    // The current sandbox has connected, so the retained previous identity can no
+    // longer be needed — clear it to shrink the window during which two tokens
+    // are accepted. (No-op if there is no previous identity.)
+    this.storage.clearPreviousSandboxIdentity?.();
     // Reset the circuit breaker only on a genuine bridge connect — NOT when the
     // provider call returned OK. This is what makes the breaker able to open on
     // a connect-never-completes loop (provider accepts createSandbox but the

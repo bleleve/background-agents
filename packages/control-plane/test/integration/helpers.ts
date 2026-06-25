@@ -297,3 +297,24 @@ export async function seedSandboxAuthHash(
     );
   });
 }
+
+/**
+ * Seed the retained previous sandbox identity (prev_* columns) so the
+ * grace-window acceptance path can be exercised. `expiresAt` is the ms-epoch
+ * after which the previous identity is no longer accepted.
+ */
+export async function seedSandboxPrevIdentity(
+  stub: DurableObjectStub,
+  opts: { prevAuthToken: string; prevSandboxId: string; expiresAt: number }
+): Promise<void> {
+  const prevHash = await hashToken(opts.prevAuthToken);
+
+  await runInDurableObject(stub, (instance: SessionDO) => {
+    instance.ctx.storage.sql.exec(
+      "UPDATE sandbox SET prev_auth_token_hash = ?, prev_modal_sandbox_id = ?, prev_identity_expires_at = ?",
+      prevHash,
+      opts.prevSandboxId,
+      opts.expiresAt
+    );
+  });
+}
