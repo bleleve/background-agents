@@ -628,6 +628,7 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
       connectingRef.current = false;
       setConnected(true);
       setConnecting(false);
+      setConnectionError(null);
       reconnectAttempts.current = 0;
 
       // Subscribe to session with the auth token
@@ -663,23 +664,30 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
       setReplaying(false);
       wsRef.current = null;
 
-      // Handle authentication errors
+      // Authentication genuinely failed — a fresh sign-in is required, so don't
+      // auto-reconnect (we would only 401 again). Clearing the token lets a
+      // manual Reconnect (or a tab refocus once the user has re-authenticated)
+      // fetch a new one.
       if (event.code === WS_CLOSE_AUTH_REQUIRED) {
         setAuthError("Authentication failed. Please sign in again.");
-        // Clear the token so we fetch a new one on reconnect
         wsTokenRef.current = null;
         return;
       }
 
-      // Handle session expired (e.g., after server hibernation)
-      if (event.code === WS_CLOSE_SESSION_EXPIRED) {
-        setConnectionError("Session expired. Please reconnect.");
-        wsTokenRef.current = null;
-        return;
+      // 4002 is a benign hibernation artifact: Cloudflare evicted the Durable
+      // Object from memory and could no longer map this socket. A fresh
+      // subscribe rebuilds that mapping from D1, so recover automatically with
+      // the normal backoff instead of forcing a manual reconnect. This close is
+      // server-initiated and therefore "clean", so it would otherwise skip the
+      // wasClean gate below — handle it explicitly here.
+      const isRecoverableExpiry = event.code === WS_CLOSE_SESSION_EXPIRED;
+      if (isRecoverableExpiry) {
+        wsTokenRef.current = null; // force a fresh token + subscribe
       }
 
-      // Only reconnect if mounted and not a clean close
-      if (mountedRef.current && !event.wasClean) {
+      // Reconnect on an unclean close (network drop, idle timeout) or a
+      // recoverable session-expiry close.
+      if (mountedRef.current && (!event.wasClean || isRecoverableExpiry)) {
         if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
           const delay = Math.min(
             RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttempts.current),
@@ -784,6 +792,12 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
   }, [hasMoreHistory, loadingHistory]);
 
   const reconnect = useCallback(() => {
+    // Cancel any pending backoff attempt so we don't end up with two connects
+    // racing (e.g. a focus-triggered reconnect short-circuiting the timer).
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -814,16 +828,46 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
     };
   }, [connect]);
 
-  // Ping periodically to keep connection alive.
+  // Keep the connection alive and recover quickly when the tab returns to the
+  // foreground. Browsers throttle (and eventually freeze) timers in backgrounded
+  // tabs, so the heartbeat can stall and an idle intermediary (CF edge / tunnel)
+  // can close the socket without the throttled backoff timer ever firing. We
+  // therefore (1) skip the heartbeat while hidden and (2) reconnect or re-ping
+  // on the visible transition.
   useEffect(() => {
-    const pingInterval = setInterval(() => {
+    const pingIfOpen = () => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: "ping" }));
       }
+    };
+
+    const pingInterval = setInterval(() => {
+      // No point pinging on a throttled timer while hidden; the visible
+      // transition below handles recovery when the user comes back.
+      if (document.visibilityState === "hidden") return;
+      pingIfOpen();
     }, PING_INTERVAL_MS);
 
-    return () => clearInterval(pingInterval);
-  }, []);
+    const handleVisible = () => {
+      if (document.visibilityState !== "visible" || !mountedRef.current) return;
+      const ws = wsRef.current;
+      const healthy = ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING;
+      if (healthy || connectingRef.current) {
+        // Socket still looks alive — nudge it to confirm liveness.
+        pingIfOpen();
+        return;
+      }
+      // Socket dropped while backgrounded — reconnect now instead of waiting on a
+      // backoff timer that may never fire while the tab is frozen.
+      reconnect();
+    };
+
+    document.addEventListener("visibilitychange", handleVisible);
+    return () => {
+      clearInterval(pingInterval);
+      document.removeEventListener("visibilitychange", handleVisible);
+    };
+  }, [reconnect]);
 
   const isProcessing = sessionState?.isProcessing ?? false;
 
