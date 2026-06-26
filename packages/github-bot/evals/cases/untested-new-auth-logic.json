@@ -1,0 +1,20 @@
+{
+  "name": "untested-new-auth-logic",
+  "description": "A PR adds a new exported authorization function with real branching (role + ownership checks) and ships no test for it. This is the narrow must-test case the coverage sentinel targets: critical-path logic with a missing test, which should raise the risk floor — as opposed to the many low-risk PRs that legitimately add no tests.",
+  "pr": {
+    "owner": "acme",
+    "repo": "widgets",
+    "number": 137,
+    "title": "Add resource-level access control",
+    "body": "Adds canAccessResource() to gate resource reads by role and ownership.",
+    "author": "alice",
+    "base": "main",
+    "head": "feat/access-control",
+    "isPublic": false
+  },
+  "diff": "diff --git a/src/auth/permissions.ts b/src/auth/permissions.ts\n@@ -0,0 +1,14 @@\n+export function canAccessResource(user: User, resource: Resource): boolean {\n+  if (user.role === \"admin\") {\n+    return true;\n+  }\n+  if (resource.ownerId === user.id) {\n+    return true;\n+  }\n+  if (user.role === \"viewer\" && resource.visibility === \"public\") {\n+    return true;\n+  }\n+  return false;\n+}",
+  "expectedFinding": {
+    "file": "src/auth/permissions.ts",
+    "summary": "New authorization logic in canAccessResource() ships with no test covering the role/ownership/visibility branches; a regression here would silently grant or deny access. Critical-path → raises the coverage floor."
+  }
+}

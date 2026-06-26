@@ -305,6 +305,34 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("never as a separate comment");
   });
 
+  it("delegates test coverage to pr-test-sentinel, scoped to must-test changes only", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).toContain("pr-test-sentinel");
+    expect(prompt).toContain("test-coverage pass");
+    // Coverage gaps ride in the single verdict comment, in a Tests line — not a separate message.
+    expect(prompt).toContain("**Tests**");
+    expect(prompt).toContain("### Tests");
+    // The coverage estimate line is part of the verdict template.
+    expect(prompt).toContain("🧪 <N>% of test-worthy changes are tested");
+    // Default is silence (Martin's framing): do not alert just because a PR adds no tests.
+    expect(prompt).toContain("No test-worthy changes.");
+    expect(prompt).toContain("Do NOT alert just because a PR adds no tests");
+    expect(prompt).toContain("never add a Tests line just because a PR adds no tests");
+  });
+
+  it("applies a narrow coverage floor to the risk badge (must-test gaps only)", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).toContain("Coverage floor");
+    // The floor fires only on a reported missing test, and is scoped by severity.
+    expect(prompt).toContain("Apply ONLY when the pr-test-sentinel reported a missing test");
+    expect(prompt).toContain("at least 🟡 Medium");
+    expect(prompt).toContain("at least 🔴 High");
+    // It must never penalize excluded change types (config, docs, refactors already covered, …).
+    expect(prompt).toContain("Never raise the badge for changes the sentinel excluded");
+    // A clean review whose badge is raised only by coverage still labels the gap honestly.
+    expect(prompt).toContain("No correctness findings");
+  });
+
   it("omits the lookout/dive guidance by default", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
     expect(prompt).not.toContain("Large diff — survey, then dive");
