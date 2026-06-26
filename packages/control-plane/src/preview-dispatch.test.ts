@@ -87,6 +87,38 @@ describe("dispatchPreview", () => {
     );
   });
 
+  it("returns per-product preview URLs when RWX_ORG_SLUG is configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      Response.json(
+        {
+          dispatch_id: "dispatch-1",
+          run_url: "https://cloud.rwx.com/mint/org/runs/3",
+        },
+        { status: 201 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      dispatchPreview({ RWX_ACCESS_TOKEN: "token", RWX_ORG_SLUG: "fountain" } as never, {
+        repoOwner: "onboardiq",
+        repoName: "background-agents",
+        branchName: "my-feature-branch",
+        slug: "stable-preview-slug",
+      })
+    ).resolves.toEqual({
+      dispatchId: "dispatch-1",
+      runUrl: "https://cloud.rwx.com/mint/org/runs/3",
+      previewUrls: {
+        hire: "https://hire-stable-preview-slug--fountain.r1.rwx.run/",
+        "recruiter-ui": "https://recruiter-ui-stable-preview-slug--fountain.r1.rwx.run/",
+        "applicant-ui": "https://applicant-ui-stable-preview-slug--fountain.r1.rwx.run/",
+        "career-site-ui": "https://career-site-ui-stable-preview-slug--fountain.r1.rwx.run/",
+        wx: "https://wx-stable-preview-slug--fountain.r1.rwx.run/",
+      },
+    });
+  });
+
   it("can dispatch without waiting for a run URL", async () => {
     const fetchMock = vi
       .fn()

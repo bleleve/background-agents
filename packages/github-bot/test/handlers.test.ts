@@ -20,6 +20,7 @@ vi.mock("../src/github-auth", () => ({
   checkSenderPermission: vi.fn().mockResolvedValue({ hasPermission: true }),
   dismissPullRequestReview: vi.fn().mockResolvedValue(true),
   approvePullRequest: vi.fn().mockResolvedValue(true),
+  createIssueComment: vi.fn().mockResolvedValue(1),
 }));
 
 vi.mock("../src/utils/internal", () => ({
@@ -73,6 +74,7 @@ import {
   checkSenderPermission,
   dismissPullRequestReview,
   approvePullRequest,
+  createIssueComment,
 } from "../src/github-auth";
 import { getGitHubConfig } from "../src/utils/integration-config";
 
@@ -238,6 +240,7 @@ beforeEach(() => {
   vi.mocked(checkSenderPermission).mockResolvedValue({ hasPermission: true });
   vi.mocked(dismissPullRequestReview).mockResolvedValue(true);
   vi.mocked(approvePullRequest).mockResolvedValue(true);
+  vi.mocked(createIssueComment).mockResolvedValue(1);
   vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig });
   // Default PR-details fetch: small diff, so review handlers see largeDiff=false.
   // Includes head/base (and head.repo for fork detection) so handlers that resolve
@@ -1961,6 +1964,54 @@ describe("handlePullRequestLabeled", () => {
       commitSha: "abc123",
       slug: "widgets-42",
     });
+  });
+
+  it("posts all product preview links when the control plane returns preview URLs", async () => {
+    const env = { ...createMockEnv(), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
+    const log = createMockLogger();
+    const cpFetch = getControlPlaneFetch(env);
+    cpFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          dispatchId: "d-1",
+          runUrl: "https://cloud.rwx.com/mint/fountain/runs/123",
+          previewUrls: {
+            hire: "https://hire-widgets-42--fountain.r1.rwx.run/",
+            "recruiter-ui": "https://recruiter-ui-widgets-42--fountain.r1.rwx.run/",
+            "applicant-ui": "https://applicant-ui-widgets-42--fountain.r1.rwx.run/",
+            "career-site-ui": "https://career-site-ui-widgets-42--fountain.r1.rwx.run/",
+            wx: "https://wx-widgets-42--fountain.r1.rwx.run/",
+          },
+        }),
+        { status: 202 }
+      )
+    );
+    const payload: PullRequestLabeledPayload = {
+      ...pullRequestLabeledPayload,
+      label: { name: "preview" },
+      pull_request: {
+        ...pullRequestLabeledPayload.pull_request,
+        labels: [{ name: "preview" }],
+      },
+    };
+
+    await handlePullRequestLabeled(env, log, payload, "trace-preview");
+
+    expect(createIssueComment).toHaveBeenCalledWith(
+      "test-installation-token",
+      "acme",
+      "widgets",
+      42,
+      [
+        "[hire preview](https://hire-widgets-42--fountain.r1.rwx.run/)",
+        "[recruiter-ui preview](https://recruiter-ui-widgets-42--fountain.r1.rwx.run/)",
+        "[applicant-ui preview](https://applicant-ui-widgets-42--fountain.r1.rwx.run/)",
+        "[career-site-ui preview](https://career-site-ui-widgets-42--fountain.r1.rwx.run/)",
+        "[WX preview](https://wx-widgets-42--fountain.r1.rwx.run/)",
+        "[RWX run](https://cloud.rwx.com/mint/fountain/runs/123)",
+      ].join("\n"),
+      "Open-Inspect"
+    );
   });
 
   it("skips the preview label when PREVIEW_LABEL_ENABLED is not set", async () => {

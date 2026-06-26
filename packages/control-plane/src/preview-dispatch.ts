@@ -7,6 +7,14 @@ const log = createLogger("preview-dispatch");
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 120_000;
 
+const PREVIEW_PRODUCTS = [
+  "hire",
+  "recruiter-ui",
+  "applicant-ui",
+  "career-site-ui",
+  "wx",
+] as const;
+
 export interface DispatchPreviewResult {
   dispatchId: string;
   runUrl: string;
@@ -55,7 +63,12 @@ export async function dispatchPreview(
   params["reason"] = input.reason || "reef_general";
 
   const previewUrls = env.RWX_ORG_SLUG
-    ? { hire: `https://hire-${input.slug}--${env.RWX_ORG_SLUG}.r1.rwx.run/` }
+    ? Object.fromEntries(
+        PREVIEW_PRODUCTS.map((product) => [
+          product,
+          `https://${product}-${input.slug}--${env.RWX_ORG_SLUG}.r1.rwx.run/`,
+        ])
+      )
     : undefined;
 
   const result = await client.createDispatch({
