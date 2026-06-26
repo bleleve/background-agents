@@ -238,6 +238,23 @@ describe("createSessionLifecycleHandler", () => {
     expect(broadcast).toHaveBeenCalledWith({ type: "preview_mode", enabled: true });
   });
 
+  it("dispatches the caller-provided commit SHA over the session's current_sha", async () => {
+    const { handler, repository, getSession, dispatchPreview } = createHandler();
+    getSession.mockReturnValue(createSession());
+
+    const response = await handler.updatePreview(
+      new Request("http://internal/internal/update-preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: true, commitSha: "newer-sha" }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(dispatchPreview).toHaveBeenCalledWith(undefined, "newer-sha");
+    expect(repository.updatePreviewDispatchedSha).toHaveBeenCalledWith("newer-sha");
+  });
+
   it("initializes session, sandbox, and owner participant", async () => {
     const {
       handler,
