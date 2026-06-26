@@ -62,6 +62,49 @@ export class SessionSandboxEventProcessor {
 
   constructor(private readonly deps: SessionSandboxEventProcessorDeps) {}
 
+  /**
+   * Self-heal a sandbox stuck in a booting status (spawning/connecting) when an
+   * agent-activity event proves it is alive.
+   *
+   * The authoritative spawning/connecting -> ready transition runs in the
+   * WebSocket-upgrade fetch handler (durable-object.ts onSandboxConnected +
+   * updateSandboxStatus), but that invocation's runtime outcome can be
+   * "canceled" for a hibernatable WS upgrade, dropping its storage writes. The
+   * `ready` handler re-asserts ready whenever the bridge re-sends `ready`, but a
+   * single long-lived connection that never reconnects sends `ready` only once —
+   * so a lost upgrade write strands the row at "spawning" with a null
+   * last_heartbeat for the life of the box.
+   *
+   * Step/tool/token/execution events, by contrast, keep streaming over committed
+   * webSocketMessage invocations and are only emitted once the agent process is
+   * up, so they are proof of life: re-assert ready and seed a heartbeat baseline
+   * off them too. Without this a healthy box running a long turn (74 tool calls
+   * observed in prod) stays "spawning"; when the inactivity alarm finally fires,
+   * evaluateConnectingTimeout — which measures elapsed from created_at while
+   * last_heartbeat is null — kills the (often already-finished) turn as a
+   * "connecting timeout", and the late execution_complete lands on an
+   * already-failed message so no PR is pushed.
+   *
+   * Only promote from a booting status; never resurrect a watchdog-terminalized
+   * box (stopped/failed/stale) from a stray event. Heartbeat events are
+   * intentionally NOT a promotion signal: during boot they are the supervisor's
+   * boot-progress pings, not proof the agent connected.
+   */
+  private healBootStatusFromAgentActivity(now: number, eventType: string): void {
+    const sandbox = this.deps.repository.getSandbox();
+    if (!sandbox || (sandbox.status !== "spawning" && sandbox.status !== "connecting")) {
+      return;
+    }
+    this.deps.updateSandboxStatus("ready");
+    this.deps.repository.updateSandboxHeartbeat(now);
+    this.deps.broadcast({ type: "sandbox_status", status: "ready" });
+    this.deps.log.info("sandbox.ready_status_recovered", {
+      event: "sandbox.ready_status_recovered",
+      from_status: sandbox.status,
+      trigger: eventType,
+    });
+  }
+
   async processSandboxEvent(event: SandboxEventWithAck): Promise<void> {
     if (event.type === "heartbeat" || event.type === "token") {
       this.deps.log.debug("Sandbox event", { event_type: event.type });
@@ -147,6 +190,13 @@ export class SessionSandboxEventProcessor {
     const eventMessageId = "messageId" in event ? event.messageId : null;
     const processingMessage = this.deps.repository.getProcessingMessage();
     const messageId = eventMessageId ?? processingMessage?.id ?? null;
+
+    // Reaching here means a non-heartbeat, non-`ready` event from a connected,
+    // running agent (heartbeat/ready/session_title return earlier). If the row
+    // is still stuck at a booting status because the `ready` signal was lost,
+    // heal it off this proof of life so the connecting-timeout watchdog cannot
+    // kill the in-flight turn.
+    this.healBootStatusFromAgentActivity(now, event.type);
 
     // NOTE: the current bridge does NOT emit `artifact` over the WebSocket —
     // media artifacts are created via the HTTP createMediaArtifact route
