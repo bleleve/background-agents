@@ -430,6 +430,97 @@ describe("SessionSandboxEventProcessor", () => {
     expect(h.broadcast).not.toHaveBeenCalledWith({ type: "sandbox_status", status: "ready" });
   });
 
+  it("recovers a stuck spawning status to ready on agent activity (no ready event)", async () => {
+    const h = createProcessor();
+    // The WS-upgrade status->ready write was lost (canceled outcome) and the
+    // long-lived connection never reconnected, so no `ready` event re-arrives —
+    // but the agent is demonstrably running and streaming step events.
+    h.repository.getSandbox.mockReturnValue({ status: "spawning" });
+    const event: SandboxEvent = {
+      type: "step_start",
+      sandboxId: "sb-1",
+      messageId: "msg-1",
+      timestamp: 1000,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.updateSandboxStatus).toHaveBeenCalledWith("ready");
+    expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_status", status: "ready" });
+    // A heartbeat baseline is seeded so the connecting-timeout watchdog stops
+    // measuring elapsed from created_at against a null last_heartbeat.
+    expect(h.repository.updateSandboxHeartbeat).toHaveBeenCalledWith(expect.any(Number));
+  });
+
+  it("recovers a connecting status to ready on a tool_call", async () => {
+    const h = createProcessor();
+    h.repository.getSandbox.mockReturnValue({ status: "connecting" });
+    const event: SandboxEvent = {
+      type: "tool_call",
+      tool: "bash",
+      args: { command: "ls" },
+      callId: "call-1",
+      status: "completed",
+      messageId: "msg-1",
+      sandboxId: "sb-1",
+      timestamp: 1000,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.updateSandboxStatus).toHaveBeenCalledWith("ready");
+  });
+
+  it("does not re-assert status on agent activity when already ready", async () => {
+    const h = createProcessor();
+    h.repository.getSandbox.mockReturnValue({ status: "ready" });
+    const event: SandboxEvent = {
+      type: "step_start",
+      sandboxId: "sb-1",
+      messageId: "msg-1",
+      timestamp: 1000,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.updateSandboxStatus).not.toHaveBeenCalled();
+  });
+
+  it("never resurrects a watchdog-terminalized sandbox from agent activity", async () => {
+    const h = createProcessor();
+    h.repository.getSandbox.mockReturnValue({ status: "failed" });
+    const event: SandboxEvent = {
+      type: "step_start",
+      sandboxId: "sb-1",
+      messageId: "msg-1",
+      timestamp: 1000,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.updateSandboxStatus).not.toHaveBeenCalled();
+    expect(h.broadcast).not.toHaveBeenCalledWith({ type: "sandbox_status", status: "ready" });
+  });
+
+  it("does not promote from a booting status on a heartbeat (boot-progress ping)", async () => {
+    const h = createProcessor();
+    // During boot, heartbeats are the supervisor's boot-progress pings, not
+    // proof the agent connected, so they must not promote spawning -> ready.
+    h.repository.getSandbox.mockReturnValue({ status: "spawning" });
+    const event: SandboxEvent = {
+      type: "heartbeat",
+      sandboxId: "sb-1",
+      status: "ok",
+      timestamp: 1000,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.updateSandboxStatus).not.toHaveBeenCalled();
+    // The heartbeat itself is still recorded as a boot-progress sign of life.
+    expect(h.repository.updateSandboxHeartbeat).toHaveBeenCalledWith(expect.any(Number));
+  });
+
   it("applies session_title without storing a timeline event", async () => {
     const h = createProcessor();
     const event: SandboxEvent = {
