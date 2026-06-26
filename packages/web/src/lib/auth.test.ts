@@ -724,3 +724,26 @@ function getSignIn(authOptions: NextAuthOptions) {
 
   return signIn;
 }
+
+describe("session cookie configuration", () => {
+  it("uses a unique, host-scoped cookie name to avoid cross-environment collisions", () => {
+    const sessionToken = authOptions.cookies?.sessionToken;
+    expect(sessionToken).toBeDefined();
+    // Must NOT reuse NextAuth's default `next-auth.session-token`: that name is
+    // shared by every coding-agent-*.fountain.com deployment, and a parent-domain
+    // copy of it is sent to all of them, each with a different NEXTAUTH_SECRET —
+    // causing random "decryption operation failed" logouts.
+    expect(sessionToken?.name).not.toContain("next-auth.session-token");
+    expect(sessionToken?.name).toMatch(/reef\.session-token$/);
+    expect(sessionToken?.options).toMatchObject({
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+    });
+    // The `__Host-` prefix (used over HTTPS) forbids a Domain attribute, keeping
+    // the cookie strictly host-only; it requires Secure. Over plain HTTP (local
+    // dev) the prefix is dropped and Secure must be off.
+    const isHostPrefixed = Boolean(sessionToken?.name?.startsWith("__Host-"));
+    expect(sessionToken?.options?.secure).toBe(isHostPrefixed);
+  });
+});

@@ -307,6 +307,24 @@ if (googleClientId && googleClientSecret) {
   );
 }
 
+// Session cookie naming: keep it unique per host and host-scoped.
+//
+// NextAuth's default session cookie is named `__Secure-next-auth.session-token`
+// — the same name across every `coding-agent-*.internal.fountain.com`
+// deployment. A copy of that cookie scoped to the shared parent domain
+// (`.internal.fountain.com`) is therefore sent to ALL of them, but each
+// environment encrypts the JWT with its own NEXTAUTH_SECRET. Reading the foreign
+// cookie then fails with "[next-auth] JWT_SESSION_ERROR: decryption operation
+// failed", logging the user out at random (empty data, "please sign in").
+//
+// A unique, `__Host-`-prefixed name fixes this: the `__Host-` prefix forbids a
+// Domain attribute (the cookie is strictly host-only), and the distinct base
+// name means we never read another deployment's `next-auth.session-token`. The
+// prefix requires Secure + Path=/, so fall back to an unprefixed, non-secure
+// name over plain HTTP for local development.
+const useSecureCookies = (process.env.NEXTAUTH_URL ?? "").startsWith("https://");
+const sessionCookieName = `${useSecureCookies ? "__Host-" : ""}reef.session-token`;
+
 export const authOptions: NextAuthOptions = {
   debug: process.env.NODE_ENV === "development" || process.env.NEXTAUTH_DEBUG === "true",
   // Keep the signed-in session alive longer than the default to avoid frequent re-auth.
@@ -317,6 +335,17 @@ export const authOptions: NextAuthOptions = {
   },
   jwt: {
     maxAge: 60 * 60 * 24 * 90, // 90 days
+  },
+  cookies: {
+    sessionToken: {
+      name: sessionCookieName,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+      },
+    },
   },
   providers,
   callbacks: {
