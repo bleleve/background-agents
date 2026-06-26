@@ -436,7 +436,12 @@ describe("SessionSandboxEventProcessor", () => {
     // long-lived connection never reconnected, so no `ready` event re-arrives —
     // but the agent is demonstrably running and streaming step events.
     h.repository.getSandbox.mockReturnValue({ status: "spawning" });
-    const event: SandboxEvent = { type: "step_start", timestamp: 1000 } as SandboxEvent;
+    const event: SandboxEvent = {
+      type: "step_start",
+      sandboxId: "sb-1",
+      messageId: "msg-1",
+      timestamp: 1000,
+    };
 
     await h.processor.processSandboxEvent(event);
 
@@ -452,10 +457,14 @@ describe("SessionSandboxEventProcessor", () => {
     h.repository.getSandbox.mockReturnValue({ status: "connecting" });
     const event: SandboxEvent = {
       type: "tool_call",
-      toolName: "bash",
+      tool: "bash",
+      args: { command: "ls" },
+      callId: "call-1",
       status: "completed",
+      messageId: "msg-1",
+      sandboxId: "sb-1",
       timestamp: 1000,
-    } as SandboxEvent;
+    };
 
     await h.processor.processSandboxEvent(event);
 
@@ -465,7 +474,12 @@ describe("SessionSandboxEventProcessor", () => {
   it("does not re-assert status on agent activity when already ready", async () => {
     const h = createProcessor();
     h.repository.getSandbox.mockReturnValue({ status: "ready" });
-    const event: SandboxEvent = { type: "step_start", timestamp: 1000 } as SandboxEvent;
+    const event: SandboxEvent = {
+      type: "step_start",
+      sandboxId: "sb-1",
+      messageId: "msg-1",
+      timestamp: 1000,
+    };
 
     await h.processor.processSandboxEvent(event);
 
@@ -475,7 +489,12 @@ describe("SessionSandboxEventProcessor", () => {
   it("never resurrects a watchdog-terminalized sandbox from agent activity", async () => {
     const h = createProcessor();
     h.repository.getSandbox.mockReturnValue({ status: "failed" });
-    const event: SandboxEvent = { type: "step_start", timestamp: 1000 } as SandboxEvent;
+    const event: SandboxEvent = {
+      type: "step_start",
+      sandboxId: "sb-1",
+      messageId: "msg-1",
+      timestamp: 1000,
+    };
 
     await h.processor.processSandboxEvent(event);
 
@@ -488,7 +507,12 @@ describe("SessionSandboxEventProcessor", () => {
     // During boot, heartbeats are the supervisor's boot-progress pings, not
     // proof the agent connected, so they must not promote spawning -> ready.
     h.repository.getSandbox.mockReturnValue({ status: "spawning" });
-    const event: SandboxEvent = { type: "heartbeat", timestamp: 1000 } as SandboxEvent;
+    const event: SandboxEvent = {
+      type: "heartbeat",
+      sandboxId: "sb-1",
+      status: "ok",
+      timestamp: 1000,
+    };
 
     await h.processor.processSandboxEvent(event);
 
