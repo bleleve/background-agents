@@ -183,6 +183,13 @@ export class SessionDO extends DurableObject<Env> {
   // expected_sandbox_id at connect), the two sides are operating on different DO
   // state — explaining a `modal_sandbox_id` that never advances despite respawns.
   private readonly instanceUid = crypto.randomUUID().slice(0, 8);
+  // PROBE (DO split-brain diagnosis — remove with #266): a marker PERSISTED in
+  // this DO's SQLite (set on first init, read thereafter). Unlike instanceUid
+  // (in-memory, churns per construction) and do_id (same id for any instance of
+  // one idFromName), storage_marker is stable across hibernation of one storage
+  // and DIFFERENT across separate storages — so two distinct storage_marker
+  // values for one session_id prove two DO storages (split-brain).
+  private storageMarker: string | null = null;
   // WebSocket manager (lazily initialized like lifecycleManager)
   private _wsManager: SessionWebSocketManager | null = null;
   // Lifecycle manager (lazily initialized)
@@ -933,6 +940,7 @@ export class SessionDO extends DurableObject<Env> {
           event: "probe.spawn_identity_write",
           do_id: this.ctx.id.toString(),
           instance_uid: this.instanceUid,
+          storage_marker: this.storageMarker,
           wrote_sandbox_id: data.modalSandboxId,
           read_back_sandbox_id: readBack,
           read_back_matches: readBack === data.modalSandboxId,
@@ -1123,6 +1131,26 @@ export class SessionDO extends DurableObject<Env> {
       { session_id: sessionId },
       parseLogLevel(this.env.LOG_LEVEL)
     );
+    // PROBE (DO split-brain diagnosis — remove with #266): read-or-create a
+    // marker persisted in THIS storage. Same marker across hibernation of one
+    // storage; different across separate storages. Idempotent CREATE — no formal
+    // migration for a temporary probe.
+    this.sql.exec("CREATE TABLE IF NOT EXISTS do_storage_probe (marker TEXT)");
+    const markerRows = this.sql
+      .exec("SELECT marker FROM do_storage_probe LIMIT 1")
+      .toArray() as Array<{ marker: string }>;
+    if (markerRows.length > 0) {
+      this.storageMarker = markerRows[0].marker;
+    } else {
+      this.storageMarker = crypto.randomUUID().slice(0, 8);
+      this.sql.exec("INSERT INTO do_storage_probe (marker) VALUES (?)", this.storageMarker);
+    }
+    this.log.info("probe.do_storage_marker", {
+      event: "probe.do_storage_marker",
+      do_id: this.ctx.id.toString(),
+      instance_uid: this.instanceUid,
+      storage_marker: this.storageMarker,
+    });
     this.wsManager.enableAutoPingPong();
   }
 
@@ -1268,6 +1296,7 @@ export class SessionDO extends DurableObject<Env> {
           // PROBE (remove once root-caused): which DO instance/state served this.
           do_id: this.ctx.id.toString(),
           instance_uid: this.instanceUid,
+          storage_marker: this.storageMarker,
           matched_previous: false,
           prev_identity_expired: prevExpired,
           ms_until_prev_expiry:
@@ -1297,6 +1326,7 @@ export class SessionDO extends DurableObject<Env> {
           // PROBE (remove once root-caused): which DO instance/state served this.
           do_id: this.ctx.id.toString(),
           instance_uid: this.instanceUid,
+          storage_marker: this.storageMarker,
           matched_previous: usePreviousIdentity,
           prev_identity_expired: prevExpired,
           duration_ms: Date.now() - wsStartTime,
@@ -1371,6 +1401,7 @@ export class SessionDO extends DurableObject<Env> {
           // PROBE (remove once root-caused): which DO instance/state served this.
           do_id: this.ctx.id.toString(),
           instance_uid: this.instanceUid,
+          storage_marker: this.storageMarker,
           duration_ms: Date.now() - now,
         });
 
