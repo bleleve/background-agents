@@ -8,6 +8,10 @@
  * at the moment of the action, so toggling the setting takes effect immediately
  * — unlike a flag baked into the session at creation. The PR is derived from the
  * session index, never from caller input, so the agent can't target another PR.
+ *
+ * The agent cannot APPROVE: approvals are decided entirely by the github-bot from
+ * PR labels (`visual-qa: pass` + `reef: low risk`), so this route rejects APPROVE
+ * outright and only handles REQUEST_CHANGES (policy-gated) and COMMENT.
  */
 import { getCachedInstallationToken, getGitHubAppConfig } from "../auth/github-app";
 import { IntegrationSettingsStore } from "../db/integration-settings";
@@ -19,12 +23,12 @@ import { error, json, parsePattern, type RequestContext, type Route } from "./sh
 
 const logger = createLogger("pr-review");
 
-/** Review events that change PR approval state and require the repo to opt in. */
-const BLOCKING_EVENTS = new Set(["APPROVE", "REQUEST_CHANGES"]);
+/** Blocking event that requires the repo to opt in via `autoApproveOnOpen`. */
+const BLOCKING_EVENTS = new Set(["REQUEST_CHANGES"]);
 /** Defensive cap on the review body we forward to GitHub. */
 const REVIEW_BODY_MAX_LENGTH = 60_000;
 
-type ReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+type ReviewEvent = "REQUEST_CHANGES" | "COMMENT";
 
 interface ParsedBody {
   event: ReviewEvent;
@@ -62,8 +66,8 @@ export async function handleSubmitPrReview(
     trace_id: ctx.trace_id,
   };
 
-  // Live policy check. APPROVE/REQUEST_CHANGES are only permitted when the repo
-  // has auto-approve enabled; otherwise the agent must stick to comments.
+  // Live policy check. REQUEST_CHANGES is only permitted when the repo has
+  // auto-approve enabled; otherwise the agent must stick to comments.
   if (BLOCKING_EVENTS.has(parsed.event)) {
     const { settings } = await new IntegrationSettingsStore(env.DB).getResolvedConfig(
       "github",
@@ -144,8 +148,16 @@ async function parseBody(request: Request): Promise<ParsedBody | Response> {
   }
   const body = raw as Record<string, unknown>;
   const event = body.event;
-  if (event !== "APPROVE" && event !== "REQUEST_CHANGES" && event !== "COMMENT") {
-    return error("event must be APPROVE, REQUEST_CHANGES, or COMMENT", 422);
+  // APPROVE is intentionally rejected: approvals are decided by the github-bot
+  // from PR labels, not by the agent.
+  if (event === "APPROVE") {
+    return error(
+      "APPROVE is not available to the agent — approvals are handled automatically from PR labels.",
+      422
+    );
+  }
+  if (event !== "REQUEST_CHANGES" && event !== "COMMENT") {
+    return error("event must be REQUEST_CHANGES or COMMENT", 422);
   }
   const text = typeof body.body === "string" ? body.body : "";
   if (text.length > REVIEW_BODY_MAX_LENGTH) {

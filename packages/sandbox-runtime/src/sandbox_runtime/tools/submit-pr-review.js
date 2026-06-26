@@ -1,6 +1,6 @@
 /**
- * Submit PR Review Tool — submit a formal GitHub PR review (APPROVE /
- * REQUEST_CHANGES / COMMENT) for the PR this session is reviewing.
+ * Submit PR Review Tool — submit a formal GitHub PR review (REQUEST_CHANGES /
+ * COMMENT) for the PR this session is reviewing.
  *
  * The review is posted SERVER-SIDE by the control plane, which first checks the
  * repo's review policy (the `autoApproveOnOpen` setting) live. This is the only
@@ -8,6 +8,9 @@
  * is blocked in the sandbox — so the policy is enforced in one place instead of
  * trusting the agent to follow instructions. The PR is derived from the session
  * on the server; the tool does not take a PR number.
+ *
+ * APPROVE is NOT available: approvals are decided entirely by the github-bot from
+ * PR labels, not by the agent. The server rejects APPROVE.
  *
  * Inline code comments and the verdict comment are NOT this tool — keep posting
  * those with `gh api .../pulls/N/comments` and `gh api .../issues/N/comments`.
@@ -21,23 +24,19 @@ export default tool({
   description:
     "Submit a formal GitHub pull request review for the PR this session is reviewing. " +
     "Use this — never raw `gh pr review` or `gh api .../reviews` (those are blocked). " +
-    "event APPROVE marks the PR approved; REQUEST_CHANGES marks it as blocking; COMMENT is a " +
-    "non-blocking top-level review note. The control plane enforces the repo's policy: APPROVE and " +
-    "REQUEST_CHANGES are rejected unless the repo permits them, in which case post your findings as " +
-    "inline comments plus the verdict comment instead. Returns the review URL on success, or the " +
-    "reason it was not permitted.",
+    "event REQUEST_CHANGES marks the PR as blocking; COMMENT is a non-blocking top-level " +
+    "review note. You cannot APPROVE — approvals are decided automatically from PR labels, not " +
+    "by you. The control plane enforces the repo's policy: REQUEST_CHANGES is rejected unless the " +
+    "repo permits it, in which case post your findings as inline comments plus the verdict comment " +
+    "instead. Returns the review URL on success, or the reason it was not permitted.",
   args: {
     event: z
-      .enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"])
-      .describe(
-        "APPROVE (approve the PR), REQUEST_CHANGES (block the PR), or COMMENT (non-blocking note)."
-      ),
+      .enum(["REQUEST_CHANGES", "COMMENT"])
+      .describe("REQUEST_CHANGES (block the PR) or COMMENT (non-blocking note)."),
     body: z
       .string()
       .optional()
-      .describe(
-        "Review summary text. Required for REQUEST_CHANGES and COMMENT; optional for APPROVE."
-      ),
+      .describe("Review summary text. Required for both REQUEST_CHANGES and COMMENT."),
   },
   async execute(args) {
     try {

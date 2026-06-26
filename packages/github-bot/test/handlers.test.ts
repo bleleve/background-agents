@@ -19,6 +19,7 @@ vi.mock("../src/github-auth", () => ({
   postReaction: vi.fn().mockResolvedValue(true),
   checkSenderPermission: vi.fn().mockResolvedValue({ hasPermission: true }),
   dismissPullRequestReview: vi.fn().mockResolvedValue(true),
+  approvePullRequest: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("../src/utils/internal", () => ({
@@ -71,6 +72,7 @@ import {
   postReaction,
   checkSenderPermission,
   dismissPullRequestReview,
+  approvePullRequest,
 } from "../src/github-auth";
 import { getGitHubConfig } from "../src/utils/integration-config";
 
@@ -235,6 +237,7 @@ beforeEach(() => {
   vi.mocked(postReaction).mockResolvedValue(true);
   vi.mocked(checkSenderPermission).mockResolvedValue({ hasPermission: true });
   vi.mocked(dismissPullRequestReview).mockResolvedValue(true);
+  vi.mocked(approvePullRequest).mockResolvedValue(true);
   vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig });
   // Default PR-details fetch: small diff, so review handlers see largeDiff=false.
   // Includes head/base (and head.repo for fork detection) so handlers that resolve
@@ -1733,7 +1736,7 @@ describe("integration config", () => {
     expect(promptBody.content).not.toContain("## Custom Instructions");
   });
 
-  it("includes APPROVE/REQUEST_CHANGES instruction when autoApproveOnOpen is true", async () => {
+  it("permits a REQUEST_CHANGES verdict but never APPROVE when autoApproveOnOpen is true", async () => {
     vi.mocked(getGitHubConfig).mockResolvedValue({
       ...defaultConfig,
       autoApproveOnOpen: true,
@@ -1746,7 +1749,8 @@ describe("integration config", () => {
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.content).toContain("submit-pr-review");
-    expect(promptBody.content).toContain("permits formal verdicts");
+    expect(promptBody.content).toContain("permits a formal REQUEST_CHANGES verdict");
+    expect(promptBody.content).toContain("cannot APPROVE");
     expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 
@@ -1765,7 +1769,7 @@ describe("integration config", () => {
 });
 
 describe("handlePullRequestOpened autoApproveOnOpen", () => {
-  it("permits formal verdicts via the tool when autoApproveOnOpen is true", async () => {
+  it("permits a REQUEST_CHANGES verdict but never APPROVE when autoApproveOnOpen is true", async () => {
     vi.mocked(getGitHubConfig).mockResolvedValue({
       ...defaultConfig,
       autoApproveOnOpen: true,
@@ -1778,7 +1782,8 @@ describe("handlePullRequestOpened autoApproveOnOpen", () => {
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.content).toContain("submit-pr-review");
-    expect(promptBody.content).toContain("permits formal verdicts");
+    expect(promptBody.content).toContain("permits a formal REQUEST_CHANGES verdict");
+    expect(promptBody.content).toContain("cannot APPROVE");
     expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 
@@ -1791,7 +1796,7 @@ describe("handlePullRequestOpened autoApproveOnOpen", () => {
     const cpFetch = getControlPlaneFetch(env);
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.content).toContain("submit-pr-review");
-    expect(promptBody.content).toContain("does not permit approving or blocking verdicts");
+    expect(promptBody.content).toContain("does not permit blocking verdicts");
     expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 });
@@ -2006,7 +2011,7 @@ describe("handlePullRequestLabeled", () => {
     // The labeled path forces the no-formal-verdict hint regardless of the repo
     // setting; the tool would also reject it server-side.
     expect(promptBody.content).toContain("submit-pr-review");
-    expect(promptBody.content).toContain("does not permit approving or blocking verdicts");
+    expect(promptBody.content).toContain("does not permit blocking verdicts");
     expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
 
@@ -2085,6 +2090,101 @@ describe("handlePullRequestLabeled", () => {
     // The resumed prompt tells the agent to sync the worktree to the latest head.
     const promptBody = JSON.parse(cpFetch.mock.calls[0][1].body);
     expect(promptBody.content).toContain("RE-REVIEW in an existing session");
+  });
+});
+
+describe("handleVisualQaPassLabel (auto-approval)", () => {
+  // `visual-qa: pass` added to a PR that already carries `reef: low risk`.
+  const visualQaPayload: PullRequestLabeledPayload = {
+    ...pullRequestLabeledPayload,
+    label: { name: "visual-qa: pass" },
+    pull_request: {
+      ...pullRequestLabeledPayload.pull_request,
+      labels: [{ name: "reef: low risk" }, { name: "visual-qa: pass" }],
+    },
+  };
+
+  it("approves the PR when both labels are present and autoApproveOnOpen is on", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoApproveOnOpen: true });
+
+    const result = await handlePullRequestLabeled(env, log, visualQaPayload, "trace-vqa");
+
+    expect(result).toMatchObject({ outcome: "processed", handler_action: "pr_auto_approved" });
+    expect(approvePullRequest).toHaveBeenCalledTimes(1);
+    const [, owner, repoName, prNumber] = vi.mocked(approvePullRequest).mock.calls[0];
+    expect(owner).toBe("acme");
+    expect(repoName).toBe("widgets");
+    expect(prNumber).toBe(42);
+    // No review session is spawned for an auto-approval.
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("does not approve when the PR is not labeled reef: low risk", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoApproveOnOpen: true });
+    const payload: PullRequestLabeledPayload = {
+      ...visualQaPayload,
+      pull_request: { ...visualQaPayload.pull_request, labels: [{ name: "visual-qa: pass" }] },
+    };
+
+    const result = await handlePullRequestLabeled(env, log, payload, "trace-vqa");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "pr_not_low_risk" });
+    expect(approvePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("does not approve when autoApproveOnOpen is off (default config)", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    const result = await handlePullRequestLabeled(env, log, visualQaPayload, "trace-vqa");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "auto_approve_disabled" });
+    expect(approvePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("skips a closed PR", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoApproveOnOpen: true });
+    const payload: PullRequestLabeledPayload = {
+      ...visualQaPayload,
+      pull_request: { ...visualQaPayload.pull_request, state: "closed" },
+    };
+
+    const result = await handlePullRequestLabeled(env, log, payload, "trace-vqa");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "pr_closed_or_merged" });
+    expect(approvePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("skips a draft PR", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoApproveOnOpen: true });
+    const payload: PullRequestLabeledPayload = {
+      ...visualQaPayload,
+      pull_request: { ...visualQaPayload.pull_request, draft: true },
+    };
+
+    const result = await handlePullRequestLabeled(env, log, payload, "trace-vqa");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "draft_pr" });
+    expect(approvePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("returns a best-effort skip when the approval call fails", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoApproveOnOpen: true });
+    vi.mocked(approvePullRequest).mockResolvedValueOnce(false);
+
+    const result = await handlePullRequestLabeled(env, log, visualQaPayload, "trace-vqa");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "approve_failed" });
   });
 });
 

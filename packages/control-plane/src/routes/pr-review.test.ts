@@ -146,10 +146,13 @@ describe("handleSubmitPrReview", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("blocks APPROVE when autoApproveOnOpen is false", async () => {
-    seedPolicy(false);
+  it("rejects APPROVE with 422 regardless of policy (approval is bot-only)", async () => {
+    // Even with the policy on, the agent can never APPROVE — approvals are
+    // decided by the github-bot from PR labels. No policy lookup, no GitHub call.
+    seedPolicy(true);
     const res = await callHandler({ event: "APPROVE", body: "" });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(422);
+    expect(integrationStoreMock.getResolvedConfig).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -161,13 +164,6 @@ describe("handleSubmitPrReview", () => {
     expect(res.status).toBe(200);
     const [, init] = fetchMock.mock.calls[0];
     expect(JSON.parse(String(init.body)).event).toBe("REQUEST_CHANGES");
-  });
-
-  it("posts APPROVE when autoApproveOnOpen is true (empty body allowed)", async () => {
-    seedPolicy(true);
-    githubOk();
-    const res = await callHandler({ event: "APPROVE" });
-    expect(res.status).toBe(200);
   });
 
   it("returns 422 when the session has no PR", async () => {

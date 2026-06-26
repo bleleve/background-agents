@@ -223,6 +223,40 @@ export async function dismissPullRequestReview(
   }
 }
 
+/**
+ * Submit a formal APPROVE review on a PR as the GitHub App. This is the bot's
+ * label-driven auto-approval path (`visual-qa: pass` + `reef: low risk`) — the
+ * agent never approves. Best-effort: returns true on success, false on any
+ * failure. Never throws.
+ */
+export async function approvePullRequest(
+  token: string,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  body: string,
+  userAgent: string = DEFAULT_APP_NAME
+): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${pullNumber}/reviews`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": userAgent,
+        },
+        body: JSON.stringify({ event: "APPROVE", body }),
+      }
+    );
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 // Page size and page cap for the verdict-comment lookup. 100 is GitHub's max
 // per_page; 10 pages (1000 comments) is far more than any real PR thread, and
 // the loop short-circuits the moment it finds the marker.

@@ -28,6 +28,7 @@ import {
   checkSenderPermission,
   dismissPullRequestReview,
   createIssueComment,
+  approvePullRequest,
 } from "./github-auth";
 import {
   buildCodeReviewPrompt,
@@ -42,8 +43,12 @@ import {
   extractPlanModelFromLabels,
   extractReviewModelFromLabels,
   hasPlanLabel,
+  hasLowRiskLabel,
   isAskForReviewLabel,
   isPreviewLabel,
+  isVisualQaPassLabel,
+  LOW_RISK_LABEL,
+  VISUAL_QA_PASS_LABEL,
   type GitHubLabel,
 } from "./label-resolution";
 
@@ -1138,6 +1143,10 @@ export async function handlePullRequestLabeled(
     return dispatchPullRequestPreview(env, payload, traceId, "github_label_added");
   }
 
+  if (isVisualQaPassLabel(label.name)) {
+    return handleVisualQaPassLabel(env, log, payload, traceId);
+  }
+
   if (!isAskForReviewLabel(label.name)) {
     log.debug("handler.not_review_label", { trace_id: traceId, label: label.name });
     return { outcome: "skipped", skip_reason: "not_review_label" };
@@ -1230,6 +1239,100 @@ export async function handlePullRequestLabeled(
     existingSessionId,
     meta,
   });
+}
+
+/**
+ * Label-driven auto-approval. When `visual-qa: pass` is added to a PR that
+ * already carries `reef: low risk`, submit an APPROVE review as the Reef App,
+ * gated by the repo's `autoApproveOnOpen` setting. This decision lives entirely
+ * in the bot — the review agent no longer approves PRs.
+ *
+ * Trust model: GitHub only lets users with triage+ access add labels, and the
+ * repo must opt in via `autoApproveOnOpen`, so the label pair plus the setting is
+ * the authorization. Approval is not merge — branch protection still governs
+ * whether the PR can land. The resulting approval fires a `pull_request_review`
+ * event; the review backstop sees `autoApproveOnOpen` is on and leaves it.
+ */
+async function handleVisualQaPassLabel(
+  env: Env,
+  log: Logger,
+  payload: PullRequestLabeledPayload,
+  traceId: string
+): Promise<HandlerResult> {
+  const { pull_request: pr, repository: repo } = payload;
+  const owner = repo.owner.login;
+  const repoName = repo.name;
+  const repoFullName = `${owner}/${repoName}`.toLowerCase();
+  const meta = { trace_id: traceId, repo: repoFullName, pull_number: pr.number };
+
+  if (pr.draft) {
+    log.debug("auto_approve.draft_pr_skipped", meta);
+    return { outcome: "skipped", skip_reason: "draft_pr" };
+  }
+
+  if (pr.state !== "open") {
+    log.debug("auto_approve.pr_not_open", { ...meta, pr_state: pr.state });
+    return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
+  }
+
+  // The PR must already carry the agent-written low-risk verdict label. The
+  // webhook payload's labels include the just-added `visual-qa: pass`, so this
+  // checks for the OTHER required label.
+  if (!hasLowRiskLabel(pr.labels ?? [])) {
+    log.debug("auto_approve.not_low_risk", meta);
+    return { outcome: "skipped", skip_reason: "pr_not_low_risk" };
+  }
+
+  const config = await getGitHubConfig(env, repoFullName, log);
+
+  if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
+    log.debug("auto_approve.repo_not_enabled", meta);
+    return { outcome: "skipped", skip_reason: "repo_not_enabled" };
+  }
+
+  if (config.privateReposOnly && !repo.private) {
+    log.debug("auto_approve.public_repo_skipped", meta);
+    return { outcome: "skipped", skip_reason: "public_repo_skipped" };
+  }
+
+  // The opt-in gate. getGitHubConfig fails closed (autoApproveOnOpen=false) on
+  // any error, so a config outage never auto-approves.
+  if (!config.autoApproveOnOpen) {
+    log.debug("auto_approve.disabled", meta);
+    return { outcome: "skipped", skip_reason: "auto_approve_disabled" };
+  }
+
+  const userAgent = resolveAppName(env);
+  const token = await generateInstallationToken({
+    appId: env.GITHUB_APP_ID,
+    privateKey: env.GITHUB_APP_PRIVATE_KEY,
+    installationId: env.GITHUB_APP_INSTALLATION_ID,
+    userAgent,
+  });
+
+  const approved = await approvePullRequest(
+    token,
+    owner,
+    repoName,
+    pr.number,
+    `Auto-approved by Reef: \`${LOW_RISK_LABEL}\` change passed visual QA (\`${VISUAL_QA_PASS_LABEL}\`).`,
+    userAgent
+  );
+
+  if (!approved) {
+    // Best-effort: don't throw (a throw clears the delivery dedupe and triggers a
+    // real GitHub retry). Re-adding the label re-fires this handler.
+    log.warn("auto_approve.failed", meta);
+    return { outcome: "skipped", skip_reason: "approve_failed" };
+  }
+
+  log.info("auto_approve.submitted", meta);
+  return {
+    outcome: "processed",
+    session_id: "",
+    message_id: "",
+    handler_action: "pr_auto_approved",
+  };
 }
 
 /**
