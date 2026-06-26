@@ -59,6 +59,27 @@ export type HandlerResult =
 // Control plane validates branch names with this same regex — omit if it wouldn't pass.
 const BRANCH_NAME_RE = /^[\w.\-/]+$/;
 
+const PREVIEW_COMMENT_LINKS = [
+  { key: "hire", label: "hire preview" },
+  { key: "recruiter-ui", label: "recruiter-ui preview" },
+  { key: "applicant-ui", label: "applicant-ui preview" },
+  { key: "career-site-ui", label: "career-site-ui preview" },
+  { key: "wx", label: "WX preview" },
+] as const;
+
+function formatPreviewComment(result: {
+  previewUrls?: Record<string, string>;
+  runUrl?: string;
+}): string | undefined {
+  const links = PREVIEW_COMMENT_LINKS.flatMap(({ key, label }) => {
+    const url = result.previewUrls?.[key];
+    return url ? [`[${label}](${url})`] : [];
+  });
+  if (result.runUrl) links.push(`[RWX run](${result.runUrl})`);
+  if (links.length > 0) return links.join("\n");
+  return undefined;
+}
+
 /**
  * Resolve the branch the sandbox should clone for a PR session — the PR head ref,
  * but only when it is safe to fetch from the base repo's origin:
@@ -1395,8 +1416,8 @@ async function dispatchPullRequestPreview(
     previewUrls?: Record<string, string>;
     runUrl?: string;
   };
-  const linkUrl = result.previewUrls?.hire ?? result.runUrl;
-  if (linkUrl) {
+  const commentBody = formatPreviewComment(result);
+  if (commentBody) {
     const userAgent = resolveAppName(env);
     const token = await generateInstallationToken({
       appId: env.GITHUB_APP_ID,
@@ -1409,7 +1430,7 @@ async function dispatchPullRequestPreview(
       owner,
       repoName,
       pr.number,
-      `[hire preview](${linkUrl})`,
+      commentBody,
       userAgent
     );
   }
