@@ -41,4 +41,16 @@ describe("formatRelativeTime", () => {
   it("returns days for a timestamp a few days ago", () => {
     expect(formatRelativeTime(Date.now() - 2 * 24 * 60 * 60 * 1000)).toBe("2d");
   });
+
+  it("returns 'in Xm' for a timestamp a few minutes in the future", () => {
+    expect(formatRelativeTime(Date.now() + 5 * 60 * 1000)).toBe("in 5m");
+  });
+
+  it("returns 'in Xh' for a timestamp a few hours in the future", () => {
+    expect(formatRelativeTime(Date.now() + 3 * 60 * 60 * 1000)).toBe("in 3h");
+  });
+
+  it("returns 'in Xd' for a timestamp a few days in the future", () => {
+    expect(formatRelativeTime(Date.now() + 2 * 24 * 60 * 60 * 1000)).toBe("in 2d");
+  });
 });

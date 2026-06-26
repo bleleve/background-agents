@@ -29,24 +29,28 @@ export function formatSessionEventTime(timestampSeconds: number): string {
 /**
  * Format a timestamp as a relative time string (e.g., "2d", "3h", "5m").
  * Returns "just now" for very recent timestamps.
+ * Future timestamps are prefixed with "in" (e.g., "in 2d").
  */
 export function formatRelativeTime(timestamp: number): string {
   const now = Date.now();
-  const diff = now - timestamp;
+  const diff = Math.abs(now - timestamp);
+  const isFuture = timestamp > now;
 
   const seconds = Math.floor(diff / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
 
+  const prefix = isFuture ? "in " : "";
+
   if (days > 0) {
-    return `${days}d`;
+    return `${prefix}${days}d`;
   }
   if (hours > 0) {
-    return `${hours}h`;
+    return `${prefix}${hours}h`;
   }
   if (minutes > 0) {
-    return `${minutes}m`;
+    return `${prefix}${minutes}m`;
   }
   return "just now";
 }
