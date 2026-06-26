@@ -965,11 +965,6 @@ export async function handlePullRequestOpened(
     return { outcome: "skipped", skip_reason: "pr_closed_or_merged" };
   }
 
-  if (pr.user.login === env.GITHUB_BOT_USERNAME) {
-    log.debug("handler.self_pr_ignored", { trace_id: traceId, pull_number: pr.number });
-    return { outcome: "skipped", skip_reason: "self_pr" };
-  }
-
   const config = await getGitHubConfig(env, repoFullName, log);
 
   if (config.enabledRepos !== null && !config.enabledRepos.includes(repoFullName)) {
@@ -1009,9 +1004,12 @@ export async function handlePullRequestOpened(
     meta
   );
 
-  // `review-<alias>` label overrides the configured model for the auto-review.
-  // Must be applied before the PR is opened.
-  const autoReviewModel = extractReviewModelFromLabels(pr.labels ?? []) ?? config.model;
+  // Bot-authored PRs always use kimi-k2.7-code to avoid infinite review loops
+  // with the default model. Label overrides and config are ignored for self-PRs.
+  const isBotPr = pr.user.login === env.GITHUB_BOT_USERNAME;
+  const autoReviewModel = isBotPr
+    ? "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code"
+    : (extractReviewModelFromLabels(pr.labels ?? []) ?? config.model);
 
   return runCodeReview(env, log, ghToken, headers, {
     owner,

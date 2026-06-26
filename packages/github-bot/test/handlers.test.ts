@@ -345,22 +345,30 @@ describe("handlePullRequestOpened", () => {
     expect(log.debug).toHaveBeenCalledWith("handler.draft_pr_skipped", expect.anything());
   });
 
-  it("returns early if PR is from the bot (loop prevention)", async () => {
+  it("reviews a bot-authored PR when it becomes ready for review using kimi-k2.7-code", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
     const payload: PullRequestOpenedPayload = {
-      ...pullRequestOpenedPayload,
+      ...pullRequestReadyForReviewPayload,
       pull_request: {
-        ...pullRequestOpenedPayload.pull_request,
+        ...pullRequestReadyForReviewPayload.pull_request,
         user: { login: "test-bot[bot]" },
       },
     };
 
-    const result = await handlePullRequestOpened(env, log, payload, "trace-0");
+    const result = await handlePullRequestOpened(env, log, payload, "trace-rfr-self");
 
-    expect(result).toEqual({ outcome: "skipped", skip_reason: "self_pr" });
-    expect(generateInstallationToken).not.toHaveBeenCalled();
-    expect(log.debug).toHaveBeenCalledWith("handler.self_pr_ignored", expect.anything());
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "auto_review",
+    });
+    expect(generateInstallationToken).toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(2);
+    const cpFetch = getControlPlaneFetch(env);
+    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(sessionBody.model).toBe("cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code");
   });
 
   it("returns early when autoReviewOnOpen is false", async () => {
@@ -506,22 +514,30 @@ describe("handlePullRequestOpened (ready_for_review action)", () => {
     );
   });
 
-  it("returns early if PR is from the bot (loop prevention)", async () => {
+  it("reviews a PR authored by the bot using kimi-k2.7-code", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
     const payload: PullRequestOpenedPayload = {
-      ...pullRequestReadyForReviewPayload,
+      ...pullRequestOpenedPayload,
       pull_request: {
-        ...pullRequestReadyForReviewPayload.pull_request,
+        ...pullRequestOpenedPayload.pull_request,
         user: { login: "test-bot[bot]" },
       },
     };
 
-    const result = await handlePullRequestOpened(env, log, payload, "trace-rfr-self");
+    const result = await handlePullRequestOpened(env, log, payload, "trace-0");
 
-    expect(result).toEqual({ outcome: "skipped", skip_reason: "self_pr" });
-    expect(generateInstallationToken).not.toHaveBeenCalled();
-    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "auto_review",
+    });
+    expect(generateInstallationToken).toHaveBeenCalled();
+    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(2);
+    const cpFetch = getControlPlaneFetch(env);
+    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(sessionBody.model).toBe("cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code");
   });
 
   it("returns early when autoReviewOnOpen is false", async () => {
