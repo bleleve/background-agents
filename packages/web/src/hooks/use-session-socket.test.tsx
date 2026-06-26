@@ -2,7 +2,7 @@
 /// <reference types="@testing-library/jest-dom" />
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ServerMessage, SessionArtifact, SessionState } from "@open-inspect/shared";
 import type * as SwrModule from "swr";
 import { isUnarchivedSessionListKey } from "@/lib/session-list";
@@ -47,6 +47,13 @@ class FakeWebSocket {
   close(code = 1000, reason = "") {
     this.readyState = FakeWebSocket.CLOSED;
     this.onclose?.({ code, reason, wasClean: true } as CloseEvent);
+  }
+
+  // Simulate the server / network closing the socket with an arbitrary code and
+  // cleanliness, without the client having called close() itself.
+  serverClose(code: number, { wasClean = false }: { wasClean?: boolean } = {}) {
+    this.readyState = FakeWebSocket.CLOSED;
+    this.onclose?.({ code, reason: "", wasClean } as CloseEvent);
   }
 
   open() {
@@ -97,6 +104,30 @@ function createSubscribedMessage(artifacts: SessionArtifact[] = []): SubscribedM
   };
 }
 
+// jsdom exposes document.visibilityState as a prototype getter; shadow it on the
+// instance so we can drive the Page Visibility API in tests.
+function setVisibility(state: "visible" | "hidden", { dispatch = true } = {}) {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => state,
+  });
+  Object.defineProperty(document, "hidden", {
+    configurable: true,
+    get: () => state === "hidden",
+  });
+  if (dispatch) {
+    document.dispatchEvent(new Event("visibilitychange"));
+  }
+}
+
+function countPings(socket: FakeWebSocket): number {
+  return socket.sentMessages.filter((m) => m.type === "ping").length;
+}
+
+function countWsTokenFetches(): number {
+  return vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/ws-token")).length;
+}
+
 function sendSandboxAccessMessages(socket: FakeWebSocket, sandboxId: string) {
   socket.receive({
     type: "code_server_info",
@@ -126,7 +157,12 @@ describe("useSessionSocket", () => {
   });
 
   afterEach(() => {
+    // Unmount rendered hooks so their visibilitychange listeners don't leak into
+    // the next test (these tests dispatch document-wide visibility events).
+    cleanup();
     vi.restoreAllMocks();
+    vi.useRealTimers();
+    setVisibility("visible", { dispatch: false });
   });
 
   it("hydrates artifacts from the subscribed payload", async () => {
@@ -699,5 +735,124 @@ describe("useSessionSocket", () => {
         },
       ]);
     });
+  });
+
+  it("auto-reconnects with a fresh token after a 4002 session-expired close", async () => {
+    const { result } = renderHook(() => useSessionSocket("session-1"));
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const first = FakeWebSocket.instances[0];
+    act(() => {
+      first.open();
+      first.receive(createSubscribedMessage());
+    });
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    const tokenFetchesBefore = countWsTokenFetches();
+
+    // Cloudflare evicted the Durable Object after hibernation: a clean,
+    // server-initiated 4002 close.
+    act(() => {
+      first.serverClose(4002, { wasClean: true });
+    });
+
+    // Recovers automatically (backoff: 1s for the first attempt) with a fresh
+    // ws-token, and never surfaces a terminal error banner.
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2), { timeout: 3000 });
+    expect(countWsTokenFetches()).toBeGreaterThan(tokenFetchesBefore);
+    expect(result.current.connectionError).toBeNull();
+  });
+
+  it("does not auto-reconnect after a 4001 auth-required close", async () => {
+    const { result } = renderHook(() => useSessionSocket("session-1"));
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const first = FakeWebSocket.instances[0];
+    act(() => {
+      first.open();
+      first.receive(createSubscribedMessage());
+    });
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    act(() => {
+      first.serverClose(4001, { wasClean: true });
+    });
+
+    await waitFor(() =>
+      expect(result.current.authError).toBe("Authentication failed. Please sign in again.")
+    );
+    // No backoff was scheduled — a fresh sign-in is required.
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("reconnects when the tab refocuses after the socket dropped while hidden", async () => {
+    const { result } = renderHook(() => useSessionSocket("session-1"));
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const first = FakeWebSocket.instances[0];
+    act(() => {
+      first.open();
+      first.receive(createSubscribedMessage());
+    });
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    // Tab goes to the background, then the socket is dropped (idle intermediary).
+    act(() => setVisibility("hidden"));
+    act(() => {
+      first.serverClose(1006, { wasClean: false });
+    });
+
+    // Coming back to the tab reconnects immediately, well within the 1s backoff.
+    act(() => setVisibility("visible"));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+
+    // The cancelled backoff must not also fire a third connect.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("re-pings instead of reconnecting when the tab refocuses with a live socket", async () => {
+    const { result } = renderHook(() => useSessionSocket("session-1"));
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0];
+    act(() => {
+      socket.open();
+      socket.receive(createSubscribedMessage());
+    });
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    const pingsBefore = countPings(socket);
+    act(() => setVisibility("visible"));
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(countPings(socket)).toBe(pingsBefore + 1);
+  });
+
+  it("skips the heartbeat while hidden and resumes it on refocus", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useSessionSocket("session-1"));
+
+    // Flush the async connect (token fetch + socket construction).
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    const socket = FakeWebSocket.instances[0];
+    act(() => {
+      socket.open();
+      socket.receive(createSubscribedMessage());
+    });
+    expect(result.current.connected).toBe(true);
+
+    // Hidden: the periodic heartbeat must not fire.
+    act(() => setVisibility("hidden"));
+    const pingsBeforeHidden = countPings(socket);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(countPings(socket)).toBe(pingsBeforeHidden);
+
+    // Visible again: one immediate liveness ping, then the interval resumes.
+    act(() => setVisibility("visible"));
+    expect(countPings(socket)).toBe(pingsBeforeHidden + 1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(countPings(socket)).toBeGreaterThan(pingsBeforeHidden + 1);
   });
 });

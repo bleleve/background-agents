@@ -34,6 +34,16 @@ export interface GitHubLabel {
 export const ASK_FOR_REVIEW_LABEL = "reef: ask for review";
 export const PREVIEW_LABEL = "preview";
 
+/**
+ * Auto-approval trigger labels. When `visual-qa: pass` is added to a PR that
+ * already carries `reef: low risk`, the github-bot submits an approval as the
+ * Reef GitHub App (gated by the repo's `autoApproveOnOpen` setting). The
+ * `reef: low risk` verdict label is written by the review agent; `visual-qa: pass`
+ * is applied by an external visual-QA system. Both are matched case-insensitively.
+ */
+export const VISUAL_QA_PASS_LABEL = "visual-qa: pass";
+export const LOW_RISK_LABEL = "reef: low risk";
+
 /** Whether `name` is the re-review trigger label (case-insensitive). */
 export function isAskForReviewLabel(name: string): boolean {
   return name.trim().toLowerCase() === ASK_FOR_REVIEW_LABEL;
@@ -41,6 +51,16 @@ export function isAskForReviewLabel(name: string): boolean {
 
 export function isPreviewLabel(name: string): boolean {
   return name.trim().toLowerCase() === PREVIEW_LABEL;
+}
+
+/** Whether `name` is the visual-QA-pass label that gates auto-approval. */
+export function isVisualQaPassLabel(name: string): boolean {
+  return name.trim().toLowerCase() === VISUAL_QA_PASS_LABEL;
+}
+
+/** Whether the PR currently carries the `reef: low risk` verdict label. */
+export function hasLowRiskLabel(labels: GitHubLabel[]): boolean {
+  return labels.some((l) => l.name.trim().toLowerCase() === LOW_RISK_LABEL);
 }
 
 // `model` and `build` are interchangeable for the impl-model override.

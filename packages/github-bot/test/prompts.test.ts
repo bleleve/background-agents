@@ -181,7 +181,9 @@ describe("buildCodeReviewPrompt", () => {
   it("routes verdicts through the submit-pr-review tool and forbids raw gh (autoApproveOnOpen false)", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
     expect(prompt).toContain("submit-pr-review");
-    expect(prompt).toContain("does not permit approving or blocking verdicts");
+    expect(prompt).toContain("does not permit blocking verdicts");
+    // The agent is never offered APPROVE — approvals are label-driven in the bot.
+    expect(prompt).toContain("cannot APPROVE");
     expect(prompt).toContain("NEVER submit a review with `gh pr review`");
     expect(prompt).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
   });
@@ -352,11 +354,12 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("Do NOT run `gh pr diff 42` repeatedly");
   });
 
-  it("permits formal verdicts via the submit-pr-review tool when autoApproveOnOpen is true", () => {
+  it("permits a REQUEST_CHANGES verdict but never APPROVE when autoApproveOnOpen is true", () => {
     const prompt = buildCodeReviewPrompt({ ...baseParams, autoApproveOnOpen: true });
     expect(prompt).toContain("submit-pr-review");
-    expect(prompt).toContain("permits formal verdicts");
-    expect(prompt).toContain("extremely low-risk");
+    expect(prompt).toContain("permits a formal REQUEST_CHANGES verdict");
+    // Even with the policy on, the agent cannot APPROVE — that's label-driven in the bot.
+    expect(prompt).toContain("cannot APPROVE");
     // Raw gh review submission is never instructed, regardless of the policy.
     expect(prompt).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
     expect(prompt).toContain("NEVER submit a review with `gh pr review`");

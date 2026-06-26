@@ -187,11 +187,12 @@ Open the web app and go to **Settings > Integrations > GitHub** to configure the
 
 ### Defaults and Scope
 
-| Setting               | What it controls                                                                      |
-| --------------------- | ------------------------------------------------------------------------------------- |
-| Auto-review new PRs   | Whether new non-draft PRs should be reviewed automatically                            |
-| Repository Scope      | Whether the bot responds in all accessible repositories or only selected repositories |
-| Allowed Trigger Users | Who can trigger the bot from GitHub                                                   |
+| Setting                   | What it controls                                                                                                                                                                                                            |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auto-review new PRs       | Whether new non-draft PRs should be reviewed automatically                                                                                                                                                                  |
+| Auto-approve low-risk PRs | Whether the bot approves a PR once it is labeled `visual-qa: pass` **and** the review agent has marked it `reef: low risk`. The agent never approves on its own — this is a label-driven decision made entirely by the bot. |
+| Repository Scope          | Whether the bot responds in all accessible repositories or only selected repositories                                                                                                                                       |
+| Allowed Trigger Users     | Who can trigger the bot from GitHub                                                                                                                                                                                         |
 
 If no GitHub Bot settings are configured, Open-Inspect uses permissive defaults: all repositories
 available to the GitHub App are in scope, auto-review is enabled, and users with write, maintain, or

@@ -117,15 +117,15 @@ access model and can authenticate auxiliary private repos on the configured SCM 
 
 ## Webhook Events
 
-| Event                         | Action               | Trigger                                                                                             | Handler                      |
-| ----------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `pull_request`                | `opened`             | Non-draft PR opened                                                                                 | `handlePullRequestOpened`    |
-| `pull_request`                | `review_requested`   | Compatibility event path                                                                            | `handleReviewRequested`      |
-| `pull_request`                | `labeled`            | `reef: ask for review` added                                                                        | `handlePullRequestLabeled`   |
-| `issue_comment`               | `created`            | @mention in a PR comment                                                                            | `handleIssueComment`         |
-| `pull_request_review_comment` | `created`            | @mention in a review thread; bot's own comments are recorded as suggestions (webhook fallback path) | `handleReviewComment`        |
-| `pull_request_review_thread`  | `resolved`           | Review thread resolved                                                                              | `handleReviewThreadResolved` |
-| `pull_request_review`         | `submitted`,`edited` | Bot submitted a formal APPROVED/CHANGES_REQUESTED review on a no-auto-approve repo (auto-dismissed) | `handlePullRequestReview`    |
+| Event                         | Action               | Trigger                                                                                                                 | Handler                      |
+| ----------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `pull_request`                | `opened`             | Non-draft PR opened                                                                                                     | `handlePullRequestOpened`    |
+| `pull_request`                | `review_requested`   | Compatibility event path                                                                                                | `handleReviewRequested`      |
+| `pull_request`                | `labeled`            | `reef: ask for review` (re-review), `visual-qa: pass` (label-driven auto-approval), or `preview`                        | `handlePullRequestLabeled`   |
+| `issue_comment`               | `created`            | @mention in a PR comment                                                                                                | `handleIssueComment`         |
+| `pull_request_review_comment` | `created`            | @mention in a review thread; bot's own comments are recorded as suggestions (webhook fallback path)                     | `handleReviewComment`        |
+| `pull_request_review_thread`  | `resolved`           | Review thread resolved                                                                                                  | `handleReviewThreadResolved` |
+| `pull_request_review`         | `submitted`,`edited` | Backstop: dismisses a bot review when `autoApproveOnOpen` is off (off-policy `REQUEST_CHANGES`, or any stray `APPROVE`) | `handlePullRequestReview`    |
 
 All events are processed asynchronously via `executionCtx.waitUntil()`. The webhook endpoint returns
 200 immediately after signature verification and delivery dedupe.
@@ -153,6 +153,24 @@ whereas an in-place edit would be silent.
   `POST /internal/reviews` endpoint (HMAC-authenticated with `INTERNAL_CALLBACK_SECRET`) with the
   current session id, so the review re-runs in that session. Requires `GITHUB_BOT_URL` set on the
   web app (and the `GITHUB_BOT_WORKER` service binding on Cloudflare).
+
+### Label-driven auto-approval
+
+Approving a PR is decided **entirely by the bot from labels** — the review agent never approves (the
+`submit-pr-review` tool drops `APPROVE`, and the control-plane route rejects it). When the
+`visual-qa: pass` label is added to a PR that **already carries `reef: low risk`**,
+`handleVisualQaPassLabel` submits a formal `APPROVE` review as the GitHub App.
+
+The flow is gated by the per-repo **`autoApproveOnOpen`** setting ("Auto-approve low-risk PRs"): the
+handler skips unless the PR is open and non-draft, carries `reef: low risk`, passes the
+enabled-repos / private-repo filters, and the toggle is on. `getGitHubConfig` fails closed
+(`autoApproveOnOpen = false`) on any config error, so an outage never auto-approves. The
+`reef: low risk` label is written by the review agent on every verdict; `visual-qa: pass` is applied
+by an external visual-QA system. (No extra GitHub App config — the `labeled` action ships with the
+already-subscribed `Pull request` event.)
+
+The resulting approval fires a `pull_request_review` event; the backstop (below) sees
+`autoApproveOnOpen` is on and leaves it in place.
 
 ### Handler Flows
 
@@ -231,12 +249,15 @@ Three prompt templates in `src/prompts.ts`:
 - Review the full diff — pre-fetched by the bot and inlined into the prompt for diffs below the
   large-diff threshold; for larger diffs, fetch it with `gh pr diff` (the prompt carries anti-loop
   guidance to save it to a file and read it in pages)
-- Submit a formal verdict only through the `submit-pr-review` tool, never raw `gh pr review` /
-  `gh api .../pulls/{n}/reviews` (those are blocked in the sandbox by the `gh` wrapper — see
-  `sandbox-runtime` `git_credential_helper` `gh-guard`). The tool routes to the control plane
-  (`POST /sessions/:id/pr-review`), which resolves the repo's `autoApproveOnOpen` live and posts the
-  review with the App token or rejects `APPROVE`/`REQUEST_CHANGES`. As a backstop, the
-  `pull_request_review` webhook handler auto-dismisses any off-policy formal review the bot lands.
+- Submit a formal verdict (`REQUEST_CHANGES` or `COMMENT`) only through the `submit-pr-review` tool,
+  never raw `gh pr review` / `gh api .../pulls/{n}/reviews` (those are blocked in the sandbox by the
+  `gh` wrapper — see `sandbox-runtime` `git_credential_helper` `gh-guard`). The agent cannot
+  `APPROVE` — approvals are decided entirely by the bot from PR labels (see
+  [Label-driven auto-approval](#label-driven-auto-approval)). The tool routes to the control plane
+  (`POST /sessions/:id/pr-review`), which rejects `APPROVE` outright (422, before any policy
+  lookup), resolves the repo's `autoApproveOnOpen` live to gate `REQUEST_CHANGES`, and posts the
+  review with the App token. As a backstop, the `pull_request_review` webhook handler dismisses any
+  off-policy formal review the bot lands when `autoApproveOnOpen` is off.
 - Post inline `suggestion` comments via `gh api .../pulls/{n}/comments`
 - Use `gh pr view ... --json headRefOid` for `commit_id`, temp markdown files for body, and
   `side=RIGHT`
