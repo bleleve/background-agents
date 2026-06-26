@@ -724,3 +724,39 @@ function getSignIn(authOptions: NextAuthOptions) {
 
   return signIn;
 }
+
+describe("session cookie configuration", () => {
+  // The cookie name and secure flag are module-level constants derived from
+  // NEXTAUTH_URL at load time, so re-import the module per env to cover BOTH
+  // branches. (The statically imported authOptions only ever exercises the HTTP
+  // path in CI, leaving the production __Host- branch untested.)
+  it("uses a unique, __Host--prefixed, Secure cookie over HTTPS (production)", async () => {
+    const { authOptions } = await importAuthModule({ NEXTAUTH_URL: "https://app.example.com" });
+    const sessionToken = authOptions.cookies?.sessionToken;
+    expect(sessionToken).toBeDefined();
+    // Must NOT reuse NextAuth's default `next-auth.session-token`: that name is
+    // shared by every coding-agent-*.fountain.com deployment, and a parent-domain
+    // copy of it is sent to all of them, each with a different NEXTAUTH_SECRET —
+    // causing random "decryption operation failed" logouts. The __Host- prefix
+    // also forbids a Domain attribute, keeping the cookie strictly host-only.
+    expect(sessionToken?.name).toBe("__Host-reef.session-token");
+    expect(sessionToken?.options).toMatchObject({
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure: true,
+    });
+  });
+
+  it("drops the __Host- prefix and Secure flag over plain HTTP (local dev)", async () => {
+    const { authOptions } = await importAuthModule({ NEXTAUTH_URL: "http://localhost:3000" });
+    const sessionToken = authOptions.cookies?.sessionToken;
+    expect(sessionToken?.name).toBe("reef.session-token");
+    expect(sessionToken?.options).toMatchObject({
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure: false,
+    });
+  });
+});
