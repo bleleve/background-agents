@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { SELF } from "cloudflare:test";
+import { SELF, runInDurableObject } from "cloudflare:test";
+import type { SessionDO } from "../../src/session/durable-object";
+import { MIGRATIONS } from "../../src/session/schema";
 import {
   initNamedSession,
   openSandboxWs,
@@ -286,5 +288,88 @@ describe("Sandbox WebSocket previous-identity grace window", () => {
     const splice2 = await openSandboxWs(name, { authToken: SANDBOX_TOKEN, sandboxId: PREV_ID });
     expect(splice2.response.status).toBe(401);
     expect(splice2.ws).toBeNull();
+  });
+});
+
+describe("Sandbox row singleton / duplicate-row determinism", () => {
+  const STALE_ID = "sb-stale-duplicate";
+
+  it("newest identity wins on connect and a stale duplicate row is ignored", async () => {
+    // Reproduces the frozen-identity wedge: a legacy double-INSERT left two
+    // sandbox rows and a bare LIMIT 1 let writes and reads resolve to DIFFERENT
+    // rows. With deterministic newest-row selection the current identity wins.
+    const name = `ws-sandbox-dup-${Date.now()}`;
+    const { stub } = await initNamedSession(name);
+    await waitForSandboxStatus(stub, "failed");
+
+    // Current identity on the row created at init; make it the NEWEST row.
+    await seedSandboxAuthHash(stub, { authToken: SANDBOX_TOKEN, sandboxId: SANDBOX_ID });
+    await queryDO(stub, "UPDATE sandbox SET created_at = ?", 1_000_000);
+
+    // Inject an OLDER duplicate carrying a stale identity (the morning sandbox).
+    await queryDO(
+      stub,
+      `INSERT INTO sandbox (id, status, git_sync_status, created_at, modal_sandbox_id, auth_token_hash)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      "sb-old-row",
+      "failed",
+      "pending",
+      1,
+      STALE_ID,
+      "stale-hash"
+    );
+
+    const counted = await queryDO<{ c: number }>(stub, "SELECT COUNT(*) AS c FROM sandbox");
+    expect(counted[0].c).toBe(2);
+
+    // Current identity connects — validation reads the NEWEST row, not the stale one.
+    const current = await openSandboxWs(name, { authToken: SANDBOX_TOKEN, sandboxId: SANDBOX_ID });
+    expect(current.response.status).toBe(101);
+    current.ws!.accept();
+    current.ws!.close();
+
+    // The stale duplicate's id no longer authenticates (newest row's id is SANDBOX_ID).
+    const stale = await openSandboxWs(name, { authToken: SANDBOX_TOKEN, sandboxId: STALE_ID });
+    expect(stale.response.status).toBe(403);
+    expect(stale.ws).toBeNull();
+  });
+
+  it("migration 39 collapses duplicate sandbox rows to the newest", async () => {
+    const name = `ws-sandbox-collapse-${Date.now()}`;
+    const { stub } = await initNamedSession(name);
+    await waitForSandboxStatus(stub, "failed");
+
+    // Mark the init row as newest, then inject an older duplicate.
+    await queryDO(
+      stub,
+      "UPDATE sandbox SET created_at = ?, modal_sandbox_id = ?",
+      1_000_000,
+      "newest-id"
+    );
+    await queryDO(
+      stub,
+      `INSERT INTO sandbox (id, status, git_sync_status, created_at, modal_sandbox_id)
+       VALUES (?, ?, ?, ?, ?)`,
+      "sb-old-row",
+      "failed",
+      "pending",
+      1,
+      "older-id"
+    );
+
+    const collapse = MIGRATIONS.find((m) => m.id === 39);
+    expect(collapse).toBeDefined();
+
+    const remaining = await runInDurableObject(stub, (instance: SessionDO) => {
+      if (typeof collapse!.run === "function") {
+        collapse!.run(instance.ctx.storage.sql);
+      }
+      return instance.ctx.storage.sql
+        .exec("SELECT modal_sandbox_id FROM sandbox")
+        .toArray() as Array<{ modal_sandbox_id: string }>;
+    });
+
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].modal_sandbox_id).toBe("newest-id");
   });
 });

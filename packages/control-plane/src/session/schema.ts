@@ -497,6 +497,23 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
       runMigration(sql, `DROP TABLE IF EXISTS do_storage_probe`);
     },
   },
+  {
+    id: 39,
+    description: "Collapse duplicate sandbox rows to the newest (frozen-identity fix)",
+    run: (sql) => {
+      // A pre-fix double-INSERT could leave more than one sandbox row. With a bare
+      // `LIMIT 1` (no ORDER BY), writes and reads then resolved to DIFFERENT rows
+      // and froze the stored sandbox identity (every respawn was rejected with
+      // sandbox_id_mismatch). Keep only the newest row so the singleton invariant
+      // holds and reads/writes agree (matches NEWEST_SANDBOX_ORDER in repository.ts).
+      runMigration(
+        sql,
+        `DELETE FROM sandbox WHERE rowid NOT IN (
+           SELECT rowid FROM sandbox ORDER BY created_at DESC, rowid DESC LIMIT 1
+         )`
+      );
+    },
+  },
 ];
 
 /**
