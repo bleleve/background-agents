@@ -487,6 +487,16 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
       runMigration(sql, `ALTER TABLE sandbox ADD COLUMN prev_identity_expires_at INTEGER`);
     },
   },
+  {
+    id: 38,
+    description: "Drop the temporary DO split-brain probe table (PRs #266/#282)",
+    run: (sql) => {
+      // do_storage_probe was created at runtime in ensureInitialized (a temporary
+      // diagnostic), not via SCHEMA_SQL. Remove its storage residue now that the
+      // probes are gone. IF EXISTS → no-op on DOs that never ran the probe.
+      runMigration(sql, `DROP TABLE IF EXISTS do_storage_probe`);
+    },
+  },
 ];
 
 /**
