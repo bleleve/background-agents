@@ -66,7 +66,9 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v94: merge upstream — bake OpenCode global config deps at build time to skip
 #      the boot-time global-deps seed/reify (#790/#795); keep langfuse plugin in
 #      the staged tree and the SCM credential helper.
-CACHE_BUSTER = "v94-bake-opencode-global-deps-with-langfuse"
+# v95: merge upstream "Remove repo-image fallback tokens" (#722); SCM credential
+#      helper backed by control plane remains the sole credential path.
+CACHE_BUSTER = "v95-bake-opencode-global-deps-with-langfuse"
 
 # Base image with all development tools
 base_image = (
