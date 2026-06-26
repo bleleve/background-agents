@@ -293,7 +293,7 @@ export function createSessionLifecycleHandler(
       const session = deps.getSession();
       if (!session) return Response.json({ error: "Session not found" }, { status: 404 });
 
-      let body: { enabled?: boolean; userId?: string; reason?: string };
+      let body: { enabled?: boolean; userId?: string; reason?: string; commitSha?: string };
       try {
         body = (await request.json()) as typeof body;
       } catch {
@@ -306,14 +306,16 @@ export function createSessionLifecycleHandler(
         return Response.json({ error: "Not authorized to update preview mode" }, { status: 403 });
       }
 
+      // Prefer the caller-provided commit (e.g. the github-bot passes the PR's
+      // latest head SHA) so the dispatch tracks the newest commit on the PR,
+      // not the session's last self-tracked push. Fall back to current_sha.
+      const dispatchSha = body.commitSha ?? session.current_sha ?? undefined;
+
       let runUrl: string | undefined;
       let previewUrls: Record<string, string> | undefined;
       if (body.enabled) {
         try {
-          ({ runUrl, previewUrls } = await deps.dispatchPreview(
-            body.reason,
-            session.current_sha ?? undefined
-          ));
+          ({ runUrl, previewUrls } = await deps.dispatchPreview(body.reason, dispatchSha));
         } catch (error) {
           deps.getLog().error("preview.dispatch_failed", {
             error: error instanceof Error ? error : String(error),
@@ -323,8 +325,8 @@ export function createSessionLifecycleHandler(
       }
       const now = deps.now();
       deps.repository.updatePreviewEnabled(body.enabled, now);
-      if (body.enabled && session.current_sha) {
-        deps.repository.updatePreviewDispatchedSha(session.current_sha);
+      if (body.enabled && dispatchSha) {
+        deps.repository.updatePreviewDispatchedSha(dispatchSha);
       }
       if (runUrl) {
         const artifactId = deps.generateId();
