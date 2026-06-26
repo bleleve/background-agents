@@ -39,6 +39,10 @@ def test_is_mutation_free_subagent() -> None:
     # It must never edit the repo or post; it only returns findings to the caller.
     assert "write: false" in fm
     assert "edit: false" in fm
+    # bash must stay enabled: the sentinel needs it to list changed files and grep for
+    # existing tests (gh pr diff, rg) during the disprove-it step. Unlike pr-doc-sentinel,
+    # flipping bash to false would silently cripple that step with no failing test.
+    assert "bash: true" in fm
 
 
 def test_has_description_for_description_driven_invocation() -> None:
