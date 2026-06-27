@@ -301,7 +301,7 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("pr-doc-sentinel");
     expect(prompt).toContain("documentation-staleness pass");
     // Doc findings ride in the single verdict comment, not a separate message
-    expect(prompt).toContain("**Docs**");
+    expect(prompt).toContain("**Docs drift**");
     expect(prompt).toContain("never as a separate comment");
   });
 
@@ -310,8 +310,8 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("pr-test-sentinel");
     expect(prompt).toContain("test-coverage pass");
     // Coverage gaps ride in the single verdict comment, in a Tests line — not a separate message.
-    expect(prompt).toContain("**Tests**");
-    expect(prompt).toContain("### Tests");
+    expect(prompt).toContain("**Tests coverage**");
+    expect(prompt).toContain("### Tests coverage");
     // The coverage line is a count of must-test gaps (no percentage — useless for small diffs).
     expect(prompt).toContain("🧪 <U> test-worthy change(s) without a test");
     // Default is silence (Martin's framing): do not alert just because a PR adds no tests.
