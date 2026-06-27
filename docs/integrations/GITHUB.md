@@ -75,6 +75,12 @@ structured risk map:
 - A **Summary** section: the verdict in one sentence and a count of findings by risk.
 - **Worth a look** — the findings that survived the quality bar, each linking back to its inline
   comment (omitted when there are none).
+- **Tests** — flagged only when a change that _should_ be tested ships without one. The coverage
+  sentinel targets must-test changes (new non-trivial logic, bug fixes, auth, migrations, parsing of
+  untrusted input, concurrency, new public APIs) and stays silent for the many PRs that legitimately
+  add no tests. A genuine gap is listed here and raises the risk badge as a floor — an uncovered
+  behavioral change to at least 🟡, an uncovered critical-path change to 🔴 (omitted when there is
+  no gap).
 - **Docs** — any documentation that drifted from the change (omitted when there is none).
 - **Reviewed, no concerns** — the areas that were checked and had nothing notable, in a collapsed
   `<details>` block so it stays out of the way of the summary.
