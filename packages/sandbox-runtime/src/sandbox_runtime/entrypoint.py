@@ -1325,6 +1325,11 @@ class SandboxSupervisor:
         # loop, stall the pings, and let the 90s heartbeat watchdog mark a
         # healthy-but-slow boot as stale.
         #
+        # This is the off-event-loop equivalent of upstream's synchronous
+        # _prepare_opencode_filesystem() (kept available for non-boot callers):
+        # each step is offloaded individually via asyncio.to_thread so the
+        # boot-progress heartbeat keeps pinging during a slow boot.
+        #
         # _seed_global_opencode_deps (from upstream) is a best-effort fallback:
         # the image normally bakes the staged plugin tree into the global config
         # dir at build time (base.py), so it's usually a no-op, but the node

@@ -30,7 +30,8 @@ import { getAvailableRepos } from "./classifier/repos";
 import { callbacksRouter, planAwaitingMessageKvKey } from "./callbacks";
 import { buildPlanDecidedBlocks } from "./completion/blocks";
 import type { PlanArtifact } from "@open-inspect/shared";
-import { buildInternalAuthHeaders } from "@open-inspect/shared";
+import { handleChannelTrigger } from "./channel-trigger";
+import { getAuthHeaders } from "./internal-auth";
 import { createLogger } from "./logger";
 import { createKvCacheStore } from "@open-inspect/shared";
 import {
@@ -106,16 +107,6 @@ export const SLACK_SESSION_INSTRUCTIONS =
 
 export function buildAppHomeIntroText(appName: string): string {
   return `Configure your ${appName} preferences below.`;
-}
-
-/**
- * Build authenticated headers for control plane requests.
- */
-async function getAuthHeaders(env: Env, traceId?: string): Promise<Record<string, string>> {
-  return {
-    "Content-Type": "application/json",
-    ...(await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET, traceId)),
-  };
 }
 
 /**
@@ -1566,6 +1557,14 @@ async function handleSlackEvent(
   // Handle app_mention events
   if (event.type === "app_mention" && event.text && event.channel && event.ts) {
     await handleAppMention(event as Required<typeof event>, env, traceId, scheduleBackground);
+    return;
+  }
+
+  // Handle ambient channel messages as potential automation triggers.
+  // `handleChannelTrigger` applies the kill switch, candidacy, and watched-channel
+  // gates; non-candidates (DMs already handled above, mentions, bot posts) are dropped.
+  if (event.type === "message") {
+    await handleChannelTrigger(event, env, traceId);
   }
 }
 
