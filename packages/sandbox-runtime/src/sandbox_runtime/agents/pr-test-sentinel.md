@@ -1,8 +1,8 @@
 ---
 description:
   Test-coverage sentinel for PR reviews. Invoke during a code review when the diff adds or modifies
-  source code, to find changes that MUST be tested but ship without a test, and to estimate how much
-  of the test-worthy change is covered. Read-only static diff analysis — it does NOT run the test
+  source code, to find changes that MUST be tested but ship without a test, and report how many
+  test-worthy changes are missing a test. Read-only static diff analysis — it does NOT run the test
   suite or coverage tools; it returns findings, it does not post or edit.
 mode: subagent
 model: anthropic/claude-sonnet-4-6
