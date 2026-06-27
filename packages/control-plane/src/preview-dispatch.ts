@@ -7,13 +7,7 @@ const log = createLogger("preview-dispatch");
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 120_000;
 
-const PREVIEW_PRODUCTS = [
-  "hire",
-  "recruiter-ui",
-  "applicant-ui",
-  "career-site-ui",
-  "wx",
-] as const;
+const PREVIEW_PRODUCTS = ["hire", "recruiter-ui", "applicant-ui", "career-site-ui", "wx"] as const;
 
 export interface DispatchPreviewResult {
   dispatchId: string;

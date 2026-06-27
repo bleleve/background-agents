@@ -1425,14 +1425,7 @@ async function dispatchPullRequestPreview(
       installationId: env.GITHUB_APP_INSTALLATION_ID,
       userAgent,
     });
-    await createIssueComment(
-      token,
-      owner,
-      repoName,
-      pr.number,
-      commentBody,
-      userAgent
-    );
+    await createIssueComment(token, owner, repoName, pr.number, commentBody, userAgent);
   }
   return {
     outcome: "processed",
