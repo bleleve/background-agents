@@ -1,8 +1,8 @@
 ---
 description:
   Test-coverage sentinel for PR reviews. Invoke during a code review when the diff adds or modifies
-  source code, to find changes that MUST be tested but ship without a test, and to estimate how much
-  of the test-worthy change is covered. Read-only static diff analysis — it does NOT run the test
+  source code, to find changes that MUST be tested but ship without a test, and report how many
+  test-worthy changes are missing a test. Read-only static diff analysis — it does NOT run the test
   suite or coverage tools; it returns findings, it does not post or edit.
 mode: subagent
 model: anthropic/claude-sonnet-4-6
@@ -72,11 +72,10 @@ Only findings that survive all three are real.
 
 ## Output (read-only — do not edit files, do not post comments; return this to the caller)
 
-- If at least one test-worthy change is missing a test, lead with one estimate line:
-  `Coverage of test-worthy changes (estimated): <N>% — <T> test-worthy, <C> with tests, <U> missing.`
-  then one line per missing one, highest-risk first:
-  ``<🟡|🔴> `path:line` — <the behavior that ships untested>`` (🔴 only when critical-path, else
-  🟡).
+- If at least one test-worthy change is missing a test, lead with one summary line:
+  `<U> of <T> test-worthy change(s) ship without a test.` then one line per missing one,
+  highest-risk first: ``<🟡|🔴> `path:line` — <the behavior that ships untested>`` (🔴 only when
+  critical-path, else 🟡).
 - If every test-worthy change already has a test, reply exactly:
   `All test-worthy changes have tests.`
 - If nothing test-worthy changed, reply exactly: `No test-worthy changes.`
