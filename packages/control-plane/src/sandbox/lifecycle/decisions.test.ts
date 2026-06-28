@@ -711,7 +711,7 @@ describe("evaluateInactivityTimeout", () => {
   });
 
   it("uses default config values correctly", () => {
-    expect(DEFAULT_INACTIVITY_CONFIG.timeoutMs).toBe(15 * 60 * 1000);
+    expect(DEFAULT_INACTIVITY_CONFIG.timeoutMs).toBe(10 * 60 * 1000);
     expect(DEFAULT_INACTIVITY_CONFIG.extensionMs).toBe(5 * 60 * 1000);
     expect(DEFAULT_INACTIVITY_CONFIG.minCheckIntervalMs).toBe(30000);
   });

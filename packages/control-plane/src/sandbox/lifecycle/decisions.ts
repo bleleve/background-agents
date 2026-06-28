@@ -327,7 +327,7 @@ export interface InactivityConfig {
  * Default inactivity configuration.
  */
 export const DEFAULT_INACTIVITY_CONFIG: InactivityConfig = {
-  timeoutMs: 15 * 60 * 1000, // 15 minutes
+  timeoutMs: 10 * 60 * 1000, // 10 minutes
   extensionMs: 5 * 60 * 1000, // 5 minutes
   minCheckIntervalMs: 30000, // 30 seconds
 };

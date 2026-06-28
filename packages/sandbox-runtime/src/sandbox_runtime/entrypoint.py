@@ -38,6 +38,8 @@ from .repo_image_callback import RepoImageBuildCallback
 
 configure_logging()
 
+BIN_INSTALL_DIR_ENV_VAR = "OPENINSPECT_BIN_INSTALL_DIR"
+
 
 def _deep_merge(base: dict, override: dict) -> dict:
     """
@@ -790,7 +792,7 @@ class SandboxSupervisor:
         self._install_bin_scripts()
 
     def _install_bin_scripts(self) -> None:
-        """Install standalone CLI scripts into /usr/local/bin.
+        """Install standalone CLI scripts into the sandbox bin directory.
 
         Scripts in bin/ are standalone CLIs (not OpenCode tool plugins) and must
         NOT be placed in .opencode/tool/ — OpenCode would import() them during
@@ -802,7 +804,9 @@ class SandboxSupervisor:
 
         for script in bin_dir.iterdir():
             if script.is_file() and script.suffix == ".js":
-                dest = Path("/usr/local/bin") / script.stem
+                install_dir = Path(os.environ.get(BIN_INSTALL_DIR_ENV_VAR, "/usr/local/bin"))
+                install_dir.mkdir(parents=True, exist_ok=True)
+                dest = install_dir / script.stem
                 shutil.copy(script, dest)
                 dest.chmod(0o755)
                 self.log.info("bin.installed", script=script.stem)
