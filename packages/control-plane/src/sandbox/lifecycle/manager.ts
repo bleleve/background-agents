@@ -1183,14 +1183,14 @@ export class SandboxLifecycleManager {
       // spawning is a slow restore/respawn, not a death: the agent has already
       // run and is likely about to complete. Defer the terminal decision to the
       // in-flight silence backstop (measured on the same last-sign-of-life
-      // clock) instead of failing on the 120s connect window — failing here
+      // clock) instead of failing on the short reconnect window — failing here
       // would terminate a turn that then completes, leaving the timeline
       // ("Execution complete") disagreeing with the status chip ("Failed"). The
       // primary death signal during a restore is spawn_failed (handled above on
       // a terminal "failed" status); this only defers the silent-provider case.
       // getIsProcessing() is false on a cold boot (the triggering prompt is
-      // still "pending"), so a first-connect that never lands keeps the original
-      // 120s terminal — nothing is in flight to lose.
+      // still "pending"), so a first-connect that never lands keeps its
+      // first-connect terminal — nothing is in flight to lose.
       if (
         this.storage.getIsProcessing() &&
         connectingResult.elapsedMs < this.config.inFlightSilence.timeoutMs
