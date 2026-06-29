@@ -51,6 +51,12 @@ const QUERY_PATTERNS = {
   UPDATE_STALE:
     /^UPDATE repo_images SET status = 'failed', error_message = \? WHERE status = 'building' AND created_at < \?$/,
   DELETE_OLD_FAILED: /^DELETE FROM repo_images WHERE status = 'failed' AND created_at < \?$/,
+  SELECT_BUILD_REPO:
+    /^SELECT repo_owner, repo_name, base_branch FROM repo_images WHERE id = \? AND provider = \?$/,
+  SELECT_LAST_READY_TS:
+    /^SELECT MAX\(created_at\) AS ts FROM repo_images WHERE repo_owner = \? AND repo_name = \? AND status = 'ready'$/,
+  SELECT_FAILED_COUNT_SINCE:
+    /^SELECT COUNT\(\*\) AS n FROM repo_images WHERE repo_owner = \? AND repo_name = \? AND status = 'failed' AND created_at > \?$/,
 } as const;
 
 function normalizeQuery(query: string): string {
@@ -85,7 +91,7 @@ class FakeD1Database {
     this.beforeReadyUpdate = callback;
   }
 
-  first(query: string, args: unknown[]): Partial<RepoImageRow> | null {
+  first(query: string, args: unknown[]): Record<string, unknown> | null {
     const normalized = normalizeQuery(query);
 
     if (QUERY_PATTERNS.SELECT_BY_ID.test(normalized)) {
@@ -158,6 +164,41 @@ class FakeD1Database {
         }
       }
       return latest ? { ...latest } : null;
+    }
+
+    if (QUERY_PATTERNS.SELECT_BUILD_REPO.test(normalized)) {
+      const [id, provider] = args as [string, string];
+      const row = this.rows.get(id);
+      return row && row.provider === provider
+        ? { repo_owner: row.repo_owner, repo_name: row.repo_name, base_branch: row.base_branch }
+        : null;
+    }
+
+    if (QUERY_PATTERNS.SELECT_LAST_READY_TS.test(normalized)) {
+      const [owner, name] = args as [string, string];
+      let ts: number | null = null;
+      for (const row of this.rows.values()) {
+        if (row.repo_owner === owner && row.repo_name === name && row.status === "ready") {
+          if (ts === null || row.created_at > ts) ts = row.created_at;
+        }
+      }
+      return { ts };
+    }
+
+    if (QUERY_PATTERNS.SELECT_FAILED_COUNT_SINCE.test(normalized)) {
+      const [owner, name, since] = args as [string, string, number];
+      let n = 0;
+      for (const row of this.rows.values()) {
+        if (
+          row.repo_owner === owner &&
+          row.repo_name === name &&
+          row.status === "failed" &&
+          row.created_at > since
+        ) {
+          n++;
+        }
+      }
+      return { n };
     }
 
     throw new Error(`Unexpected first() query: ${normalized}`);
@@ -1349,6 +1390,64 @@ describe("RepoImageStore", () => {
 
       const count = await store.deleteOldFailedBuilds(86400000);
       expect(count).toBe(0);
+    });
+  });
+
+  describe("countFailuresSinceLastReady", () => {
+    async function registerFailed(id: string, owner: string, name: string) {
+      await store.registerBuild({
+        id,
+        repoOwner: owner,
+        repoName: name,
+        provider: "modal",
+        baseBranch: "main",
+      });
+      await store.markBuildFailed(id, "modal", "Timed out waiting for image to be created");
+    }
+
+    it("returns null for an unknown build id", async () => {
+      expect(await store.countFailuresSinceLastReady("nope", "modal")).toBeNull();
+    });
+
+    it("counts all failures when the repo has never succeeded", async () => {
+      await registerFailed("img-1", "acme", "repo");
+      vi.advanceTimersByTime(1000);
+      await registerFailed("img-2", "acme", "repo");
+      vi.advanceTimersByTime(1000);
+      await registerFailed("img-3", "acme", "repo");
+
+      expect(await store.countFailuresSinceLastReady("img-3", "modal")).toEqual({
+        repoOwner: "acme",
+        repoName: "repo",
+        baseBranch: "main",
+        failureCount: 3,
+      });
+    });
+
+    it("resets the streak after a successful build", async () => {
+      await registerFailed("img-1", "acme", "repo");
+      vi.advanceTimersByTime(1000);
+
+      await store.registerBuild({
+        id: "img-ok",
+        repoOwner: "acme",
+        repoName: "repo",
+        provider: "modal",
+        baseBranch: "main",
+      });
+      await store.markBuildReady("img-ok", "modal", "im-1", "sha1", 42);
+      vi.advanceTimersByTime(1000);
+
+      await registerFailed("img-2", "acme", "repo");
+
+      expect((await store.countFailuresSinceLastReady("img-2", "modal"))?.failureCount).toBe(1);
+    });
+
+    it("scopes the streak to the build's own repo", async () => {
+      await registerFailed("img-a", "acme", "repo");
+      await registerFailed("img-b", "other", "repo");
+
+      expect((await store.countFailuresSinceLastReady("img-a", "modal"))?.failureCount).toBe(1);
     });
   });
 });
