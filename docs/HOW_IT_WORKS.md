@@ -391,6 +391,11 @@ body). The sandbox bridge then wraps the whole prompt in `<user_message>` when a
 preamble is prepended, and also neutralizes literal `</user_message>` so a user can't close the
 outer wrapper from inside.
 
+The bridge also enriches the prompt with environment context: when the request content contains
+Fountain application URLs (`*.fountain.com`, `*.ftn.app`, `*.tryfountain.com`), it prepends a
+`<fountain_context>` block classifying each URL by service (Hire, Hire Go, WX) and environment
+before dispatching to OpenCode, so the agent knows which codebase the request targets.
+
 ---
 
 ## The Agent

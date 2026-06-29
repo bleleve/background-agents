@@ -29,6 +29,7 @@ from websockets import ClientConnection, State
 from websockets.exceptions import InvalidStatus
 
 from .constants import TUNNEL_ENV_FILE_PATH
+from .fountain_url_context import build_fountain_url_context
 from .log_config import configure_logging, get_logger
 from .types import GitUser
 
@@ -805,6 +806,8 @@ class AgentBridge:
         start_time = time.time()
         outcome = "success"
 
+        url_context = build_fountain_url_context(content)
+
         if plan_mode:
             # Planning turn: instruct the agent to output a markdown plan and stop.
             # We do NOT inject the impl-mode restate-and-confirm — the bridge will
@@ -825,6 +828,9 @@ class AgentBridge:
             else:
                 preamble_kind = "none"
             content = f"{content}\n\n{self._PUSH_TURN_INSTRUCTION}"
+
+        if url_context:
+            content = f"{url_context}\n\n{content}"
 
         self.log.info(
             "prompt.start",
