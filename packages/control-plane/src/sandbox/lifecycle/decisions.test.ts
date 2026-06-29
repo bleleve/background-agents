@@ -802,44 +802,44 @@ describe("evaluateConnectingTimeout", () => {
     expect(result.elapsedMs).toBe(0);
   });
 
-  it("returns not timed out when within timeout window", () => {
+  it("returns not timed out when within first-connect window", () => {
     const now = Date.now();
-    const createdAt = now - 60_000; // 60s ago, well within 120s timeout
+    const createdAt = now - 200_000; // 200s ago, still within the 240s first-connect budget
 
     const result = evaluateConnectingTimeout("connecting", createdAt, null, config, now);
 
     expect(result.isTimedOut).toBe(false);
-    expect(result.elapsedMs).toBe(60_000);
+    expect(result.elapsedMs).toBe(200_000);
   });
 
-  it("returns timed out when past timeout", () => {
+  it("returns timed out when past first-connect timeout (no sign of life)", () => {
     const now = Date.now();
-    const createdAt = now - 130_000; // 130s ago, past 120s timeout
+    const createdAt = now - 250_000; // 250s ago, past the 240s first-connect budget
 
     const result = evaluateConnectingTimeout("connecting", createdAt, null, config, now);
 
     expect(result.isTimedOut).toBe(true);
-    expect(result.elapsedMs).toBe(130_000);
+    expect(result.elapsedMs).toBe(250_000);
   });
 
-  it("returns timed out at exact boundary (>=)", () => {
+  it("returns timed out at exact first-connect boundary (>=)", () => {
     const now = Date.now();
-    const createdAt = now - config.timeoutMs; // Exactly at timeout
+    const createdAt = now - config.firstConnectTimeoutMs; // Exactly at the first-connect budget
 
     const result = evaluateConnectingTimeout("connecting", createdAt, null, config, now);
 
     expect(result.isTimedOut).toBe(true);
-    expect(result.elapsedMs).toBe(config.timeoutMs);
+    expect(result.elapsedMs).toBe(config.firstConnectTimeoutMs);
   });
 
-  it("returns timed out when stuck in spawning past timeout (interrupted spawn)", () => {
+  it("returns timed out when stuck in spawning past first-connect timeout (interrupted spawn)", () => {
     const now = Date.now();
-    const createdAt = now - 130_000; // 130s ago, past 120s timeout
+    const createdAt = now - 250_000; // 250s ago, past the 240s first-connect budget
 
     const result = evaluateConnectingTimeout("spawning", createdAt, null, config, now);
 
     expect(result.isTimedOut).toBe(true);
-    expect(result.elapsedMs).toBe(130_000);
+    expect(result.elapsedMs).toBe(250_000);
   });
 
   it("returns not timed out for spawning within timeout window", () => {
@@ -870,15 +870,15 @@ describe("evaluateConnectingTimeout", () => {
     expect(result.elapsedMs).toBe(10_000);
   });
 
-  it("times out when boot-progress pings stop for the full window", () => {
+  it("times out when boot-progress pings stop for the full reconnect window", () => {
     const now = Date.now();
     const createdAt = now - 300_000;
-    const lastProgress = now - config.timeoutMs; // last ping exactly a window ago
+    const lastProgress = now - config.reconnectTimeoutMs; // last ping exactly a reconnect window ago
 
     const result = evaluateConnectingTimeout("connecting", createdAt, lastProgress, config, now);
 
     expect(result.isTimedOut).toBe(true);
-    expect(result.elapsedMs).toBe(config.timeoutMs);
+    expect(result.elapsedMs).toBe(config.reconnectTimeoutMs);
   });
 
   it("falls back to creation time when no progress reported yet", () => {
@@ -894,8 +894,35 @@ describe("evaluateConnectingTimeout", () => {
     );
   });
 
-  it("uses correct default config value", () => {
-    expect(DEFAULT_CONNECTING_TIMEOUT_CONFIG.timeoutMs).toBe(120_000);
+  it("uses correct default config values", () => {
+    expect(DEFAULT_CONNECTING_TIMEOUT_CONFIG.firstConnectTimeoutMs).toBe(240_000);
+    expect(DEFAULT_CONNECTING_TIMEOUT_CONFIG.reconnectTimeoutMs).toBe(120_000);
+  });
+
+  it("applies the shorter reconnect budget once a sign of life has arrived", () => {
+    const now = Date.now();
+    // Pinged 90s ago: within the 120s reconnect budget, so still alive.
+    expect(
+      evaluateConnectingTimeout("connecting", now - 300_000, now - 90_000, config, now).isTimedOut
+    ).toBe(false);
+    // Pinged 130s ago: past the 120s reconnect budget, fast-fail preserved.
+    expect(
+      evaluateConnectingTimeout("connecting", now - 300_000, now - 130_000, config, now).isTimedOut
+    ).toBe(true);
+  });
+
+  it("picks the budget from lastProgressAt (first-connect vs reconnect crossover)", () => {
+    const now = Date.now();
+    const createdAt = now - 130_000; // 130s: between the reconnect (120s) and first-connect (240s) budgets
+
+    // No sign of life yet → first-connect budget (240s) → still booting.
+    expect(evaluateConnectingTimeout("connecting", createdAt, null, config, now).isTimedOut).toBe(
+      false
+    );
+    // Has pinged 130s ago → reconnect budget (120s) → timed out.
+    expect(
+      evaluateConnectingTimeout("connecting", createdAt, createdAt, config, now).isTimedOut
+    ).toBe(true);
   });
 });
 
