@@ -451,8 +451,12 @@ describe("SandboxLifecycleManager", () => {
       // deadline.
       expect(alarmScheduler.alarms.length).toBe(2);
       for (const scheduledTime of alarmScheduler.alarms) {
-        expect(scheduledTime).toBeGreaterThanOrEqual(before + config.connectingTimeout.timeoutMs);
-        expect(scheduledTime).toBeLessThanOrEqual(after + config.connectingTimeout.timeoutMs);
+        expect(scheduledTime).toBeGreaterThanOrEqual(
+          before + config.connectingTimeout.firstConnectTimeoutMs
+        );
+        expect(scheduledTime).toBeLessThanOrEqual(
+          after + config.connectingTimeout.firstConnectTimeoutMs
+        );
       }
     });
 
@@ -594,8 +598,12 @@ describe("SandboxLifecycleManager", () => {
       // a successful restore. Both land in the connecting-timeout window.
       expect(alarmScheduler.alarms.length).toBe(2);
       for (const scheduledTime of alarmScheduler.alarms) {
-        expect(scheduledTime).toBeGreaterThanOrEqual(before + config.connectingTimeout.timeoutMs);
-        expect(scheduledTime).toBeLessThanOrEqual(after + config.connectingTimeout.timeoutMs);
+        expect(scheduledTime).toBeGreaterThanOrEqual(
+          before + config.connectingTimeout.firstConnectTimeoutMs
+        );
+        expect(scheduledTime).toBeLessThanOrEqual(
+          after + config.connectingTimeout.firstConnectTimeoutMs
+        );
       }
     });
 
@@ -1485,7 +1493,7 @@ describe("SandboxLifecycleManager", () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
         status: "connecting" as SandboxStatus,
-        created_at: now - 130_000, // 130s ago, past 120s timeout
+        created_at: now - 250_000, // 250s ago, past the 240s first-connect timeout
         last_heartbeat: null,
       });
       const storage = createMockStorage(createMockSession(), sandbox);
@@ -1520,7 +1528,7 @@ describe("SandboxLifecycleManager", () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
         status: "connecting" as SandboxStatus,
-        created_at: now - 30_000, // 30s ago, well within 120s timeout
+        created_at: now - 30_000, // 30s ago, well within the 240s first-connect timeout
         last_heartbeat: null,
       });
       const storage = createMockStorage(createMockSession(), sandbox);
@@ -1573,7 +1581,7 @@ describe("SandboxLifecycleManager", () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
         status: "connecting" as SandboxStatus,
-        created_at: now - 130_000,
+        created_at: now - 250_000, // 250s ago, past the 240s first-connect timeout
         last_heartbeat: null,
       });
       const storage = createMockStorage(createMockSession(), sandbox);
@@ -1607,11 +1615,11 @@ describe("SandboxLifecycleManager", () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
         status: "connecting" as SandboxStatus,
-        created_at: now - 130_000, // 130s: past the 120s connect window…
+        created_at: now - 250_000, // 250s: past the 240s first-connect window…
         last_heartbeat: null,
       });
       const storage = createMockStorage(createMockSession(), sandbox);
-      // …but a message is processing (mid-run respawn), and 130s < 10min backstop.
+      // …but a message is processing (mid-run respawn), and 250s < 10min backstop.
       storage.getIsProcessing = vi.fn(() => true);
       const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
       const alarmScheduler = createMockAlarmScheduler();
@@ -1669,12 +1677,12 @@ describe("SandboxLifecycleManager", () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
         status: "connecting" as SandboxStatus,
-        created_at: now - 130_000,
+        created_at: now - 250_000, // 250s ago, past the 240s first-connect timeout
         last_heartbeat: null,
       });
       const storage = createMockStorage(createMockSession(), sandbox);
       // Default getIsProcessing() === false: the triggering prompt is still
-      // "pending", nothing is in flight to lose, so the 120s terminal stands.
+      // "pending", nothing is in flight to lose, so the first-connect terminal stands.
       const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
 
       const manager = new SandboxLifecycleManager(
@@ -1692,6 +1700,39 @@ describe("SandboxLifecycleManager", () => {
 
       expect(onSandboxTerminating).toHaveBeenCalledWith("connecting_timeout");
       expect(storage.calls).toContain("updateSandboxStatus:failed");
+    });
+
+    it("gives a cold boot the longer first-connect budget (200s, no sign of life, not failed)", async () => {
+      const now = Date.now();
+      // 200s with no boot-progress ping yet: under the OLD single 120s budget this
+      // healthy-but-slow cold boot was false-failed; the 240s first-connect budget
+      // spares it. This is the core regression guard for the concurrent-cold-boot fix.
+      const sandbox = createMockSandbox({
+        status: "connecting" as SandboxStatus,
+        created_at: now - 200_000,
+        last_heartbeat: null,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+      const alarmScheduler = createMockAlarmScheduler();
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        alarmScheduler,
+        createMockIdGenerator(),
+        createTestConfig(),
+        { onSandboxTerminating }
+      );
+
+      await manager.handleAlarm();
+
+      expect(onSandboxTerminating).not.toHaveBeenCalled();
+      expect(storage.calls).not.toContain("updateSandboxStatus:failed");
+      // Re-armed to re-check at the real first-connect deadline rather than failing now.
+      expect(alarmScheduler.alarms.length).toBe(1);
     });
 
     it("defers heartbeat-stale terminal while a turn is in flight (silence < backstop)", async () => {
@@ -1787,12 +1828,13 @@ describe("SandboxLifecycleManager", () => {
       expect(storage.calls).toContain("updateSandboxHeartbeat");
       expect(sandbox.last_heartbeat).toBeGreaterThanOrEqual(before);
 
-      // Connecting deadline actively pushed to ~now + timeout, not left at the
-      // stale created_at + timeout that would fire mid-boot.
+      // Connecting deadline actively pushed to ~now + the reconnect budget (a
+      // ping is a sign of life), not left at the stale created_at + budget that
+      // would fire mid-boot.
       expect(alarmScheduler.alarms.length).toBe(1);
       const armed = alarmScheduler.alarms[0];
-      expect(armed).toBeGreaterThanOrEqual(before + config.connectingTimeout.timeoutMs);
-      expect(armed).toBeLessThanOrEqual(after + config.connectingTimeout.timeoutMs);
+      expect(armed).toBeGreaterThanOrEqual(before + config.connectingTimeout.reconnectTimeoutMs);
+      expect(armed).toBeLessThanOrEqual(after + config.connectingTimeout.reconnectTimeoutMs);
     });
 
     it("re-arms while spawning (before the provider call returns)", async () => {

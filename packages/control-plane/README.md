@@ -355,8 +355,9 @@ Sandbox lifecycle tuning knobs (all in milliseconds):
   is terminally failed (default: `600000` = 10 min). While a turn is processing, a
   connecting/heartbeat blip is treated as a recoverable reconnection (slow restore/respawn) until
   the box has been silent for this long — so an actively-working turn is never failed on the short
-  90s/120s watchdog windows. Measured on last sign of life, never on total turn duration; must
-  exceed the worst legitimate restore/respawn silence.
+  90s heartbeat / 120s reconnect watchdog windows (a cold boot with no turn in flight instead uses
+  the separate 240s first-connect window). Measured on last sign of life, never on total turn
+  duration; must exceed the worst legitimate restore/respawn silence.
 
 See [terraform/terraform.tfvars.example](../../terraform/terraform.tfvars.example) for the complete
 list.

@@ -265,6 +265,10 @@ describe("SessionRepository", () => {
       expect(mock.calls[0].query).toContain("modal_sandbox_id");
       expect(mock.calls[0].query).toContain("auth_token = NULL");
       expect(mock.calls[0].query).toContain("modal_object_id = NULL");
+      // A fresh spawn lineage has no heartbeat: clearing it makes the connecting
+      // watchdog treat the boot as a cold first-connect (longer budget), not a
+      // reconnect, even when respawning over a row that previously heart-beat.
+      expect(mock.calls[0].query).toContain("last_heartbeat = NULL");
       // Prior identity is captured into the prev_* slots in the same statement.
       expect(mock.calls[0].query).toContain("prev_auth_token_hash = auth_token_hash");
       expect(mock.calls[0].query).toContain("prev_modal_sandbox_id = modal_sandbox_id");

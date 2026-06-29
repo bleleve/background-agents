@@ -501,7 +501,8 @@ export class SessionRepository {
          auth_token_hash = ?,
          auth_token = NULL,
          modal_sandbox_id = ?,
-         modal_object_id = NULL
+         modal_object_id = NULL,
+         last_heartbeat = NULL
        WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
       data.prevIdentityExpiresAt,
       data.status,

@@ -495,23 +495,42 @@ export function evaluateHeartbeatHealth(
 
 /**
  * Configuration for the initial-connect watchdog.
+ *
+ * Two budgets, keyed on whether the sandbox has shown ANY sign of life yet
+ * (`last_heartbeat`: bridge heartbeats and boot-progress pings):
+ *
+ * - `firstConnectTimeoutMs` — the sandbox has never pinged. The window covers
+ *   the blind pre-first-ping latency: Modal container schedule + base-image
+ *   mount + Python interpreter boot before the supervisor sends its first
+ *   boot-progress ping. Under concurrent cold boots (no prebuilt repo image)
+ *   this contends for Modal capacity and routinely exceeds the short budget,
+ *   false-failing healthy-but-slow boots — the reason this budget is longer.
+ * - `reconnectTimeoutMs` — the sandbox has pinged at least once, so it is alive;
+ *   each ping re-arms the watchdog. A short budget keeps a box that goes silent
+ *   after showing life failing fast.
  */
 export interface ConnectingTimeoutConfig {
-  /** Maximum time in ms a sandbox can stay in "connecting" before being failed */
-  timeoutMs: number;
+  /** Max ms with NO sign of life (cold first connect) before the sandbox is failed. */
+  firstConnectTimeoutMs: number;
+  /** Max silence (ms since last sign of life) tolerated once the sandbox has pinged. */
+  reconnectTimeoutMs: number;
 }
 
 /**
- * Default connecting timeout: 2 minutes.
+ * Default connecting timeouts.
  *
- * Measured from the sandbox's last sign of life, not raw creation time: the
- * in-sandbox supervisor posts boot-progress pings (recorded as heartbeats)
- * throughout setup, so a legitimately slow setup.sh keeps pushing the deadline
- * forward. The watchdog therefore fires only after two minutes of silence — a
- * genuinely stuck boot — rather than penalizing repos with long setup scripts.
+ * Both are measured from the sandbox's last sign of life, not raw creation time:
+ * the in-sandbox supervisor posts boot-progress pings (recorded as heartbeats)
+ * throughout setup, and each one pushes the deadline forward — so a legitimately
+ * slow setup.sh is never penalized.
+ *
+ * `firstConnectTimeoutMs` MUST stay >= MODAL_SANDBOX_REQUEST_TIMEOUT_MS
+ * (sandbox/client.ts) so the pre-armed watchdog can never fire before the
+ * provider create call has had its full chance to return.
  */
 export const DEFAULT_CONNECTING_TIMEOUT_CONFIG: ConnectingTimeoutConfig = {
-  timeoutMs: 120_000,
+  firstConnectTimeoutMs: 240_000,
+  reconnectTimeoutMs: 120_000,
 };
 
 /**
@@ -588,6 +607,10 @@ export interface ConnectingTimeoutResult {
  * Pure function: no side effects. Safe to call for any status — returns
  * `isTimedOut: false` for sandboxes that are not spawning/connecting.
  *
+ * Applies the longer `firstConnectTimeoutMs` budget while the sandbox has shown
+ * no sign of life yet (`lastProgressAt == null`), and the shorter
+ * `reconnectTimeoutMs` budget once it has pinged at least once.
+ *
  * @param status - Current sandbox status
  * @param createdAt - Timestamp (ms) when the sandbox was spawned
  * @param lastProgressAt - Timestamp (ms) of the last sign of life from the
@@ -612,10 +635,16 @@ export function evaluateConnectingTimeout(
   // setup.sh — before the bridge WebSocket exists — and each one pushes the
   // deadline forward. The watchdog fires only when the sandbox goes silent for
   // the full window (stuck boot), not when a healthy setup simply runs long.
+  //
+  // A sandbox that has never signalled (lastProgressAt == null) is still in its
+  // cold first-connect phase and gets the longer firstConnect budget; once it
+  // has pinged it is demonstrably alive and the shorter reconnect budget applies.
+  const budgetMs =
+    lastProgressAt == null ? config.firstConnectTimeoutMs : config.reconnectTimeoutMs;
   const since = Math.max(createdAt, lastProgressAt ?? 0);
   const elapsedMs = now - since;
   return {
-    isTimedOut: elapsedMs >= config.timeoutMs,
+    isTimedOut: elapsedMs >= budgetMs,
     elapsedMs,
   };
 }
