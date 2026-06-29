@@ -212,13 +212,13 @@ describe("SessionRepository", () => {
 
   describe("getSandbox", () => {
     it("returns null when no sandbox exists", () => {
-      mock.setData(`SELECT * FROM sandbox LIMIT 1`, []);
+      mock.setData(`SELECT * FROM sandbox ORDER BY created_at DESC, rowid DESC LIMIT 1`, []);
       expect(repo.getSandbox()).toBeNull();
     });
 
     it("returns sandbox when it exists", () => {
       const sandbox = { id: "sb-1", status: "ready" };
-      mock.setData(`SELECT * FROM sandbox LIMIT 1`, [sandbox]);
+      mock.setData(`SELECT * FROM sandbox ORDER BY created_at DESC, rowid DESC LIMIT 1`, [sandbox]);
       expect(repo.getSandbox()).toEqual(sandbox);
     });
   });
@@ -235,6 +235,20 @@ describe("SessionRepository", () => {
       expect(mock.calls.length).toBe(1);
       expect(mock.calls[0].query).toContain("INSERT INTO sandbox");
       expect(mock.calls[0].params).toEqual(["sb-1", "pending", "pending", 1000]);
+    });
+
+    it("guards the insert so a re-init never creates a second row (singleton)", () => {
+      // A duplicate sandbox row lets writes and reads target different rows under
+      // a bare LIMIT 1 and freezes the stored identity, so the INSERT is gated on
+      // an empty table — a re-init is a no-op rather than a second row.
+      repo.createSandbox({
+        id: "sb-1",
+        status: "pending",
+        gitSyncStatus: "pending",
+        createdAt: 1000,
+      });
+
+      expect(mock.calls[0].query).toContain("WHERE NOT EXISTS (SELECT 1 FROM sandbox)");
     });
   });
 

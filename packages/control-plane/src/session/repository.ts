@@ -38,6 +38,15 @@ type TokenEvent = Extract<SandboxEvent, { type: "token" }>;
 type ExecutionCompleteEvent = Extract<SandboxEvent, { type: "execution_complete" }>;
 type UpsertableEventType = TokenEvent["type"] | ExecutionCompleteEvent["type"];
 
+// The `sandbox` table is a logical singleton per session DO (enforced at
+// createSandbox), but a stray duplicate row can still exist. A bare `LIMIT 1`
+// with NO `ORDER BY` is non-deterministic: `SELECT *` (table scan) and
+// `SELECT id` (PK-index subquery) can resolve to DIFFERENT rows, so writes and
+// reads diverge and the stored sandbox identity freezes (every respawn writes
+// one row while connect validation reads another). Always target the newest row.
+const NEWEST_SANDBOX_ORDER = `ORDER BY created_at DESC, rowid DESC`;
+const CANONICAL_SANDBOX_ID = `(SELECT id FROM sandbox ${NEWEST_SANDBOX_ORDER} LIMIT 1)`;
+
 /**
  * WS client mapping result for hibernation recovery.
  */
@@ -446,27 +455,33 @@ export class SessionRepository {
   }
 
   // === SANDBOX ===
-  // Note: Each session DO has exactly one sandbox row, so update methods use
-  // a subquery `WHERE id = (SELECT id FROM sandbox LIMIT 1)` to find it.
+  // The sandbox table is a singleton per session (enforced at createSandbox).
+  // Reads and writes deterministically target the NEWEST row via
+  // NEWEST_SANDBOX_ORDER / CANONICAL_SANDBOX_ID so a stray duplicate row can
+  // never freeze the stored identity (a bare LIMIT 1 selects rows ambiguously).
 
   getSandbox(): SandboxRow | null {
-    const result = this.sql.exec(`SELECT * FROM sandbox LIMIT 1`);
+    const result = this.sql.exec(`SELECT * FROM sandbox ${NEWEST_SANDBOX_ORDER} LIMIT 1`);
     const rows = this.rows<SandboxRow>(result);
     return rows[0] ?? null;
   }
 
   getSandboxWithCircuitBreaker(): SandboxCircuitBreakerState | null {
     const result = this.sql.exec(
-      `SELECT status, created_at, modal_object_id, snapshot_image_id, spawn_failure_count, last_spawn_failure, last_heartbeat FROM sandbox LIMIT 1`
+      `SELECT status, created_at, modal_object_id, snapshot_image_id, spawn_failure_count, last_spawn_failure, last_heartbeat FROM sandbox ${NEWEST_SANDBOX_ORDER} LIMIT 1`
     );
     const rows = this.rows<SandboxCircuitBreakerState>(result);
     return rows[0] ?? null;
   }
 
   createSandbox(data: CreateSandboxData): void {
+    // Singleton: never create a second row. A stray second row would let writes
+    // and reads target different rows (see CANONICAL_SANDBOX_ID) and freeze the
+    // stored sandbox identity, so a re-init is a no-op when a row already exists.
     this.sql.exec(
       `INSERT INTO sandbox (id, status, git_sync_status, created_at)
-       VALUES (?, ?, ?, ?)`,
+       SELECT ?, ?, ?, ?
+       WHERE NOT EXISTS (SELECT 1 FROM sandbox)`,
       data.id,
       data.status,
       data.gitSyncStatus,
@@ -475,10 +490,7 @@ export class SessionRepository {
   }
 
   updateSandboxStatus(status: SandboxStatus): void {
-    this.sql.exec(
-      `UPDATE sandbox SET status = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
-      status
-    );
+    this.sql.exec(`UPDATE sandbox SET status = ? WHERE id = ${CANONICAL_SANDBOX_ID}`, status);
   }
 
   updateSandboxForSpawn(data: SpawnSandboxData): void {
@@ -503,7 +515,7 @@ export class SessionRepository {
          modal_sandbox_id = ?,
          modal_object_id = NULL,
          last_heartbeat = NULL
-       WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+       WHERE id = ${CANONICAL_SANDBOX_ID}`,
       data.prevIdentityExpiresAt,
       data.status,
       data.createdAt,
@@ -523,7 +535,7 @@ export class SessionRepository {
          prev_auth_token_hash = NULL,
          prev_modal_sandbox_id = NULL,
          prev_identity_expires_at = NULL
-       WHERE id = (SELECT id FROM sandbox LIMIT 1)`
+       WHERE id = ${CANONICAL_SANDBOX_ID}`
     );
   }
 
@@ -542,7 +554,7 @@ export class SessionRepository {
          prev_auth_token_hash = NULL,
          prev_modal_sandbox_id = NULL,
          prev_identity_expires_at = NULL
-       WHERE id = (SELECT id FROM sandbox LIMIT 1)`
+       WHERE id = ${CANONICAL_SANDBOX_ID}`
     );
   }
 
@@ -552,7 +564,7 @@ export class SessionRepository {
          status = ?,
          created_at = ?,
          last_heartbeat = NULL
-       WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+       WHERE id = ${CANONICAL_SANDBOX_ID}`,
       data.status,
       data.createdAt
     );
@@ -560,7 +572,7 @@ export class SessionRepository {
 
   updateSandboxModalObjectId(modalObjectId: string): void {
     this.sql.exec(
-      `UPDATE sandbox SET modal_object_id = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+      `UPDATE sandbox SET modal_object_id = ? WHERE id = ${CANONICAL_SANDBOX_ID}`,
       modalObjectId
     );
   }
@@ -570,35 +582,33 @@ export class SessionRepository {
   }
 
   clearSandboxSnapshotImageId(): void {
-    this.sql.exec(
-      `UPDATE sandbox SET snapshot_image_id = NULL WHERE id = (SELECT id FROM sandbox LIMIT 1)`
-    );
+    this.sql.exec(`UPDATE sandbox SET snapshot_image_id = NULL WHERE id = ${CANONICAL_SANDBOX_ID}`);
   }
 
   updateSandboxHeartbeat(timestamp: number): void {
     this.sql.exec(
-      `UPDATE sandbox SET last_heartbeat = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+      `UPDATE sandbox SET last_heartbeat = ? WHERE id = ${CANONICAL_SANDBOX_ID}`,
       timestamp
     );
   }
 
   updateSandboxLastActivity(timestamp: number): void {
     this.sql.exec(
-      `UPDATE sandbox SET last_activity = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+      `UPDATE sandbox SET last_activity = ? WHERE id = ${CANONICAL_SANDBOX_ID}`,
       timestamp
     );
   }
 
   updateSandboxGitSyncStatus(status: GitSyncStatus): void {
     this.sql.exec(
-      `UPDATE sandbox SET git_sync_status = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+      `UPDATE sandbox SET git_sync_status = ? WHERE id = ${CANONICAL_SANDBOX_ID}`,
       status
     );
   }
 
   updateSandboxSpawnError(error: string | null, timestamp: number | null): void {
     this.sql.exec(
-      `UPDATE sandbox SET last_spawn_error = ?, last_spawn_error_at = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+      `UPDATE sandbox SET last_spawn_error = ?, last_spawn_error_at = ? WHERE id = ${CANONICAL_SANDBOX_ID}`,
       error,
       timestamp
     );
@@ -606,7 +616,7 @@ export class SessionRepository {
 
   updateSandboxCodeServer(url: string, password: string): void {
     this.sql.exec(
-      `UPDATE sandbox SET code_server_url = ?, code_server_password = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+      `UPDATE sandbox SET code_server_url = ?, code_server_password = ? WHERE id = ${CANONICAL_SANDBOX_ID}`,
       url,
       password
     );
@@ -614,32 +624,28 @@ export class SessionRepository {
 
   clearSandboxCodeServer(): void {
     this.sql.exec(
-      `UPDATE sandbox SET code_server_url = NULL, code_server_password = NULL WHERE id = (SELECT id FROM sandbox LIMIT 1)`
+      `UPDATE sandbox SET code_server_url = NULL, code_server_password = NULL WHERE id = ${CANONICAL_SANDBOX_ID}`
     );
   }
 
   clearSandboxCodeServerUrl(): void {
-    this.sql.exec(
-      `UPDATE sandbox SET code_server_url = NULL WHERE id = (SELECT id FROM sandbox LIMIT 1)`
-    );
+    this.sql.exec(`UPDATE sandbox SET code_server_url = NULL WHERE id = ${CANONICAL_SANDBOX_ID}`);
   }
 
   updateSandboxTunnelUrls(urls: Record<string, string>): void {
     this.sql.exec(
-      `UPDATE sandbox SET tunnel_urls = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+      `UPDATE sandbox SET tunnel_urls = ? WHERE id = ${CANONICAL_SANDBOX_ID}`,
       JSON.stringify(urls)
     );
   }
 
   clearSandboxTunnelUrls(): void {
-    this.sql.exec(
-      `UPDATE sandbox SET tunnel_urls = NULL WHERE id = (SELECT id FROM sandbox LIMIT 1)`
-    );
+    this.sql.exec(`UPDATE sandbox SET tunnel_urls = NULL WHERE id = ${CANONICAL_SANDBOX_ID}`);
   }
 
   updateSandboxTtyd(url: string, encryptedToken: string): void {
     this.sql.exec(
-      `UPDATE sandbox SET ttyd_url = ?, ttyd_token = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+      `UPDATE sandbox SET ttyd_url = ?, ttyd_token = ? WHERE id = ${CANONICAL_SANDBOX_ID}`,
       url,
       encryptedToken
     );
@@ -647,14 +653,12 @@ export class SessionRepository {
 
   clearSandboxTtyd(): void {
     this.sql.exec(
-      `UPDATE sandbox SET ttyd_url = NULL, ttyd_token = NULL WHERE id = (SELECT id FROM sandbox LIMIT 1)`
+      `UPDATE sandbox SET ttyd_url = NULL, ttyd_token = NULL WHERE id = ${CANONICAL_SANDBOX_ID}`
     );
   }
 
   resetCircuitBreaker(): void {
-    this.sql.exec(
-      `UPDATE sandbox SET spawn_failure_count = 0 WHERE id = (SELECT id FROM sandbox LIMIT 1)`
-    );
+    this.sql.exec(`UPDATE sandbox SET spawn_failure_count = 0 WHERE id = ${CANONICAL_SANDBOX_ID}`);
   }
 
   incrementCircuitBreakerFailure(timestamp: number): void {
@@ -662,7 +666,7 @@ export class SessionRepository {
       `UPDATE sandbox SET
          spawn_failure_count = COALESCE(spawn_failure_count, 0) + 1,
          last_spawn_failure = ?
-       WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+       WHERE id = ${CANONICAL_SANDBOX_ID}`,
       timestamp
     );
   }

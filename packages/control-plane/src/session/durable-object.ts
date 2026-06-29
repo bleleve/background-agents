@@ -178,20 +178,6 @@ export class SessionDO extends DurableObject<Env> {
   private repository: SessionRepository;
   private initialized = false;
   private log: Logger;
-  // PROBE (Durable Object state-divergence diagnosis — remove once root-caused):
-  // a fresh id per in-memory construction. Logged alongside `ctx.id` at the
-  // spawn-identity write and at WS connect. If the spawn-side and connect-side of
-  // one session log different `instance_uid`/`do_id` (with a stale
-  // expected_sandbox_id at connect), the two sides are operating on different DO
-  // state — explaining a `modal_sandbox_id` that never advances despite respawns.
-  private readonly instanceUid = crypto.randomUUID().slice(0, 8);
-  // PROBE (DO split-brain diagnosis — remove with #266): a marker PERSISTED in
-  // this DO's SQLite (set on first init, read thereafter). Unlike instanceUid
-  // (in-memory, churns per construction) and do_id (same id for any instance of
-  // one idFromName), storage_marker is stable across hibernation of one storage
-  // and DIFFERENT across separate storages — so two distinct storage_marker
-  // values for one session_id prove two DO storages (split-brain).
-  private storageMarker: string | null = null;
   // WebSocket manager (lazily initialized like lifecycleManager)
   private _wsManager: SessionWebSocketManager | null = null;
   // Lifecycle manager (lazily initialized)
@@ -834,24 +820,7 @@ export class SessionDO extends DurableObject<Env> {
       getUserEnvVars: () => this.getUserEnvVars(),
       getOpencodeUserConfig: () => this.getOpencodeConfig(),
       updateSandboxStatus: (status) => this.updateSandboxStatus(status),
-      updateSandboxForSpawn: (data) => {
-        this.repository.updateSandboxForSpawn(data);
-        // PROBE (remove once root-caused): re-read the identity we just wrote.
-        // If `read_back` !== `wrote`, the write didn't persist to this instance's
-        // SQLite. If a later WS connect for this session logs a stale
-        // expected_sandbox_id with a different do_id/instance_uid, the spawn-side
-        // and connect-side are on different DO state.
-        const readBack = this.repository.getSandbox()?.modal_sandbox_id ?? null;
-        this.log.info("probe.spawn_identity_write", {
-          event: "probe.spawn_identity_write",
-          do_id: this.ctx.id.toString(),
-          instance_uid: this.instanceUid,
-          storage_marker: this.storageMarker,
-          wrote_sandbox_id: data.modalSandboxId,
-          read_back_sandbox_id: readBack,
-          read_back_matches: readBack === data.modalSandboxId,
-        });
-      },
+      updateSandboxForSpawn: (data) => this.repository.updateSandboxForSpawn(data),
       updateSandboxForResume: (data) => this.repository.updateSandboxForResume(data),
       clearPreviousSandboxIdentity: () => this.repository.clearPreviousSandboxIdentity(),
       promotePreviousSandboxIdentity: () => this.repository.promotePreviousSandboxIdentity(),
@@ -1037,26 +1006,6 @@ export class SessionDO extends DurableObject<Env> {
       { session_id: sessionId },
       parseLogLevel(this.env.LOG_LEVEL)
     );
-    // PROBE (DO split-brain diagnosis — remove with #266): read-or-create a
-    // marker persisted in THIS storage. Same marker across hibernation of one
-    // storage; different across separate storages. Idempotent CREATE — no formal
-    // migration for a temporary probe.
-    this.sql.exec("CREATE TABLE IF NOT EXISTS do_storage_probe (marker TEXT)");
-    const markerRows = this.sql
-      .exec("SELECT marker FROM do_storage_probe LIMIT 1")
-      .toArray() as Array<{ marker: string }>;
-    if (markerRows.length > 0) {
-      this.storageMarker = markerRows[0].marker;
-    } else {
-      this.storageMarker = crypto.randomUUID().slice(0, 8);
-      this.sql.exec("INSERT INTO do_storage_probe (marker) VALUES (?)", this.storageMarker);
-    }
-    this.log.info("probe.do_storage_marker", {
-      event: "probe.do_storage_marker",
-      do_id: this.ctx.id.toString(),
-      instance_uid: this.instanceUid,
-      storage_marker: this.storageMarker,
-    });
     this.wsManager.enableAutoPingPong();
   }
 
@@ -1199,10 +1148,6 @@ export class SessionDO extends DurableObject<Env> {
           reject_reason: "sandbox_id_mismatch",
           expected_sandbox_id: expectedSandboxId,
           sandbox_id: sandboxId,
-          // PROBE (remove once root-caused): which DO instance/state served this.
-          do_id: this.ctx.id.toString(),
-          instance_uid: this.instanceUid,
-          storage_marker: this.storageMarker,
           matched_previous: false,
           prev_identity_expired: prevExpired,
           ms_until_prev_expiry:
@@ -1229,10 +1174,6 @@ export class SessionDO extends DurableObject<Env> {
           ws_type: "sandbox",
           outcome: "auth_failed",
           reject_reason: "token_mismatch",
-          // PROBE (remove once root-caused): which DO instance/state served this.
-          do_id: this.ctx.id.toString(),
-          instance_uid: this.instanceUid,
-          storage_marker: this.storageMarker,
           matched_previous: usePreviousIdentity,
           prev_identity_expired: prevExpired,
           duration_ms: Date.now() - wsStartTime,
@@ -1304,10 +1245,6 @@ export class SessionDO extends DurableObject<Env> {
           sandbox_id: sandboxId,
           replaced_existing: replaced,
           matched_previous: matchedSandboxIdentity === "previous",
-          // PROBE (remove once root-caused): which DO instance/state served this.
-          do_id: this.ctx.id.toString(),
-          instance_uid: this.instanceUid,
-          storage_marker: this.storageMarker,
           duration_ms: Date.now() - now,
         });
 
