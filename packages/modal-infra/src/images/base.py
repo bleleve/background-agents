@@ -68,7 +68,8 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 #      the staged tree and the SCM credential helper.
 # v95: merge upstream "Remove repo-image fallback tokens" (#722); SCM credential
 #      helper backed by control plane remains the sole credential path.
-CACHE_BUSTER = "v95-bake-opencode-global-deps-with-langfuse"
+# v96: add ripgrep to apt packages
+CACHE_BUSTER = "v96-add-ripgrep"
 
 # Base image with all development tools
 base_image = (
@@ -84,6 +85,7 @@ base_image = (
         "openssh-client",
         "apt-transport-https",
         "jq",
+        "ripgrep",
         "locales",
         "locales-all",
         "unzip",  # Required for Bun installation
