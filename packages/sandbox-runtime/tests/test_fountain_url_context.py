@@ -195,6 +195,10 @@ class TestHireGoUrls:
         assert result is not None
         assert "Hire Go" in result
         assert "staging" in result
+        # The tenant namespace, not the env, is the display name — guards against
+        # the redundant "staging staging environment" output.
+        assert "petvet" in result
+        assert "staging staging" not in result
 
     def test_tryfountain_com_production(self):
         content = "Production Hire Go at https://acme.tryfountain.com/openings"

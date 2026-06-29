@@ -70,9 +70,9 @@ def _classify_host(
         prefix = h[: -len(".tryfountain.com")]
         parts = prefix.split(".")
         if len(parts) == 2:
-            _namespace, env = parts
+            namespace, env = parts
             env_type = "staging" if env == "staging" else "production"
-            return ("Hire Go", None, env, env_type)
+            return ("Hire Go", None, namespace, env_type)
         if len(parts) == 1:
             return ("Hire Go", None, parts[0], "production")
         return None
