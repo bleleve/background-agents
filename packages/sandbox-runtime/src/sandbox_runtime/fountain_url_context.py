@@ -17,7 +17,6 @@ _SERVICE_LABELS: dict[str, str] = {
     "WX": "WX (Worker Experience, React/TypeScript)",
     "Hire": "Hire (monolith, Ruby on Rails)",
     "Hire Go": "Hire Go (Go app)",
-    "Fountain One": "Fountain One (unified login)",
 }
 
 # Matches fountain.com, ftn.app, and tryfountain.com URLs, optionally with scheme and path.
@@ -99,7 +98,7 @@ def _classify_host(
         if namespace == "go":
             return ("Hire Go", None, "go", "production")
         if namespace == "employer":
-            return ("Fountain One", None, "unified login", "production")
+            return ("WX", "Fountain One (unified login)", "employer", "production")
         return ("Hire", None, namespace, _classify_hire_env(namespace))
 
     return None

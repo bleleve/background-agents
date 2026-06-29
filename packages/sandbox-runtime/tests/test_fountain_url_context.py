@@ -1,7 +1,5 @@
 """Tests for Fountain URL context detection and enrichment."""
 
-import pytest
-
 from sandbox_runtime.fountain_url_context import build_fountain_url_context
 
 
@@ -211,12 +209,14 @@ class TestFountainOneUrls:
         content = "Login broken at https://employer.fountain.com/home"
         result = build_fountain_url_context(content)
         assert result is not None
+        assert "WX" in result
         assert "Fountain One" in result
 
     def test_employer_fountain_com_hire_go_redirect(self):
         content = "Redirect stalled at https://employer.fountain.com/hire-go-redirect"
         result = build_fountain_url_context(content)
         assert result is not None
+        assert "WX" in result
         assert "Fountain One" in result
 
 
