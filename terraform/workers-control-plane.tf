@@ -113,6 +113,11 @@ module "control_plane_worker" {
     ] : [],
     local.use_opencomputer_backend && var.opencomputer_target != "" ? [
       { name = "OPENCOMPUTER_TARGET", value = var.opencomputer_target },
+    ] : [],
+    local.use_vercel_backend ? [
+      { name = "VERCEL_PROJECT_ID", value = var.vercel_sandbox_project_id },
+      { name = "VERCEL_RUNTIME", value = var.vercel_sandbox_runtime },
+      { name = "VERCEL_SNAPSHOT_EXPIRATION_MS", value = tostring(var.vercel_snapshot_expiration_ms) },
     ] : []
   )
 
@@ -138,6 +143,9 @@ module "control_plane_worker" {
     local.use_opencomputer_backend ? [
       { name = "OPENCOMPUTER_API_KEY", value = var.opencomputer_api_key },
       { name = "ANTHROPIC_API_KEY", value = var.anthropic_api_key },
+    ] : [],
+    local.use_vercel_backend ? [
+      { name = "VERCEL_TOKEN", value = var.vercel_sandbox_token },
     ] : [],
     # Slack bot token enables the agent-initiated `slack-notify` endpoint.
     # Shares the variable with the slack-bot worker; bound here so the same
@@ -174,6 +182,7 @@ module "control_plane_worker" {
     null_resource.d1_migrations,
     module.linear_bot_worker,
     module.daytona_infra,
+    module.vercel_sandbox_infra,
     module.opencomputer_infra,
   ]
 }

@@ -670,7 +670,7 @@ export interface AgentResponse {
 
 export interface UserPreferences {
   userId: string;
-  model: string;
+  model?: string;
   reasoningEffort?: string;
   branch?: string;
   /** When true, sessions started by this user default to plan-first HITL mode. */
