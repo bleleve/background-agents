@@ -20,6 +20,10 @@ def _make_supervisor() -> SandboxSupervisor:
         return SandboxSupervisor()
 
 
+def _langfuse_env() -> dict[str, str]:
+    return {"LANGFUSE_PUBLIC_KEY": "pk-lf-test", "LANGFUSE_SECRET_KEY": "sk-lf-test"}
+
+
 class TestOpenCodePluginDeployment:
     """Cases for bundled OpenCode plugin deployment."""
 
@@ -57,3 +61,90 @@ class TestOpenCodePluginDeployment:
         deployed = opencode_dir / "plugins" / "codex-auth-plugin.ts"
         assert deployed.exists()
         assert deployed.read_text() == "// codex plugin"
+
+
+class TestSkillSpanPluginDeployment:
+    """Cases for skill span plugin deployment (gated on Langfuse keys)."""
+
+    def test_skill_span_plugin_skipped_without_langfuse_keys(self, tmp_path):
+        sup = _make_supervisor()
+        opencode_dir = tmp_path / ".opencode"
+
+        skill_source = tmp_path / "plugins" / "skill-span-plugin.js"
+        skill_source.parent.mkdir(parents=True)
+        skill_source.write_text("// skill span plugin")
+
+        with (
+            patch.object(SandboxSupervisor, "SKILL_SPAN_PLUGIN_SOURCE_PATH", str(skill_source)),
+            patch.dict(
+                "os.environ",
+                {"LANGFUSE_PUBLIC_KEY": "", "LANGFUSE_SECRET_KEY": ""},
+                clear=False,
+            ),
+        ):
+            sup._deploy_opencode_plugins(opencode_dir)
+
+        assert not (opencode_dir / "plugins" / "skill-span-plugin.js").exists()
+
+    def test_skill_span_plugin_skipped_with_only_public_key(self, tmp_path):
+        sup = _make_supervisor()
+        opencode_dir = tmp_path / ".opencode"
+
+        skill_source = tmp_path / "plugins" / "skill-span-plugin.js"
+        skill_source.parent.mkdir(parents=True)
+        skill_source.write_text("// skill span plugin")
+
+        with (
+            patch.object(SandboxSupervisor, "SKILL_SPAN_PLUGIN_SOURCE_PATH", str(skill_source)),
+            patch.dict(
+                "os.environ",
+                {"LANGFUSE_PUBLIC_KEY": "pk-lf-test", "LANGFUSE_SECRET_KEY": ""},
+                clear=False,
+            ),
+        ):
+            sup._deploy_opencode_plugins(opencode_dir)
+
+        assert not (opencode_dir / "plugins" / "skill-span-plugin.js").exists()
+
+    def test_skill_span_plugin_deployed_with_langfuse_keys(self, tmp_path):
+        sup = _make_supervisor()
+        opencode_dir = tmp_path / ".opencode"
+
+        skill_source = tmp_path / "plugins" / "skill-span-plugin.js"
+        skill_source.parent.mkdir(parents=True)
+        skill_source.write_text("// skill span plugin")
+
+        with (
+            patch.object(SandboxSupervisor, "SKILL_SPAN_PLUGIN_SOURCE_PATH", str(skill_source)),
+            patch.dict("os.environ", _langfuse_env(), clear=False),
+        ):
+            sup._deploy_opencode_plugins(opencode_dir)
+
+        deployed = opencode_dir / "plugins" / "skill-span-plugin.js"
+        assert deployed.exists()
+        assert deployed.read_text() == "// skill span plugin"
+
+    def test_both_plugins_deployed_when_both_conditions_met(self, tmp_path):
+        sup = _make_supervisor()
+        opencode_dir = tmp_path / ".opencode"
+
+        codex_source = tmp_path / "plugins" / "codex-auth-plugin.js"
+        codex_source.parent.mkdir(parents=True)
+        codex_source.write_text("// codex plugin")
+
+        skill_source = tmp_path / "plugins" / "skill-span-plugin.js"
+        skill_source.write_text("// skill span plugin")
+
+        with (
+            patch.object(SandboxSupervisor, "CODEX_AUTH_PLUGIN_SOURCE_PATH", str(codex_source)),
+            patch.object(SandboxSupervisor, "SKILL_SPAN_PLUGIN_SOURCE_PATH", str(skill_source)),
+            patch.dict(
+                "os.environ",
+                {**_langfuse_env(), "OPENAI_OAUTH_REFRESH_TOKEN": "rt_test"},
+                clear=False,
+            ),
+        ):
+            sup._deploy_opencode_plugins(opencode_dir)
+
+        assert (opencode_dir / "plugins" / "codex-auth-plugin.js").exists()
+        assert (opencode_dir / "plugins" / "skill-span-plugin.js").exists()
