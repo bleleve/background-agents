@@ -926,7 +926,12 @@ describe("SandboxLifecycleManager", () => {
       expect(storage.calls).toContain("updateSandboxStatus:failed");
     });
 
-    it("does not increment circuit breaker for transient errors", async () => {
+    it("keeps a transient create error connecting (no terminal failure, no breaker)", async () => {
+      // A transient create error (gateway/timeout/abort) is indeterminate: Modal
+      // may still have created the sandbox, which will connect on its own. The
+      // sandbox must NOT be marked failed (which would orphan it via the pre-armed
+      // connecting-timeout's spawn_failed sweep); it stays connecting so a late
+      // connect is adopted, and the in-flight guard stays set.
       const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
       const storage = createMockStorage(createMockSession(), sandbox);
       const broadcaster = createMockBroadcaster();
@@ -950,7 +955,10 @@ describe("SandboxLifecycleManager", () => {
       await manager.spawnSandbox();
 
       expect(storage.calls).not.toContain("incrementCircuitBreakerFailure");
-      expect(storage.calls).toContain("updateSandboxStatus:failed");
+      expect(storage.calls).not.toContain("updateSandboxStatus:failed");
+      expect(storage.calls).toContain("updateSandboxStatus:connecting");
+      // Boot may still be in flight, so the in-flight guard must remain set.
+      expect(manager.isSpawning()).toBe(true);
     });
 
     it("fails spawn when getUserEnvVars rejects", async () => {

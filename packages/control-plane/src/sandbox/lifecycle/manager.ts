@@ -622,27 +622,40 @@ export class SandboxLifecycleManager {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to spawn sandbox";
       this.storage.setLastSpawnError(errorMessage, Date.now());
+
+      // A transient provider error on create is INDETERMINATE: gateway / edge /
+      // timeout / network failures (502/503/504/524, request aborts) mean we never
+      // got a clean answer, so Modal may well have created the sandbox — which
+      // then boots and connects on its own. The identity was persisted before the
+      // create call (updateSandboxForSpawn above) and the connecting-timeout
+      // watchdog is already armed, so a late connect still authenticates and is
+      // adopted. Marking it "failed" here would orphan that healthy sandbox: the
+      // pre-armed watchdog sweeps the queued prompt as spawn_failed even though
+      // the bridge connects seconds later. Keep it connecting and let the watchdog
+      // fail it with a true connecting_timeout only if nothing ever connects.
+      // Transient errors never touch the circuit breaker.
+      if (error instanceof SandboxProviderError && error.errorType === "transient") {
+        this.log.warn("Sandbox create indeterminate (transient) — awaiting connect", {
+          event: "sandbox.spawn_create_indeterminate",
+          error: error.message,
+        });
+        this.storage.updateSandboxStatus("connecting");
+        this.broadcaster.broadcast({ type: "sandbox_status", status: "connecting" });
+        // The boot may still be in flight — keep the in-flight guard set past this
+        // method's return (cleared on connect / connecting-timeout, not here).
+        armed = true;
+        return;
+      }
+
+      // Permanent or unknown error: a definitive, terminal spawn failure.
       this.log.error("Sandbox spawn failed", {
         event: "sandbox.spawn_failed",
         error: error instanceof Error ? error : String(error),
       });
-
-      // Only increment circuit breaker for permanent errors
-      if (error instanceof SandboxProviderError) {
-        if (error.errorType === "permanent") {
-          this.storage.incrementCircuitBreakerFailure(Date.now());
-          this.log.info("Circuit breaker incremented", { error_type: "permanent" });
-        } else {
-          this.log.info("Transient error, not incrementing circuit breaker", {
-            error_type: error.errorType,
-          });
-        }
-      } else {
-        // Unknown error type - treat as permanent
-        this.storage.incrementCircuitBreakerFailure(Date.now());
-        this.log.info("Circuit breaker incremented", { error_type: "unknown" });
-      }
-
+      this.storage.incrementCircuitBreakerFailure(Date.now());
+      this.log.info("Circuit breaker incremented", {
+        error_type: error instanceof SandboxProviderError ? error.errorType : "unknown",
+      });
       this.storage.updateSandboxStatus("failed");
       this.broadcaster.broadcast({
         type: "sandbox_error",
