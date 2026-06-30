@@ -1,37 +1,24 @@
 /**
  * OpenCode plugin that wraps skill invocations in a named OTEL span.
  *
- * When the agent reads a .opencode/skills/<name>/SKILL.md file, the OTEL
- * trace shows only a generic "read" observation. This plugin adds a parent
- * span named "Skill: <name>" so Langfuse traces surface skill usage clearly.
+ * OpenCode invokes skills via a dedicated `skill` tool with args `{ name }`.
+ * This plugin creates a span named "Skill: <name>" so Langfuse traces surface
+ * skill usage as a distinct observation.
  *
  * Requires @opentelemetry/api (transitive dep of opencode-plugin-langfuse).
  */
 import { trace, SpanKind } from "@opentelemetry/api";
 
-const SKILL_PATH_RE = /[/\\]\.opencode[/\\]skills[/\\]([^/\\]+)[/\\]SKILL\.md$/i;
-
 const tracer = trace.getTracer("open-inspect-skills");
 
-// Map<callID, Span> for in-flight skill reads.
+// Map<callID, Span> for in-flight skill invocations.
 const activeSkillSpans = new Map();
-
-function extractSkillName(args) {
-  if (!args || typeof args !== "object") return null;
-  const candidates = [args.filePath, args.path, args.file, args.filename];
-  for (const candidate of candidates) {
-    if (typeof candidate === "string") {
-      const m = SKILL_PATH_RE.exec(candidate);
-      if (m) return m[1];
-    }
-  }
-  return null;
-}
 
 export const server = async (_input) => ({
   "tool.execute.before": async (input, output) => {
-    const skillName = extractSkillName(output?.args);
-    if (!skillName) return;
+    if (input.tool !== "skill") return;
+    const skillName = output?.args?.name;
+    if (!skillName || typeof skillName !== "string") return;
 
     const span = tracer.startSpan(`Skill: ${skillName}`, {
       kind: SpanKind.INTERNAL,
