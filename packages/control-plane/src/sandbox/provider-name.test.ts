@@ -34,12 +34,17 @@ describe("resolveSandboxBackendName", () => {
     expect(resolveSandboxBackendName("rwx")).toBe("rwx");
   });
 
+  it('returns "opencomputer" for "opencomputer"', () => {
+    expect(resolveSandboxBackendName("opencomputer")).toBe("opencomputer");
+  });
+
   it("is case-insensitive", () => {
     expect(resolveSandboxBackendName("MODAL")).toBe("modal");
     expect(resolveSandboxBackendName("Daytona")).toBe("daytona");
     expect(resolveSandboxBackendName("DAYTONA")).toBe("daytona");
     expect(resolveSandboxBackendName("VERCEL")).toBe("vercel");
     expect(resolveSandboxBackendName("RWX")).toBe("rwx");
+    expect(resolveSandboxBackendName("OPENCOMPUTER")).toBe("opencomputer");
   });
 
   it("trims whitespace", () => {
@@ -47,6 +52,7 @@ describe("resolveSandboxBackendName", () => {
     expect(resolveSandboxBackendName("  daytona  ")).toBe("daytona");
     expect(resolveSandboxBackendName("  vercel  ")).toBe("vercel");
     expect(resolveSandboxBackendName("  rwx  ")).toBe("rwx");
+    expect(resolveSandboxBackendName("  opencomputer  ")).toBe("opencomputer");
   });
 
   it("throws for unsupported provider", () => {
@@ -71,12 +77,17 @@ describe("isModalSandboxBackend", () => {
   it("returns false for vercel", () => {
     expect(isModalSandboxBackend("vercel")).toBe(false);
   });
+
+  it("returns false for opencomputer", () => {
+    expect(isModalSandboxBackend("opencomputer")).toBe(false);
+  });
 });
 
 describe("supportsRepoImageBackend", () => {
-  it("returns true for modal and vercel", () => {
+  it("returns true for modal, vercel, and opencomputer", () => {
     expect(supportsRepoImageBackend("modal")).toBe(true);
     expect(supportsRepoImageBackend("vercel")).toBe(true);
+    expect(supportsRepoImageBackend("opencomputer")).toBe(true);
     expect(supportsRepoImageBackend(undefined)).toBe(true);
   });
 

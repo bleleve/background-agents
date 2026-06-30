@@ -253,21 +253,27 @@ access.
    - Members: **Read-only**
    - For existing GitHub Apps, republish the permission change and request/approve installation
      updates before testing org membership sign-in.
-7. Click **"Create GitHub App"**
-8. Note the **App ID** and **Client ID** (top of page)
-9. Under **"Client secrets"**, click **"Generate a new client secret"** and note the **Client
-   Secret**
-10. Scroll down to **"Private keys"** and click **"Generate a private key"** (downloads a .pem file)
-11. **Convert the key to PKCS#8 format** (required for Cloudflare Workers):
+7. Set **Account permissions**:
+   - Email addresses: **Read-only** _(required for `ALLOWED_EMAILS`/`ALLOWED_EMAIL_DOMAINS`; without
+     it the app cannot read verified emails and those allowlists silently deny every GitHub
+     sign-in)_
+   - For existing GitHub Apps, republish the permission change and request/approve installation
+     updates, otherwise the added permission does not apply to current installs.
+8. Click **"Create GitHub App"**
+9. Note the **App ID** and **Client ID** (top of page)
+10. Under **"Client secrets"**, click **"Generate a new client secret"** and note the **Client
+    Secret**
+11. Scroll down to **"Private keys"** and click **"Generate a private key"** (downloads a .pem file)
+12. **Convert the key to PKCS#8 format** (required for Cloudflare Workers):
     ```bash
     openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt \
       -in ~/Downloads/your-app-name.*.private-key.pem \
       -out private-key-pkcs8.pem
     ```
-12. **Install the app** on your account/organization:
+13. **Install the app** on your account/organization:
     - Click "Install App" in the sidebar
     - Select the repositories you want Open-Inspect to access
-13. Note the **Installation ID** from the URL after installing:
+14. Note the **Installation ID** from the URL after installing:
     ```
     https://github.com/settings/installations/INSTALLATION_ID
     ```
@@ -979,7 +985,9 @@ If the bot doesn't see the original message when tagged in a thread reply:
    private channels). These are required by the `conversations.replies` API to fetch thread
    messages.
 2. Verify the bot has `channels:read` and `groups:read` scopes. These are required by
-   `conversations.info` to fetch channel name and description for context.
+   `conversations.info` to fetch channel name and description for context, and by
+   `conversations.list` to populate the automation channel picker. If the picker shows no channels,
+   check these scopes and that the bot is invited to the target channel.
 3. If you added missing scopes, **reinstall the app** to your workspace for the new permissions to
    take effect.
 

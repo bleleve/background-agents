@@ -303,6 +303,28 @@ export class SandboxLifecycleManager {
   }
 
   /**
+   * Arm the connecting-timeout watchdog.
+   *
+   * A cold first connect (the sandbox has shown no sign of life yet) gets the
+   * longer `firstConnectTimeoutMs` budget; a re-arm after the sandbox has pinged
+   * gets the shorter `reconnectTimeoutMs` budget. The phase chosen here must
+   * match the budget `evaluateConnectingTimeout()` picks from `lastProgressAt`
+   * (null ⇒ first-connect) so the scheduled wake-up lands at the real deadline.
+   * `atMs` defaults to now; callers that already captured `Date.now()` pass it
+   * so the heartbeat write and the alarm share one timestamp.
+   */
+  private armConnectingTimeout(
+    phase: "first-connect" | "reconnect",
+    atMs: number = Date.now()
+  ): Promise<void> {
+    const budgetMs =
+      phase === "first-connect"
+        ? this.config.connectingTimeout.firstConnectTimeoutMs
+        : this.config.connectingTimeout.reconnectTimeoutMs;
+    return this.alarmScheduler.scheduleAlarm(atMs + budgetMs);
+  }
+
+  /**
    * Spawn a sandbox (fresh or from snapshot).
    *
    * Uses decision functions to determine the appropriate action:
@@ -467,9 +489,10 @@ export class SandboxLifecycleManager {
       // would never reach the post-spawn scheduleAlarm() below, leaving the
       // sandbox "spawning" forever. evaluateConnectingTimeout() measures from
       // created_at (set just above) and covers the "spawning" state, so this
-      // fires at created_at + connectingTimeout even if createSandbox hangs.
+      // fires at created_at + the firstConnect budget even if createSandbox hangs
+      // (which is why that budget must stay >= the provider request timeout).
       // On a successful connect it is naturally superseded by the inactivity alarm.
-      await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+      await this.armConnectingTimeout("first-connect");
 
       this.log.info("Spawning sandbox", {
         event: "sandbox.spawn",
@@ -587,7 +610,7 @@ export class SandboxLifecycleManager {
       // Schedule connecting timeout watchdog — if the bridge doesn't connect
       // within the allowed window, handleAlarm() will fail the sandbox.
       // This alarm is naturally replaced by the inactivity alarm on successful connect.
-      await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+      await this.armConnectingTimeout("first-connect");
       // Boot is now genuinely in flight — keep the in-flight guard set past this
       // method's return (cleared on connect / connecting-timeout, not in finally).
       armed = true;
@@ -599,27 +622,40 @@ export class SandboxLifecycleManager {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to spawn sandbox";
       this.storage.setLastSpawnError(errorMessage, Date.now());
+
+      // A transient provider error on create is INDETERMINATE: gateway / edge /
+      // timeout / network failures (502/503/504/524, request aborts) mean we never
+      // got a clean answer, so Modal may well have created the sandbox — which
+      // then boots and connects on its own. The identity was persisted before the
+      // create call (updateSandboxForSpawn above) and the connecting-timeout
+      // watchdog is already armed, so a late connect still authenticates and is
+      // adopted. Marking it "failed" here would orphan that healthy sandbox: the
+      // pre-armed watchdog sweeps the queued prompt as spawn_failed even though
+      // the bridge connects seconds later. Keep it connecting and let the watchdog
+      // fail it with a true connecting_timeout only if nothing ever connects.
+      // Transient errors never touch the circuit breaker.
+      if (error instanceof SandboxProviderError && error.errorType === "transient") {
+        this.log.warn("Sandbox create indeterminate (transient) — awaiting connect", {
+          event: "sandbox.spawn_create_indeterminate",
+          error: error.message,
+        });
+        this.storage.updateSandboxStatus("connecting");
+        this.broadcaster.broadcast({ type: "sandbox_status", status: "connecting" });
+        // The boot may still be in flight — keep the in-flight guard set past this
+        // method's return (cleared on connect / connecting-timeout, not here).
+        armed = true;
+        return;
+      }
+
+      // Permanent or unknown error: a definitive, terminal spawn failure.
       this.log.error("Sandbox spawn failed", {
         event: "sandbox.spawn_failed",
         error: error instanceof Error ? error : String(error),
       });
-
-      // Only increment circuit breaker for permanent errors
-      if (error instanceof SandboxProviderError) {
-        if (error.errorType === "permanent") {
-          this.storage.incrementCircuitBreakerFailure(Date.now());
-          this.log.info("Circuit breaker incremented", { error_type: "permanent" });
-        } else {
-          this.log.info("Transient error, not incrementing circuit breaker", {
-            error_type: error.errorType,
-          });
-        }
-      } else {
-        // Unknown error type - treat as permanent
-        this.storage.incrementCircuitBreakerFailure(Date.now());
-        this.log.info("Circuit breaker incremented", { error_type: "unknown" });
-      }
-
+      this.storage.incrementCircuitBreakerFailure(Date.now());
+      this.log.info("Circuit breaker incremented", {
+        error_type: error instanceof SandboxProviderError ? error.errorType : "unknown",
+      });
       this.storage.updateSandboxStatus("failed");
       this.broadcaster.broadcast({
         type: "sandbox_error",
@@ -725,7 +761,7 @@ export class SandboxLifecycleManager {
       // a hung restoreFromSnapshot (the Modal restore HTTP has no client-side
       // timeout) cannot leave the sandbox pinned at "spawning" forever. Mirrors
       // doSpawn(); the post-success scheduleAlarm below simply re-arms it.
-      await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+      await this.armConnectingTimeout("first-connect");
 
       this.log.info("Restoring from snapshot", {
         event: "sandbox.restore",
@@ -801,9 +837,7 @@ export class SandboxLifecycleManager {
         this.broadcaster.broadcast({ type: "sandbox_status", status: "connecting" });
 
         // Schedule connecting timeout watchdog
-        await this.alarmScheduler.scheduleAlarm(
-          Date.now() + this.config.connectingTimeout.timeoutMs
-        );
+        await this.armConnectingTimeout("first-connect");
 
         this.broadcaster.broadcast({
           type: "sandbox_restored",
@@ -905,7 +939,7 @@ export class SandboxLifecycleManager {
       // Arm the connecting-timeout watchdog BEFORE the awaited provider call so
       // a hung resume cannot pin the sandbox at "connecting" forever. Mirrors
       // doSpawn()/restoreFromSnapshot(); re-armed on success below.
-      await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+      await this.armConnectingTimeout("first-connect");
 
       const timeoutSeconds =
         session.spawn_source === "agent" ? CHILD_SANDBOX_TIMEOUT_SECONDS : undefined;
@@ -946,7 +980,7 @@ export class SandboxLifecycleManager {
       }
 
       await this.storeAndBroadcastTunnelUrls(result.tunnelUrls);
-      await this.alarmScheduler.scheduleAlarm(Date.now() + this.config.connectingTimeout.timeoutMs);
+      await this.armConnectingTimeout("first-connect");
       // Boot in flight — hold the guard past return (see doSpawn).
       armed = true;
       // Breaker reset happens on a genuine bridge connect (onSandboxConnected),
@@ -1162,14 +1196,14 @@ export class SandboxLifecycleManager {
       // spawning is a slow restore/respawn, not a death: the agent has already
       // run and is likely about to complete. Defer the terminal decision to the
       // in-flight silence backstop (measured on the same last-sign-of-life
-      // clock) instead of failing on the 120s connect window — failing here
+      // clock) instead of failing on the short reconnect window — failing here
       // would terminate a turn that then completes, leaving the timeline
       // ("Execution complete") disagreeing with the status chip ("Failed"). The
       // primary death signal during a restore is spawn_failed (handled above on
       // a terminal "failed" status); this only defers the silent-provider case.
       // getIsProcessing() is false on a cold boot (the triggering prompt is
-      // still "pending"), so a first-connect that never lands keeps the original
-      // 120s terminal — nothing is in flight to lose.
+      // still "pending"), so a first-connect that never lands keeps its
+      // first-connect terminal — nothing is in flight to lose.
       if (
         this.storage.getIsProcessing() &&
         connectingResult.elapsedMs < this.config.inFlightSilence.timeoutMs
@@ -1179,14 +1213,19 @@ export class SandboxLifecycleManager {
           elapsed_ms: connectingResult.elapsedMs,
           silence_backstop_ms: this.config.inFlightSilence.timeoutMs,
         });
-        await this.alarmScheduler.scheduleAlarm(now + this.config.connectingTimeout.timeoutMs);
+        await this.armConnectingTimeout("reconnect", now);
         return;
       }
 
       this.log.warn("Connecting timeout", {
         event: "sandbox.connecting_timeout",
         elapsed_ms: connectingResult.elapsedMs,
-        timeout_ms: this.config.connectingTimeout.timeoutMs,
+        // The budget that actually applied: firstConnect while no sign of life
+        // (last_heartbeat null), reconnect once the sandbox has pinged.
+        timeout_ms:
+          sandbox.last_heartbeat == null
+            ? this.config.connectingTimeout.firstConnectTimeoutMs
+            : this.config.connectingTimeout.reconnectTimeoutMs,
         // Captured so a timeout on a boot that WAS reporting progress is
         // diagnosable: elapsed measures from max(created_at, last_heartbeat), so
         // a fresh last_heartbeat here means a boot-progress ping landed yet the
@@ -1462,7 +1501,7 @@ export class SandboxLifecycleManager {
     }
     const now = Date.now();
     this.storage.updateSandboxHeartbeat(now);
-    await this.alarmScheduler.scheduleAlarm(now + this.config.connectingTimeout.timeoutMs);
+    await this.armConnectingTimeout("reconnect", now);
     this.log.debug("Boot progress ping", {
       event: "sandbox.boot_progress",
       sandbox_status: sandbox.status,

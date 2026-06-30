@@ -30,7 +30,8 @@ import { getAvailableRepos } from "./classifier/repos";
 import { callbacksRouter, planAwaitingMessageKvKey } from "./callbacks";
 import { buildPlanDecidedBlocks } from "./completion/blocks";
 import type { PlanArtifact } from "@open-inspect/shared";
-import { buildInternalAuthHeaders } from "@open-inspect/shared";
+import { handleChannelTrigger } from "./channel-trigger";
+import { getAuthHeaders } from "./internal-auth";
 import { createLogger } from "./logger";
 import { createKvCacheStore } from "@open-inspect/shared";
 import {
@@ -66,6 +67,12 @@ import {
   getRepoClarificationOptions,
   buildRepoClarificationBlocks,
 } from "./repo-clarification";
+import { getResolvedUserPreferences } from "./user-preferences";
+// NOTE: `getAvailableModels` is defined locally in this file (see below); the
+// upstream re-export in ./app-home/models is intentionally not imported here to
+// avoid a redeclaration collision. Only the Slack default-model helper is pulled
+// in to preserve upstream's "respect Slack default model settings" fix (#847).
+import { getSlackDefaultModel } from "./app-home/models";
 import { slackInteractionPayloadSchema } from "./interaction-payload";
 
 const log = createLogger("handler");
@@ -106,16 +113,6 @@ export const SLACK_SESSION_INSTRUCTIONS =
 
 export function buildAppHomeIntroText(appName: string): string {
   return `Configure your ${appName} preferences below.`;
-}
-
-/**
- * Build authenticated headers for control plane requests.
- */
-async function getAuthHeaders(env: Env, traceId?: string): Promise<Record<string, string>> {
-  return {
-    "Content-Type": "application/json",
-    ...(await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET, traceId)),
-  };
 }
 
 /**
@@ -1150,15 +1147,27 @@ async function startSessionAndSendPrompt(
    */
   classifierShouldPlan?: boolean
 ): Promise<{ sessionId: string; planMode: boolean } | null> {
-  // Fetch user's preferred model and reasoning effort
+  // Resolve the model, reasoning effort, and branch via the shared resolver so
+  // the Slack-wide default model setting (and the deployment's enabled-model
+  // list) is respected — upstream fix #847. The deployment DEFAULT_MODEL is the
+  // final fallback when no Slack default is configured.
+  const [availableModels, slackDefaultModel] = await Promise.all([
+    getAvailableModels(env, traceId),
+    getSlackDefaultModel(env, traceId),
+  ]);
+  const resolvedPrefs = await getResolvedUserPreferences(env, userId, {
+    defaultModel: slackDefaultModel ?? env.DEFAULT_MODEL,
+    enabledModels: availableModels.map((modelOption) => modelOption.value),
+  });
+  const model = resolvedPrefs.model;
+  const reasoningEffort = resolvedPrefs.reasoningEffort;
+  const globalBranch = resolvedPrefs.branch;
+
+  // Plan-mode automation (this fork): the App Home plan toggle and the plan
+  // model live in KV user preferences, which the shared resolver above does not
+  // surface. Read them directly and fetch the deployment plan-model default.
   const userPrefs = await getUserPreferences(env, userId);
-  const { defaultModel, defaultPlanModel } = await fetchModelDefaults(env);
-  const model = getValidModelOrDefault(userPrefs?.model ?? defaultModel);
-  const reasoningEffort =
-    userPrefs?.reasoningEffort && isValidReasoningEffort(model, userPrefs.reasoningEffort)
-      ? userPrefs.reasoningEffort
-      : getDefaultReasoningEffort(model);
-  const globalBranch = getValidatedBranch(userPrefs?.branch);
+  const { defaultPlanModel } = await fetchModelDefaults(env);
   const repoBranch = await getUserRepoBranchPreference(env, userId, repo.id);
   const branch = repoBranch ?? globalBranch;
 
@@ -1566,6 +1575,14 @@ async function handleSlackEvent(
   // Handle app_mention events
   if (event.type === "app_mention" && event.text && event.channel && event.ts) {
     await handleAppMention(event as Required<typeof event>, env, traceId, scheduleBackground);
+    return;
+  }
+
+  // Handle ambient channel messages as potential automation triggers.
+  // `handleChannelTrigger` applies the kill switch, candidacy, and watched-channel
+  // gates; non-candidates (DMs already handled above, mentions, bot posts) are dropped.
+  if (event.type === "message") {
+    await handleChannelTrigger(event, env, traceId);
   }
 }
 

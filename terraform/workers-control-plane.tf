@@ -86,6 +86,7 @@ module "control_plane_worker" {
       { name = "DEFAULT_MODEL", value = "claude-haiku-4-5" },
       { name = "DEFAULT_PLAN_MODEL", value = "claude-haiku-4-5" },
       { name = "AUTOMATION_DELETE_ADMINS", value = var.automation_delete_admins },
+      { name = "SANDBOX_INACTIVITY_TIMEOUT_MS", value = tostring(var.sandbox_inactivity_timeout_ms) },
     ],
     local.use_modal_backend ? [
       { name = "MODAL_WORKSPACE", value = var.modal_workspace },
@@ -99,6 +100,25 @@ module "control_plane_worker" {
     local.use_daytona_backend && var.daytona_target != "" ? [
       { name = "DAYTONA_TARGET", value = var.daytona_target },
     ] : [],
+    local.use_opencomputer_backend ? [
+      { name = "OPENCOMPUTER_API_URL", value = var.opencomputer_api_url },
+      # Pinned template when provided, otherwise the Terraform-managed base snapshot.
+      {
+        name  = "OPENCOMPUTER_TEMPLATE",
+        value = var.opencomputer_template != "" ? var.opencomputer_template : module.opencomputer_infra[0].snapshot_name,
+      },
+    ] : [],
+    local.use_opencomputer_backend && var.opencomputer_project_id != "" ? [
+      { name = "OPENCOMPUTER_PROJECT_ID", value = var.opencomputer_project_id },
+    ] : [],
+    local.use_opencomputer_backend && var.opencomputer_target != "" ? [
+      { name = "OPENCOMPUTER_TARGET", value = var.opencomputer_target },
+    ] : [],
+    local.use_vercel_backend ? [
+      { name = "VERCEL_PROJECT_ID", value = var.vercel_sandbox_project_id },
+      { name = "VERCEL_RUNTIME", value = var.vercel_sandbox_runtime },
+      { name = "VERCEL_SNAPSHOT_EXPIRATION_MS", value = tostring(var.vercel_snapshot_expiration_ms) },
+    ] : []
   )
 
   secrets = concat(
@@ -119,6 +139,13 @@ module "control_plane_worker" {
     ] : [],
     local.use_daytona_backend ? [
       { name = "DAYTONA_API_KEY", value = var.daytona_api_key },
+    ] : [],
+    local.use_opencomputer_backend ? [
+      { name = "OPENCOMPUTER_API_KEY", value = var.opencomputer_api_key },
+      { name = "ANTHROPIC_API_KEY", value = var.anthropic_api_key },
+    ] : [],
+    local.use_vercel_backend ? [
+      { name = "VERCEL_TOKEN", value = var.vercel_sandbox_token },
     ] : [],
     # Slack bot token enables the agent-initiated `slack-notify` endpoint.
     # Shares the variable with the slack-bot worker; bound here so the same
@@ -155,5 +182,6 @@ module "control_plane_worker" {
     null_resource.d1_migrations,
     module.linear_bot_worker,
     module.daytona_infra,
+    module.opencomputer_infra,
   ]
 }

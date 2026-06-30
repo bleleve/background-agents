@@ -13,22 +13,19 @@ import { reEnqueueInterruptedTurnForRelaunch, decideRelaunchAction } from "./rel
 import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
 import {
   DEFAULT_MODEL,
+  clientMessageSchema,
   isValidReasoningEffort,
   resolveAppName,
+  sandboxEventSchema,
   timingSafeEqual,
   RESUMABLE_SESSION_STATUSES,
   TERMINAL_SESSION_STATUSES,
 } from "@open-inspect/shared";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
-import { buildModalSandboxDashboardUrl, createModalClient } from "../sandbox/client";
-import { createDaytonaRestClient } from "../sandbox/daytona-rest-client";
-import { createVercelSandboxClient } from "../sandbox/providers/vercel/client";
-import { createRwxRestClient } from "../sandbox/rwx-rest-client";
-import { createModalProvider } from "../sandbox/providers/modal-provider";
-import { createDaytonaProvider } from "../sandbox/providers/daytona-provider";
-import { createVercelProvider } from "../sandbox/providers/vercel/provider";
-import { createRwxProvider } from "../sandbox/providers/rwx-provider";
-import { resolveSandboxBackendName, supportsRepoImageBackend } from "../sandbox/provider-name";
+import { buildModalSandboxDashboardUrl } from "../sandbox/client";
+import { resolveSandboxBackendName } from "../sandbox/provider-name";
+import { createSandboxProviderFromEnv } from "../sandbox/provider-factory";
+import { resolveRepoImageProvider } from "../repo-images/provider-policy";
 import { createLogger, parseLogLevel } from "../logger";
 import type { Logger } from "../logger";
 import {
@@ -60,7 +57,6 @@ import {
 import type {
   Env,
   ClientInfo,
-  ClientMessage,
   ServerMessage,
   SandboxEvent,
   SessionState,
@@ -171,25 +167,17 @@ const WS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const SYSTEM_USER_ID = "system";
 const SYSTEM_DISPLAY_NAME = "System";
 
+type BoundarySchema<T> = {
+  safeParse(
+    input: unknown
+  ): { success: true; data: T } | { success: false; error: { issues: unknown } };
+};
+
 export class SessionDO extends DurableObject<Env> {
   private sql: SqlStorage;
   private repository: SessionRepository;
   private initialized = false;
   private log: Logger;
-  // PROBE (Durable Object state-divergence diagnosis — remove once root-caused):
-  // a fresh id per in-memory construction. Logged alongside `ctx.id` at the
-  // spawn-identity write and at WS connect. If the spawn-side and connect-side of
-  // one session log different `instance_uid`/`do_id` (with a stale
-  // expected_sandbox_id at connect), the two sides are operating on different DO
-  // state — explaining a `modal_sandbox_id` that never advances despite respawns.
-  private readonly instanceUid = crypto.randomUUID().slice(0, 8);
-  // PROBE (DO split-brain diagnosis — remove with #266): a marker PERSISTED in
-  // this DO's SQLite (set on first init, read thereafter). Unlike instanceUid
-  // (in-memory, churns per construction) and do_id (same id for any instance of
-  // one idFromName), storage_marker is stable across hibernation of one storage
-  // and DIFFERENT across separate storages — so two distinct storage_marker
-  // values for one session_id prove two DO storages (split-brain).
-  private storageMarker: string | null = null;
   // WebSocket manager (lazily initialized like lifecycleManager)
   private _wsManager: SessionWebSocketManager | null = null;
   // Lifecycle manager (lazily initialized)
@@ -822,103 +810,7 @@ export class SessionDO extends DurableObject<Env> {
   private createLifecycleManager(): SandboxLifecycleManager {
     const sandboxBackend = resolveSandboxBackendName(this.env.SANDBOX_PROVIDER);
 
-    const provider = (() => {
-      if (sandboxBackend === "daytona") {
-        if (
-          !this.env.DAYTONA_API_URL ||
-          !this.env.DAYTONA_API_KEY ||
-          !this.env.DAYTONA_BASE_SNAPSHOT
-        ) {
-          throw new Error(
-            "DAYTONA_API_URL, DAYTONA_API_KEY, and DAYTONA_BASE_SNAPSHOT are required when SANDBOX_PROVIDER=daytona"
-          );
-        }
-
-        const daytonaClient = createDaytonaRestClient({
-          apiUrl: this.env.DAYTONA_API_URL,
-          apiKey: this.env.DAYTONA_API_KEY,
-          target: this.env.DAYTONA_TARGET,
-          baseSnapshot: this.env.DAYTONA_BASE_SNAPSHOT,
-          autoStopIntervalMinutes: parseInt(
-            this.env.DAYTONA_AUTO_STOP_INTERVAL_MINUTES || "120",
-            10
-          ),
-          autoArchiveIntervalMinutes: parseInt(
-            this.env.DAYTONA_AUTO_ARCHIVE_INTERVAL_MINUTES || "10080",
-            10
-          ),
-        });
-
-        const scmProvider = resolveScmProviderFromEnv(this.env.SCM_PROVIDER);
-
-        return createDaytonaProvider(daytonaClient, {
-          scmProvider,
-          gitlabAccessToken: this.env.GITLAB_ACCESS_TOKEN,
-          // Reuses API key as HMAC secret for code-server password derivation
-          // (distinct message prefix prevents collision with auth use)
-          codeServerPasswordSecret: this.env.DAYTONA_API_KEY,
-        });
-      }
-
-      if (sandboxBackend === "vercel") {
-        if (!this.env.VERCEL_TOKEN || !this.env.VERCEL_PROJECT_ID) {
-          throw new Error(
-            "VERCEL_TOKEN and VERCEL_PROJECT_ID are required when SANDBOX_PROVIDER=vercel"
-          );
-        }
-
-        const vercelClient = createVercelSandboxClient({
-          token: this.env.VERCEL_TOKEN,
-          projectId: this.env.VERCEL_PROJECT_ID,
-          teamId: this.env.VERCEL_TEAM_ID,
-          apiBaseUrl: this.env.VERCEL_SANDBOX_API_BASE_URL,
-        });
-
-        return createVercelProvider(vercelClient, {
-          scmProvider: resolveScmProviderFromEnv(this.env.SCM_PROVIDER),
-          token: this.env.VERCEL_TOKEN,
-          teamId: this.env.VERCEL_TEAM_ID,
-          apiBaseUrl: this.env.VERCEL_SANDBOX_API_BASE_URL,
-          baseSnapshotId: this.env.VERCEL_BASE_SNAPSHOT_ID,
-          baseSnapshotName: this.env.VERCEL_BASE_SNAPSHOT_NAME,
-          runtime: this.env.VERCEL_RUNTIME,
-          snapshotExpirationMs: parseInt(this.env.VERCEL_SNAPSHOT_EXPIRATION_MS || "0", 10),
-          codeServerPasswordSecret: this.env.VERCEL_TOKEN,
-        });
-      }
-
-      if (sandboxBackend === "rwx") {
-        if (!this.env.RWX_ACCESS_TOKEN) {
-          throw new Error("RWX_ACCESS_TOKEN is required when SANDBOX_PROVIDER=rwx");
-        }
-
-        const rwxClient = createRwxRestClient({
-          apiToken: this.env.RWX_ACCESS_TOKEN,
-          baseUrl: this.env.RWX_BASE_URL,
-        });
-
-        return createRwxProvider(rwxClient, {
-          scmProvider: resolveScmProviderFromEnv(this.env.SCM_PROVIDER),
-          // Reuses access token as HMAC secret for code-server password derivation
-          // (distinct message prefix prevents collision with auth use)
-          codeServerPasswordSecret: this.env.RWX_ACCESS_TOKEN,
-          orgSlug: this.env.RWX_ORG_SLUG,
-        });
-      }
-
-      if (!this.env.MODAL_API_SECRET || !this.env.MODAL_WORKSPACE) {
-        throw new Error(
-          "MODAL_API_SECRET and MODAL_WORKSPACE are required when SANDBOX_PROVIDER=modal"
-        );
-      }
-
-      const modalClient = createModalClient(
-        this.env.MODAL_API_SECRET,
-        this.env.MODAL_WORKSPACE,
-        this.env.MODAL_ENVIRONMENT_WEB_SUFFIX
-      );
-      return createModalProvider(modalClient);
-    })();
+    const provider = createSandboxProviderFromEnv(this.env, sandboxBackend);
 
     // Storage adapter
     const storage: SandboxStorage = {
@@ -928,24 +820,7 @@ export class SessionDO extends DurableObject<Env> {
       getUserEnvVars: () => this.getUserEnvVars(),
       getOpencodeUserConfig: () => this.getOpencodeConfig(),
       updateSandboxStatus: (status) => this.updateSandboxStatus(status),
-      updateSandboxForSpawn: (data) => {
-        this.repository.updateSandboxForSpawn(data);
-        // PROBE (remove once root-caused): re-read the identity we just wrote.
-        // If `read_back` !== `wrote`, the write didn't persist to this instance's
-        // SQLite. If a later WS connect for this session logs a stale
-        // expected_sandbox_id with a different do_id/instance_uid, the spawn-side
-        // and connect-side are on different DO state.
-        const readBack = this.repository.getSandbox()?.modal_sandbox_id ?? null;
-        this.log.info("probe.spawn_identity_write", {
-          event: "probe.spawn_identity_write",
-          do_id: this.ctx.id.toString(),
-          instance_uid: this.instanceUid,
-          storage_marker: this.storageMarker,
-          wrote_sandbox_id: data.modalSandboxId,
-          read_back_sandbox_id: readBack,
-          read_back_matches: readBack === data.modalSandboxId,
-        });
-      },
+      updateSandboxForSpawn: (data) => this.repository.updateSandboxForSpawn(data),
       updateSandboxForResume: (data) => this.repository.updateSandboxForResume(data),
       clearPreviousSandboxIdentity: () => this.repository.clearPreviousSandboxIdentity(),
       promotePreviousSandboxIdentity: () => this.repository.promotePreviousSandboxIdentity(),
@@ -1081,9 +956,9 @@ export class SessionDO extends DurableObject<Env> {
 
     // Create repo image lookup if D1 is available and the provider supports repo images.
     let repoImageLookup: RepoImageLookup | undefined;
-    if (this.env.DB && supportsRepoImageBackend(sandboxBackend)) {
+    const repoImageProvider = resolveRepoImageProvider(sandboxBackend);
+    if (this.env.DB && repoImageProvider) {
       const repoImageStore = new RepoImageStore(this.env.DB);
-      const repoImageProvider = sandboxBackend === "vercel" ? "vercel" : "modal";
       repoImageLookup = {
         getLatestReady: (repoOwner, repoName, baseBranch) =>
           repoImageStore.getLatestReady(repoOwner, repoName, repoImageProvider, baseBranch),
@@ -1131,26 +1006,6 @@ export class SessionDO extends DurableObject<Env> {
       { session_id: sessionId },
       parseLogLevel(this.env.LOG_LEVEL)
     );
-    // PROBE (DO split-brain diagnosis — remove with #266): read-or-create a
-    // marker persisted in THIS storage. Same marker across hibernation of one
-    // storage; different across separate storages. Idempotent CREATE — no formal
-    // migration for a temporary probe.
-    this.sql.exec("CREATE TABLE IF NOT EXISTS do_storage_probe (marker TEXT)");
-    const markerRows = this.sql
-      .exec("SELECT marker FROM do_storage_probe LIMIT 1")
-      .toArray() as Array<{ marker: string }>;
-    if (markerRows.length > 0) {
-      this.storageMarker = markerRows[0].marker;
-    } else {
-      this.storageMarker = crypto.randomUUID().slice(0, 8);
-      this.sql.exec("INSERT INTO do_storage_probe (marker) VALUES (?)", this.storageMarker);
-    }
-    this.log.info("probe.do_storage_marker", {
-      event: "probe.do_storage_marker",
-      do_id: this.ctx.id.toString(),
-      instance_uid: this.instanceUid,
-      storage_marker: this.storageMarker,
-    });
     this.wsManager.enableAutoPingPong();
   }
 
@@ -1293,10 +1148,6 @@ export class SessionDO extends DurableObject<Env> {
           reject_reason: "sandbox_id_mismatch",
           expected_sandbox_id: expectedSandboxId,
           sandbox_id: sandboxId,
-          // PROBE (remove once root-caused): which DO instance/state served this.
-          do_id: this.ctx.id.toString(),
-          instance_uid: this.instanceUid,
-          storage_marker: this.storageMarker,
           matched_previous: false,
           prev_identity_expired: prevExpired,
           ms_until_prev_expiry:
@@ -1323,10 +1174,6 @@ export class SessionDO extends DurableObject<Env> {
           ws_type: "sandbox",
           outcome: "auth_failed",
           reject_reason: "token_mismatch",
-          // PROBE (remove once root-caused): which DO instance/state served this.
-          do_id: this.ctx.id.toString(),
-          instance_uid: this.instanceUid,
-          storage_marker: this.storageMarker,
           matched_previous: usePreviousIdentity,
           prev_identity_expired: prevExpired,
           duration_ms: Date.now() - wsStartTime,
@@ -1398,10 +1245,6 @@ export class SessionDO extends DurableObject<Env> {
           sandbox_id: sandboxId,
           replaced_existing: replaced,
           matched_previous: matchedSandboxIdentity === "previous",
-          // PROBE (remove once root-caused): which DO instance/state served this.
-          do_id: this.ctx.id.toString(),
-          instance_uid: this.instanceUid,
-          storage_marker: this.storageMarker,
           duration_ms: Date.now() - now,
         });
 
@@ -1548,8 +1391,10 @@ export class SessionDO extends DurableObject<Env> {
    * Handle messages from sandbox.
    */
   private async handleSandboxMessage(ws: WebSocket, message: string): Promise<void> {
+    const event = this.parseWebSocketMessage(message, "sandbox", sandboxEventSchema);
+    if (!event) return;
+
     try {
-      const event = JSON.parse(message) as SandboxEvent;
       await this.processSandboxEvent(event);
     } catch (e) {
       this.log.error("Error processing sandbox message", {
@@ -1563,7 +1408,15 @@ export class SessionDO extends DurableObject<Env> {
    */
   private async handleClientMessage(ws: WebSocket, message: string): Promise<void> {
     try {
-      const data = JSON.parse(message) as ClientMessage;
+      const data = this.parseWebSocketMessage(message, "client", clientMessageSchema);
+      if (!data) {
+        this.safeSend(ws, {
+          type: "error",
+          code: "INVALID_MESSAGE",
+          message: "Failed to process message",
+        });
+        return;
+      }
 
       switch (data.type) {
         case "ping":
@@ -1604,6 +1457,34 @@ export class SessionDO extends DurableObject<Env> {
         message: "Failed to process message",
       });
     }
+  }
+
+  private parseWebSocketMessage<T>(
+    message: string,
+    boundary: "client" | "sandbox",
+    schema: BoundarySchema<T>
+  ): T | null {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(message);
+    } catch (e) {
+      this.log.error("Invalid WebSocket JSON", {
+        boundary,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      return null;
+    }
+
+    const result = schema.safeParse(raw);
+    if (!result.success) {
+      this.log.warn("Invalid WebSocket message", {
+        boundary,
+        issues: result.error.issues,
+      });
+      return null;
+    }
+
+    return result.data;
   }
 
   /**

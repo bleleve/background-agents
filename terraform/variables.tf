@@ -198,6 +198,12 @@ variable "enable_slack_bot" {
   }
 }
 
+variable "slack_triggers_enabled" {
+  description = "Kill switch for Slack channel-message automation triggers. When false (default), the slack-bot ignores channel messages and forwards nothing — the feature ships dark. Flip to true only after completing the rollout verification."
+  type        = bool
+  default     = false
+}
+
 variable "slack_bot_token" {
   description = "Slack Bot OAuth token (xoxb-...)"
   type        = string
@@ -348,6 +354,100 @@ variable "daytona_target" {
   default     = ""
 }
 
+variable "opencomputer_api_url" {
+  description = "Base URL for the OpenComputer REST API (e.g. https://api.opencomputer.dev)"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "opencomputer" || length(trimspace(var.opencomputer_api_url)) > 0
+    error_message = "opencomputer_api_url must be set when sandbox_provider = 'opencomputer'."
+  }
+}
+
+variable "opencomputer_api_key" {
+  description = "API key for OpenComputer REST API (X-API-Key auth)"
+  type        = string
+  sensitive   = true
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "opencomputer" || length(trimspace(var.opencomputer_api_key)) > 0
+    error_message = "opencomputer_api_key must be set when sandbox_provider = 'opencomputer'."
+  }
+}
+
+variable "opencomputer_template" {
+  description = "Optional manual OpenComputer template/snapshot name to pin. When empty, Terraform builds and manages the base snapshot from the runtime source (like the Vercel and Modal base images)."
+  type        = string
+  default     = ""
+}
+
+variable "opencomputer_project_id" {
+  description = "Optional OpenComputer project/workspace scope"
+  type        = string
+  default     = ""
+}
+
+variable "opencomputer_target" {
+  description = "Optional OpenComputer target, region, or cell"
+  type        = string
+  default     = ""
+}
+
+variable "vercel_sandbox_token" {
+  description = "Vercel API token for the Vercel Sandbox API"
+  type        = string
+  sensitive   = true
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "vercel" || length(var.vercel_sandbox_token) > 0
+    error_message = "vercel_sandbox_token must be set when sandbox_provider = 'vercel'."
+  }
+}
+
+variable "vercel_sandbox_project_id" {
+  description = "Vercel project ID used to scope Sandbox API calls"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "vercel" || length(var.vercel_sandbox_project_id) > 0
+    error_message = "vercel_sandbox_project_id must be set when sandbox_provider = 'vercel'."
+  }
+}
+
+variable "vercel_sandbox_team_id" {
+  description = "Optional Vercel team ID used to scope Sandbox API calls"
+  type        = string
+  default     = ""
+}
+
+variable "vercel_sandbox_api_base_url" {
+  description = "Optional Vercel Sandbox API base URL override"
+  type        = string
+  default     = ""
+}
+
+variable "vercel_base_snapshot_id" {
+  description = "Optional manual Vercel Sandbox snapshot ID containing the Open-Inspect base runtime. When set, Terraform skips managed Vercel base snapshot builds."
+  type        = string
+  default     = ""
+}
+
+variable "vercel_sandbox_runtime" {
+  description = "Vercel Sandbox runtime identifier"
+  type        = string
+  default     = "node24"
+}
+
+variable "vercel_snapshot_expiration_ms" {
+  description = "Vercel Sandbox snapshot expiration in milliseconds; 0 means no expiration"
+  type        = number
+  default     = 0
+}
+
 variable "nextauth_secret" {
   description = "NextAuth.js secret (generate with: openssl rand -base64 32)"
   type        = string
@@ -372,14 +472,20 @@ variable "rwx_org_slug" {
 # =============================================================================
 
 variable "sandbox_provider" {
-  description = "Sandbox backend for session execution: 'modal', 'daytona', or 'rwx'"
+  description = "Sandbox backend for session execution: 'modal', 'daytona', 'vercel', 'rwx', or 'opencomputer'"
   type        = string
   default     = "modal"
 
   validation {
-    condition     = contains(["modal", "daytona", "rwx"], var.sandbox_provider)
-    error_message = "sandbox_provider must be 'modal', 'daytona', or 'rwx'."
+    condition     = contains(["modal", "daytona", "vercel", "rwx", "opencomputer"], var.sandbox_provider)
+    error_message = "sandbox_provider must be 'modal', 'daytona', 'vercel', 'rwx', or 'opencomputer'."
   }
+}
+
+variable "sandbox_inactivity_timeout_ms" {
+  description = "Milliseconds of sandbox inactivity before OpenInspect snapshots and stops the sandbox when no clients are connected."
+  type        = number
+  default     = 600000
 }
 
 variable "web_platform" {
