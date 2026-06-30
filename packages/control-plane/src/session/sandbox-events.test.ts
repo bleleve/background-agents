@@ -158,7 +158,7 @@ describe("SessionSandboxEventProcessor", () => {
     });
     h.dispatchPreview.mockResolvedValueOnce({
       runUrl: "https://cloud.rwx.com/mint/org/runs/2",
-      previewUrls: { hire: "https://hire-session-1--testorg.r1.rwx.run/" },
+      previewUrls: { wx: "https://wx-session-1--testorg.r1.rwx.run/" },
     });
 
     await h.processor.processSandboxEvent({
@@ -179,7 +179,7 @@ describe("SessionSandboxEventProcessor", () => {
     expect(h.repository.createArtifact).toHaveBeenNthCalledWith(2, {
       id: expect.any(String),
       type: "preview",
-      url: "https://hire-session-1--testorg.r1.rwx.run/",
+      url: "https://wx-session-1--testorg.r1.rwx.run/",
       metadata: JSON.stringify({ previewStatus: "active" }),
       createdAt: expect.any(Number),
     });
@@ -211,7 +211,7 @@ describe("SessionSandboxEventProcessor", () => {
       artifact: {
         id: expect.any(String),
         type: "preview",
-        url: "https://hire-session-1--testorg.r1.rwx.run/",
+        url: "https://wx-session-1--testorg.r1.rwx.run/",
         metadata: { previewStatus: "active" },
         createdAt: expect.any(Number),
       },

@@ -346,7 +346,7 @@ export function createSessionLifecycleHandler(
         });
         deps.broadcastArtifactCreated(artifact);
       }
-      const previewUrl = previewUrls?.hire;
+      const previewUrl = previewUrls?.wx;
       if (previewUrl) {
         const artifactId = deps.generateId();
         const artifact: SessionArtifact = {
