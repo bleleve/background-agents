@@ -62,7 +62,7 @@ describe("SessionRightSidebarContent", () => {
       {
         id: "preview-1",
         type: "preview",
-        url: "https://hire-session-1--org.r1.rwx.run/",
+        url: "https://wx-session-1--org.r1.rwx.run/",
         metadata: { previewStatus: "active" },
         createdAt: 2000,
       },
@@ -77,7 +77,7 @@ describe("SessionRightSidebarContent", () => {
 
     expect(screen.getByTitle("Open preview")).toHaveAttribute(
       "href",
-      "https://hire-session-1--org.r1.rwx.run/"
+      "https://wx-session-1--org.r1.rwx.run/"
     );
     expect(screen.getByRole("link", { name: /rwx run url/i })).toHaveAttribute(
       "href",

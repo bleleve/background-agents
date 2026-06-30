@@ -100,7 +100,7 @@ export function SessionRightSidebarContent({
         toast.error(data.error || "Failed to update preview");
       } else {
         setRwxRunUrl(data.runUrl ?? null);
-        setPreviewUrl(data.previewUrls?.hire ?? null);
+        setPreviewUrl(data.previewUrls?.wx ?? null);
       }
     } catch {
       setPreviewOn(!enabled);

@@ -120,7 +120,7 @@ function createHandler() {
   const createSystemMessage = vi.fn();
   const dispatchPreview = vi.fn(async () => ({
     runUrl: "https://cloud.rwx.com/mint/org/runs/1",
-    previewUrls: { hire: "https://hire-session-1--testorg.r1.rwx.run/" },
+    previewUrls: { wx: "https://wx-session-1--testorg.r1.rwx.run/" },
   }));
   const broadcastArtifactCreated = vi.fn();
   const broadcast = vi.fn();
@@ -204,7 +204,7 @@ describe("createSessionLifecycleHandler", () => {
     expect(await response.json()).toEqual({
       enabled: true,
       runUrl: "https://cloud.rwx.com/mint/org/runs/1",
-      previewUrls: { hire: "https://hire-session-1--testorg.r1.rwx.run/" },
+      previewUrls: { wx: "https://wx-session-1--testorg.r1.rwx.run/" },
     });
     expect(dispatchPreview).toHaveBeenCalledWith(undefined, "head-sha");
     expect(repository.createArtifact).toHaveBeenNthCalledWith(1, {
@@ -217,7 +217,7 @@ describe("createSessionLifecycleHandler", () => {
     expect(repository.createArtifact).toHaveBeenNthCalledWith(2, {
       id: "preview-artifact",
       type: "preview",
-      url: "https://hire-session-1--testorg.r1.rwx.run/",
+      url: "https://wx-session-1--testorg.r1.rwx.run/",
       metadata: JSON.stringify({ previewStatus: "active" }),
       createdAt: 1234,
     });
@@ -231,7 +231,7 @@ describe("createSessionLifecycleHandler", () => {
     expect(broadcastArtifactCreated).toHaveBeenNthCalledWith(2, {
       id: "preview-artifact",
       type: "preview",
-      url: "https://hire-session-1--testorg.r1.rwx.run/",
+      url: "https://wx-session-1--testorg.r1.rwx.run/",
       metadata: { previewStatus: "active" },
       createdAt: 1234,
     });

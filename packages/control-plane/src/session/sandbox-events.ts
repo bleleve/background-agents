@@ -571,7 +571,7 @@ export class SessionSandboxEventProcessor {
       this.deps.broadcast({ type: "artifact_created", artifact });
     }
 
-    const previewUrl = result.previewUrls?.hire;
+    const previewUrl = result.previewUrls?.wx;
     if (previewUrl) {
       const artifactId = generateId();
       const artifact: SessionArtifact = {
