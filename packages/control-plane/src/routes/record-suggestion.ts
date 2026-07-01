@@ -57,6 +57,9 @@ async function handleRecordSuggestion(
   if (!session.prNumber) {
     return error("Session has no associated PR — cannot record suggestion", 400);
   }
+  if (!session.repoOwner || !session.repoName) {
+    return error("Session has no associated repository — cannot record suggestion", 400);
+  }
 
   const store = new ReviewSuggestionStore(env.DB);
   await store.record({

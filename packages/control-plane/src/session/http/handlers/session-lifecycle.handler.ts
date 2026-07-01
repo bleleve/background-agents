@@ -24,17 +24,17 @@ const TERMINAL_STATUSES = new Set<SessionStatus>(TERMINAL_SESSION_STATUSES);
  */
 interface InitRequest {
   sessionName: string;
-  repoOwner: string;
-  repoName: string;
+  repoOwner: string | null;
+  repoName: string | null;
   /** PR descriptor for github-bot sessions; seeds a `pr` artifact so the web UI links to the PR. */
   prNumber?: number | null;
   prUrl?: string | null;
   prState?: string | null;
   prHeadRef?: string | null;
   prBaseRef?: string | null;
-  repoId?: number;
-  defaultBranch?: string;
-  branch?: string;
+  repoId?: number | null;
+  defaultBranch?: string | null;
+  branch?: string | null;
   title?: string;
   model?: string;
   reasoningEffort?: string;
@@ -151,6 +151,21 @@ export function createSessionLifecycleHandler(
       const sessionId = deps.getDurableObjectId();
       const sessionName = body.sessionName;
       const now = deps.now();
+      const repoOwner = body.repoOwner?.trim() || null;
+      const repoName = body.repoName?.trim() || null;
+      const hasRepoOwner = repoOwner !== null;
+      const hasRepoName = repoName !== null;
+      const hasRepoId = body.repoId != null;
+      if (
+        hasRepoOwner !== hasRepoName ||
+        (!hasRepoOwner && hasRepoId) ||
+        (hasRepoOwner && !hasRepoId)
+      ) {
+        return Response.json(
+          { error: "Repository context must include repoOwner, repoName, and repoId together" },
+          { status: 400 }
+        );
+      }
 
       let encryptedToken = body.scmTokenEncrypted ?? null;
       if (body.scmToken && deps.tokenEncryptionKey) {
@@ -173,7 +188,7 @@ export function createSessionLifecycleHandler(
       }
 
       const reasoningEffort = deps.validateReasoningEffort(model, body.reasoningEffort);
-      const baseBranch = body.branch || body.defaultBranch || "main";
+      const baseBranch = hasRepoOwner ? body.branch || body.defaultBranch || "main" : null;
       const planMode = body.planMode === true;
       const planModel = planMode
         ? body.planModel && isValidModel(body.planModel)
@@ -185,9 +200,9 @@ export function createSessionLifecycleHandler(
         id: sessionId,
         sessionName,
         title: body.title ?? null,
-        repoOwner: body.repoOwner,
-        repoName: body.repoName,
-        repoId: body.repoId ?? null,
+        repoOwner,
+        repoName,
+        repoId: hasRepoOwner ? body.repoId : null,
         baseBranch,
         model,
         reasoningEffort,
