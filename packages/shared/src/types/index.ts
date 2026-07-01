@@ -359,7 +359,23 @@ export const sandboxEventSchema = z.discriminatedUnion("type", [
   messageSandboxEventBaseSchema.extend({
     type: z.literal("step_finish"),
     cost: z.number().optional(),
-    tokens: z.number().optional(),
+    // OpenCode / the bridge emit token usage as an object
+    // ({ total, input, output, reasoning, cache: { read, write } }), NOT a
+    // number. Typing this as z.number() made the whole discriminated-union
+    // variant fail boundary validation, so every step_finish was dropped and
+    // session cost stopped accumulating. Model the object loosely and allow
+    // unknown keys so future OpenCode usage fields never drop the event again.
+    tokens: z
+      .object({
+        total: z.number(),
+        input: z.number(),
+        output: z.number(),
+        reasoning: z.number(),
+        cache: z.object({ read: z.number(), write: z.number() }).partial(),
+      })
+      .partial()
+      .passthrough()
+      .optional(),
     reason: z.string().optional(),
     isSubtask: z.boolean().optional(),
   }),
