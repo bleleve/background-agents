@@ -583,6 +583,36 @@ export const DEFAULT_IN_FLIGHT_SILENCE_CONFIG: InFlightSilenceConfig = {
 };
 
 /**
+ * Continuous-silence clock for the in-flight backstop, measured across BOTH
+ * signs of life:
+ *  - `lastHeartbeat` — bridge heartbeats and boot-progress pings, and
+ *  - `lastActivity`  — agent step/tool/tool_result/artifact events.
+ *
+ * The watchdogs (connecting / heartbeat-stale) read only `last_heartbeat`, so a
+ * demonstrably-working agent — streaming tool calls while the bridge heartbeat
+ * lapses, or while the box briefly falls back to `connecting` on a reconnect —
+ * looks "silent" to them and its in-flight turn gets force-failed even though it
+ * later completes (the failed-then-completed contradiction, with the
+ * automation-run left wrongly "failed"). Folding `last_activity` in means agent
+ * progress counts as liveness: the turn defers as long as EITHER signal is
+ * fresh, and only genuine silence across both — no heartbeat AND no agent event
+ * for the backstop window — fails it. The dead-box window is unchanged (still
+ * measured from the last sign of life); only a working agent is spared.
+ *
+ * Returns ms since the most recent sign of life, or null when neither has ever
+ * been seen — the caller must NOT defer on null (a turn with no sign of life at
+ * all is not something to keep waiting on; it fails safe).
+ */
+export function inFlightSilenceMs(
+  lastHeartbeat: number | null,
+  lastActivity: number | null,
+  now: number
+): number | null {
+  const lastSignOfLife = Math.max(lastHeartbeat ?? 0, lastActivity ?? 0);
+  return lastSignOfLife === 0 ? null : now - lastSignOfLife;
+}
+
+/**
  * Result of connecting timeout evaluation.
  */
 export interface ConnectingTimeoutResult {

@@ -1150,6 +1150,95 @@ describe("SandboxLifecycleManager", () => {
       expect(wsManager.closeSandboxWebSocket).toHaveBeenCalledWith(1000, "Heartbeat stale");
     });
 
+    it("defers a stale heartbeat mid-turn when agent activity is fresh (in-flight sign-of-life)", async () => {
+      const now = Date.now();
+      // Heartbeat lapsed 11 min ago — past the 10-min in-flight backstop on its
+      // own — but the agent emitted a tool event 2s ago, so it is demonstrably
+      // alive. The in-flight turn must be deferred, not force-failed to "stale".
+      const sandbox = createMockSandbox({
+        status: "ready",
+        last_heartbeat: now - 11 * 60 * 1000,
+        last_activity: now - 2000,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      storage.getIsProcessing = vi.fn(() => true);
+      const alarmScheduler = createMockAlarmScheduler();
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        alarmScheduler,
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.handleAlarm();
+
+      expect(storage.calls).not.toContain("updateSandboxStatus:stale");
+      expect(alarmScheduler.alarms.length).toBe(1); // deferred — alarm rescheduled
+    });
+
+    it("defers a connecting-timeout mid-turn when agent activity is fresh", async () => {
+      const now = Date.now();
+      // A long-running turn whose box fell back to "connecting"; its heartbeat
+      // would trip the watchdog, but a tool event 2s ago proves it is alive.
+      const sandbox = createMockSandbox({
+        status: "connecting",
+        created_at: now - 60 * 60 * 1000,
+        last_heartbeat: now - 11 * 60 * 1000,
+        last_activity: now - 2000,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      storage.getIsProcessing = vi.fn(() => true);
+      const alarmScheduler = createMockAlarmScheduler();
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        alarmScheduler,
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.handleAlarm();
+
+      expect(storage.calls).not.toContain("updateSandboxStatus:failed");
+      expect(storage.calls).not.toContain("updateSandboxStatus:stopped");
+      expect(alarmScheduler.alarms.length).toBeGreaterThanOrEqual(1); // deferred — watchdog re-armed
+    });
+
+    it("still fails an in-flight turn after genuine silence across both signals", async () => {
+      const now = Date.now();
+      // Neither the heartbeat nor any agent event has arrived for >10 min — a
+      // genuinely unreachable box. The backstop must still terminalize it.
+      const sandbox = createMockSandbox({
+        status: "connecting",
+        created_at: now - 60 * 60 * 1000,
+        last_heartbeat: now - 11 * 60 * 1000,
+        last_activity: now - 12 * 60 * 1000,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      storage.getIsProcessing = vi.fn(() => true);
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.handleAlarm();
+
+      expect(storage.calls).toContain("updateSandboxStatus:failed");
+    });
+
     it("handles inactivity timeout", async () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
@@ -1657,8 +1746,9 @@ describe("SandboxLifecycleManager", () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
         status: "connecting" as SandboxStatus,
-        created_at: now - 11 * 60 * 1000, // 11min of silence > 10min backstop
+        created_at: now - 11 * 60 * 1000,
         last_heartbeat: null,
+        last_activity: now - 11 * 60 * 1000, // silent across BOTH signals for 11min > 10min backstop
       });
       const storage = createMockStorage(createMockSession(), sandbox);
       storage.getIsProcessing = vi.fn(() => true);
@@ -1782,7 +1872,8 @@ describe("SandboxLifecycleManager", () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
         status: "ready",
-        last_heartbeat: now - 11 * 60 * 1000, // 11min silence > 10min backstop
+        last_heartbeat: now - 11 * 60 * 1000,
+        last_activity: now - 11 * 60 * 1000, // silent across BOTH signals for 11min > 10min backstop
       });
       const storage = createMockStorage(createMockSession(), sandbox);
       storage.getIsProcessing = vi.fn(() => true);

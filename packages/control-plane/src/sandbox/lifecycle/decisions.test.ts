@@ -13,6 +13,7 @@ import {
   evaluateConnectingTimeout,
   evaluateWarmDecision,
   evaluateExecutionTimeout,
+  inFlightSilenceMs,
   reconcileTerminalSandboxStatus,
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   DEFAULT_SPAWN_CONFIG,
@@ -923,6 +924,37 @@ describe("evaluateConnectingTimeout", () => {
     expect(
       evaluateConnectingTimeout("connecting", createdAt, createdAt, config, now).isTimedOut
     ).toBe(true);
+  });
+});
+
+// ==================== In-flight Silence Tests ====================
+
+describe("inFlightSilenceMs", () => {
+  const now = 1_000_000;
+
+  it("returns null when neither signal has ever been seen", () => {
+    expect(inFlightSilenceMs(null, null, now)).toBeNull();
+  });
+
+  it("measures from last_heartbeat when only it is present", () => {
+    expect(inFlightSilenceMs(now - 5_000, null, now)).toBe(5_000);
+  });
+
+  it("measures from last_activity when only it is present", () => {
+    expect(inFlightSilenceMs(null, now - 3_000, now)).toBe(3_000);
+  });
+
+  it("uses the MORE RECENT of the two signals (fresh activity wins over stale heartbeat)", () => {
+    // Heartbeat lapsed 11 min ago, but the agent emitted a tool event 2s ago.
+    expect(inFlightSilenceMs(now - 11 * 60_000, now - 2_000, now)).toBe(2_000);
+  });
+
+  it("uses the heartbeat when it is the more recent signal", () => {
+    expect(inFlightSilenceMs(now - 1_000, now - 60_000, now)).toBe(1_000);
+  });
+
+  it("reports the full silence when both signals are old (genuine silence)", () => {
+    expect(inFlightSilenceMs(now - 11 * 60_000, now - 12 * 60_000, now)).toBe(11 * 60_000);
   });
 });
 
