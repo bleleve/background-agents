@@ -62,4 +62,17 @@ describe("TunnelUrlsSection", () => {
     expect(previewLink).toHaveTextContent("Preview");
     expect(previewLink).toHaveTextContent("8991");
   });
+
+  it("uses a configured label for a single tunnel with no port suffix", () => {
+    render(
+      <TunnelUrlsSection
+        urls={{ "8990": "https://a.example.dev" }}
+        labels={{ "8990": "API" }}
+        sandboxStatus="ready"
+      />
+    );
+    const link = screen.getByRole("link", { name: /api/i });
+    expect(link).toHaveTextContent("API");
+    expect(link).not.toHaveTextContent("8990");
+  });
 });
