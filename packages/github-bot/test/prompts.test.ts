@@ -318,6 +318,8 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("No test-worthy changes.");
     expect(prompt).toContain("Do NOT alert just because a PR adds no tests");
     expect(prompt).toContain("never add a Tests line just because a PR adds no tests");
+    // A coverage gap is always 🟡/🔴 — a would-be 🔵 gap is trivial plumbing, dropped not downgraded.
+    expect(prompt).toContain("never 🔵 Low — 🟡 and 🔴 are the only allowed badges");
   });
 
   it("applies a narrow coverage floor to the risk badge (must-test gaps only)", () => {
@@ -331,6 +333,13 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("Never raise the badge for changes the sentinel excluded");
     // A clean review whose badge is raised only by coverage still labels the gap honestly.
     expect(prompt).toContain("No correctness findings");
+    // The floor→header coupling is a hard rule, not a suggestion: the header can never sit
+    // below the highest gap it lists, and the model must reconcile the two before posting.
+    expect(prompt).toContain(
+      "The header is never lower than the highest severity shown in any section below"
+    );
+    expect(prompt).toContain("The floor is not optional and it is a hard coupling");
+    expect(prompt).toContain("the header badge MUST be at least its highest bullet");
   });
 
   it("omits the lookout/dive guidance by default", () => {
