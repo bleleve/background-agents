@@ -121,7 +121,7 @@ access model and can authenticate auxiliary private repos on the configured SCM 
 | ----------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
 | `pull_request`                | `opened`             | Non-draft PR opened                                                                                                     | `handlePullRequestOpened`    |
 | `pull_request`                | `review_requested`   | Compatibility event path                                                                                                | `handleReviewRequested`      |
-| `pull_request`                | `labeled`            | `reef: ask for review` (re-review), `visual-qa: pass` (label-driven auto-approval), or `preview`                        | `handlePullRequestLabeled`   |
+| `pull_request`                | `labeled`            | `reef: ask for review` (re-review), `visual-qa: pass`/`visual-qa: skip` (label-driven auto-approval), or `preview`      | `handlePullRequestLabeled`   |
 | `issue_comment`               | `created`            | @mention in a PR comment                                                                                                | `handleIssueComment`         |
 | `pull_request_review_comment` | `created`            | @mention in a review thread; bot's own comments are recorded as suggestions (webhook fallback path)                     | `handleReviewComment`        |
 | `pull_request_review_thread`  | `resolved`           | Review thread resolved                                                                                                  | `handleReviewThreadResolved` |
@@ -158,16 +158,17 @@ whereas an in-place edit would be silent.
 
 Approving a PR is decided **entirely by the bot from labels** — the review agent never approves (the
 `submit-pr-review` tool drops `APPROVE`, and the control-plane route rejects it). When the
-`visual-qa: pass` label is added to a PR that **already carries `reef: low risk`**,
-`handleVisualQaPassLabel` submits a formal `APPROVE` review as the GitHub App.
+`visual-qa: pass` or `visual-qa: skip` label is added to a PR that **already carries
+`reef: low risk`**, `handleVisualQaApprovalLabel` submits a formal `APPROVE` review as the GitHub
+App.
 
 The flow is gated by the per-repo **`autoApproveOnOpen`** setting ("Auto-approve low-risk PRs"): the
 handler skips unless the PR is open and non-draft, carries `reef: low risk`, passes the
 enabled-repos / private-repo filters, and the toggle is on. `getGitHubConfig` fails closed
 (`autoApproveOnOpen = false`) on any config error, so an outage never auto-approves. The
-`reef: low risk` label is written by the review agent on every verdict; `visual-qa: pass` is applied
-by an external visual-QA system. (No extra GitHub App config — the `labeled` action ships with the
-already-subscribed `Pull request` event.)
+`reef: low risk` label is written by the review agent on every verdict; `visual-qa: pass` and
+`visual-qa: skip` are applied by an external visual-QA system. (No extra GitHub App config — the
+`labeled` action ships with the already-subscribed `Pull request` event.)
 
 The resulting approval fires a `pull_request_review` event; the backstop (below) sees
 `autoApproveOnOpen` is on and leaves it in place.

@@ -2160,7 +2160,7 @@ describe("handlePullRequestLabeled", () => {
   });
 });
 
-describe("handleVisualQaPassLabel (auto-approval)", () => {
+describe("handleVisualQaApprovalLabel (auto-approval)", () => {
   // `visual-qa: pass` added to a PR that already carries `reef: low risk`.
   const visualQaPayload: PullRequestLabeledPayload = {
     ...pullRequestLabeledPayload,
@@ -2171,7 +2171,7 @@ describe("handleVisualQaPassLabel (auto-approval)", () => {
     },
   };
 
-  it("approves the PR when both labels are present and autoApproveOnOpen is on", async () => {
+  it("approves the PR when the visual-qa: pass label is present and autoApproveOnOpen is on", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
     vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoApproveOnOpen: true });
@@ -2185,6 +2185,28 @@ describe("handleVisualQaPassLabel (auto-approval)", () => {
     expect(repoName).toBe("widgets");
     expect(prNumber).toBe(42);
     // No review session is spawned for an auto-approval.
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+  });
+
+  it("approves the PR when the visual-qa: skip label is present and autoApproveOnOpen is on", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig, autoApproveOnOpen: true });
+    const payload: PullRequestLabeledPayload = {
+      ...visualQaPayload,
+      label: { name: "visual-qa: skip" },
+      pull_request: {
+        ...visualQaPayload.pull_request,
+        labels: [{ name: "reef: low risk" }, { name: "visual-qa: skip" }],
+      },
+    };
+
+    const result = await handlePullRequestLabeled(env, log, payload, "trace-vqa-skip");
+
+    expect(result).toMatchObject({ outcome: "processed", handler_action: "pr_auto_approved" });
+    expect(approvePullRequest).toHaveBeenCalledTimes(1);
+    // The approval body reflects the skipped-visual-QA reason.
+    expect(vi.mocked(approvePullRequest).mock.calls[0][4]).toContain("visual-qa: skip");
     expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
   });
 
