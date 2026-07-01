@@ -64,6 +64,7 @@ import type { UserPreferences } from "./types";
 import {
   SELECT_REPO_ACTION_ID,
   SELECT_REPO_QUICK_PICK_ACTION_ID,
+  baseActionId,
   getRepoClarificationOptions,
   buildRepoClarificationBlocks,
 } from "./repo-clarification";
@@ -76,6 +77,7 @@ import { getSlackDefaultModel } from "./app-home/models";
 import { slackInteractionPayloadSchema } from "./interaction-payload";
 
 const log = createLogger("handler");
+const THREAD_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 type BackgroundTaskScheduler = (promise: Promise<void>) => void;
 
@@ -288,7 +290,7 @@ async function lookupThreadSession(
 
 /**
  * Store a session mapping for a thread.
- * TTL is 24 hours by default.
+ * TTL is THREAD_SESSION_TTL_SECONDS by default.
  */
 async function storeThreadSession(
   env: Env,
@@ -299,7 +301,7 @@ async function storeThreadSession(
   try {
     const key = getThreadSessionKey(channel, threadTs);
     await createKvCacheStore(env.SLACK_KV).put(key, JSON.stringify(session), {
-      expirationTtl: 86400, // 24 hours
+      expirationTtl: THREAD_SESSION_TTL_SECONDS,
     });
   } catch (e) {
     log.error("kv.put", {
@@ -1768,7 +1770,7 @@ async function handleIncomingMessage(params: IncomingMessageParams): Promise<voi
       `I couldn't determine which repository you're referring to. ${result.reasoning}`,
       {
         thread_ts: threadTs || ts,
-        blocks: buildRepoClarificationBlocks(result.reasoning, result.alternatives),
+        blocks: buildRepoClarificationBlocks(result.reasoning, result.alternatives, repos),
       }
     );
     return;
@@ -2156,7 +2158,8 @@ async function handleSlackInteraction(
   const messageTs = payload.message?.ts;
   const threadTs = payload.message?.thread_ts;
 
-  switch (action.action_id) {
+  // Collapse a quick-pick's per-button action_id back to the bare constant before matching.
+  switch (baseActionId(action.action_id)) {
     case "select_model": {
       // Handle model selection from App Home
       const selectedModel = action.selected_option?.value;

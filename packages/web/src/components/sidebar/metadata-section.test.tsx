@@ -139,4 +139,12 @@ describe("MetadataSection", () => {
     expect(screen.getByText("Web")).toBeInTheDocument();
     expect(screen.queryByText("GitHub")).not.toBeInTheDocument();
   });
+
+  it("renders an explicit no-repository row for repo-less sessions", () => {
+    render(
+      <MetadataSection createdAt={Date.now()} baseBranch={null} repoOwner={null} repoName={null} />
+    );
+
+    expect(screen.getByText("No repository")).toBeInTheDocument();
+  });
 });

@@ -113,17 +113,18 @@ built for internal use where all employees are trusted and have access to compan
 
 ## Packages
 
-| Package                                     | Description                                       |
-| ------------------------------------------- | ------------------------------------------------- |
-| [control-plane](packages/control-plane)     | Cloudflare Workers + Durable Objects              |
-| [web](packages/web)                         | Next.js web client                                |
-| [slack-bot](packages/slack-bot)             | Slack integration (sessions from messages)        |
-| [github-bot](packages/github-bot)           | GitHub integration (auto-review, @mention)        |
-| [linear-bot](packages/linear-bot)           | Linear integration (issue → coding session)       |
-| [shared](packages/shared)                   | Shared types and utilities (build first)          |
-| [modal-infra](packages/modal-infra)         | Modal sandbox infrastructure and lifecycle        |
-| [sandbox-runtime](packages/sandbox-runtime) | Provider-agnostic sandbox runtime (bridge, agent) |
-| [daytona-infra](packages/daytona-infra)     | Daytona base-snapshot seeding scripts             |
+| Package                                           | Description                                       |
+| ------------------------------------------------- | ------------------------------------------------- |
+| [control-plane](packages/control-plane)           | Cloudflare Workers + Durable Objects              |
+| [web](packages/web)                               | Next.js web client                                |
+| [slack-bot](packages/slack-bot)                   | Slack integration (sessions from messages)        |
+| [github-bot](packages/github-bot)                 | GitHub integration (auto-review, @mention)        |
+| [linear-bot](packages/linear-bot)                 | Linear integration (issue → coding session)       |
+| [shared](packages/shared)                         | Shared types and utilities (build first)          |
+| [modal-infra](packages/modal-infra)               | Modal sandbox infrastructure and lifecycle        |
+| [sandbox-runtime](packages/sandbox-runtime)       | Provider-agnostic sandbox runtime (bridge, agent) |
+| [daytona-infra](packages/daytona-infra)           | Daytona base-snapshot seeding scripts             |
+| [opencomputer-infra](packages/opencomputer-infra) | OpenComputer template infrastructure              |
 
 ## Getting Started
 
@@ -281,6 +282,7 @@ built with:
 - [Modal](https://modal.com) - Cloud sandbox infrastructure
 - [Daytona](https://www.daytona.io) - Cloud development sandboxes
 - [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) - Cloud sandbox infrastructure
+- [OpenComputer](https://www.opencomputer.dev) - Cloud sandbox infrastructure
 - [Cloudflare Workers](https://workers.cloudflare.com) - Edge computing
 - [OpenCode](https://opencode.ai) - Coding agent runtime
 - [Next.js](https://nextjs.org) - Web framework

@@ -53,6 +53,9 @@ export async function handleSubmitPrReview(
   if (session.prNumber == null) {
     return error("This session is not associated with a pull request", 422);
   }
+  if (!session.repoOwner || !session.repoName) {
+    return error("This session is not associated with a repository", 422);
+  }
 
   const owner = session.repoOwner;
   const repoName = session.repoName;

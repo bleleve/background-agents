@@ -1968,7 +1968,7 @@ class AgentBridge:
 
         repo_dir = self._resolve_repo_dir()
         if not repo_dir:
-            self.log.warn("git.push_error", reason="no_repository")
+            self.log.warn("git.push_error", reason="no_repo_configured")
             await self._send_event(
                 {
                     "type": "push_error",
@@ -2138,7 +2138,7 @@ class AgentBridge:
 
         repo_dir = self._resolve_repo_dir()
         if not repo_dir:
-            self.log.debug("git.identity_skip", reason="no_repository")
+            self.log.debug("git.identity_skip", reason="no_repo_configured")
             return
 
         async def _run_git_config(*args: str) -> None:
