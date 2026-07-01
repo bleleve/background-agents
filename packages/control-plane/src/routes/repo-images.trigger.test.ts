@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_BUILD_TIMEOUT_SECONDS } from "@open-inspect/shared";
 import { createRequestMetrics } from "../db/instrumented-d1";
 import { RepoImageStore } from "../db/repo-images";
 import { repoImageRoutes } from "./repo-images";
@@ -218,7 +219,7 @@ describe("POST /repo-images/trigger/:owner/:name", () => {
         repoOwner: "acme",
         repoName: "repo",
         defaultBranch: "develop",
-        buildTimeoutSeconds: 1800,
+        buildTimeoutSeconds: DEFAULT_BUILD_TIMEOUT_SECONDS,
       }),
       expect.any(Object)
     );

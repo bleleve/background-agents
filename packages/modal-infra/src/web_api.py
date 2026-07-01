@@ -600,7 +600,7 @@ async def api_build_img(
         "default_branch": "main",
         "build_id": "...",
         "callback_url": "...",
-        "build_timeout_seconds": 1800  // optional
+        "build_timeout_seconds": 2700  // optional
     }
     """
     start_time = time.time()
