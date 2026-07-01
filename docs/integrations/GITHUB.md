@@ -81,7 +81,7 @@ structured risk map:
   legitimately add no tests. A genuine gap is listed here — always 🟡 or 🔴, never 🔵 Low — and
   raises the risk badge as a floor: an uncovered behavioral change lifts the header to at least 🟡,
   an uncovered critical-path change to 🔴. The floor is a hard coupling, so the header badge is
-  never lower than the highest gap listed in this section (omitted when there is no gap).
+  never lower than the highest severity shown in any section below (omitted when there is no gap).
 - **Docs drift** — any documentation that drifted from the change (omitted when there is none).
 - **Reviewed, no concerns** — the areas that were checked and had nothing notable, in a collapsed
   `<details>` block so it stays out of the way of the summary.
