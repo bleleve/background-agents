@@ -45,7 +45,7 @@ DEFAULT_SANDBOX_TIMEOUT_SECONDS = 7200  # 2 hours
 # filesystem can be snapshotted. Promoted to module scope so the scheduler's stale
 # threshold can be derived from it (see STALE_BUILD_THRESHOLD_SECONDS).
 # Mirrors DEFAULT_BUILD_TIMEOUT_SECONDS in shared (packages/shared/src/types/integrations.ts).
-BUILD_TIMEOUT_SECONDS = 1800  # 30 minutes
+BUILD_TIMEOUT_SECONDS = 2700  # 45 minutes
 # Default repo-image build timeout (alias of BUILD_TIMEOUT_SECONDS) used by the
 # configurable build-timeout path. Mirrors DEFAULT_BUILD_TIMEOUT_SECONDS in shared.
 DEFAULT_BUILD_TIMEOUT_SECONDS = BUILD_TIMEOUT_SECONDS

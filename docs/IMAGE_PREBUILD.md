@@ -122,7 +122,7 @@ Check the error message shown in the Images settings page. Common causes:
 - **Setup script errors** — Your `scripts/.openinspect/setup.sh` is failing. Test it locally or
   check the script for commands that might not work in the sandbox environment (Debian Linux with
   Node.js, Python, and common dev tools).
-- **Setup timeout** — `scripts/.openinspect/setup.sh` has a 30-minute limit. If it takes longer,
+- **Setup timeout** — `scripts/.openinspect/setup.sh` has a 45-minute limit. If it takes longer,
   speed it up (faster package managers, fewer dependencies).
 - **Snapshot timeout** — After setup runs, the resulting filesystem is captured as a snapshot, which
   has its own time limit. Very large images (huge `node_modules`, many baked Docker images, large

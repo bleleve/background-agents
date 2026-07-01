@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from src.sandbox.manager import SandboxManager
+from src.sandbox.manager import DEFAULT_BUILD_TIMEOUT_SECONDS, SandboxManager
 
 
 def _fake_sandbox_create(captured):
@@ -100,8 +100,8 @@ async def test_no_control_plane_or_auth_vars(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_timeout_defaults_to_1800(monkeypatch):
-    """Build sandbox should default to the 30-minute (1800s) timeout."""
+async def test_timeout_defaults_to_build_timeout_default(monkeypatch):
+    """Build sandbox should default to DEFAULT_BUILD_TIMEOUT_SECONDS."""
     captured = {}
     monkeypatch.setattr("src.sandbox.manager.modal.Sandbox.create", _fake_sandbox_create(captured))
 
@@ -111,7 +111,7 @@ async def test_timeout_defaults_to_1800(monkeypatch):
         repo_name="my-repo",
     )
 
-    assert captured["timeout"] == 1800
+    assert captured["timeout"] == DEFAULT_BUILD_TIMEOUT_SECONDS
 
 
 @pytest.mark.asyncio
