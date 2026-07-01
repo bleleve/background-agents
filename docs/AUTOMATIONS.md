@@ -374,8 +374,10 @@ failures. The status changes to **Paused** and no further runs will start until 
 To re-enable the automation, click **Resume**. This resets the failure counter. Scheduled
 automations also compute their next run at that point.
 
-Consecutive failures are tracked across both scheduled and manually triggered runs. A single
-successful run resets the counter to zero.
+Consecutive failures are tracked across both scheduled and manually triggered runs. A genuine
+successful run resets the counter to zero. One edge case: if the watchdog timed out a run that was
+actually still healthy and later completed (a false-positive timeout), the counter is decremented by
+1 rather than fully reset, so any unrelated failures that accumulated in the interim are preserved.
 
 Runs that time out (sessions running longer than 90 minutes) also count as failures toward the
 auto-pause threshold.
