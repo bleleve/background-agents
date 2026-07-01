@@ -678,12 +678,23 @@ export class SchedulerDO extends DurableObject<Env> {
     // Verify the run exists and is still in an active state.
     // The recovery sweep may have already marked it as failed.
     const run = await store.getRunById(body.automationId, body.runId);
-    if (!run || (run.status !== "starting" && run.status !== "running")) {
+    const isActive = run?.status === "starting" || run?.status === "running";
+    // A late `success` callback for a run already marked `failed` reconciles it.
+    // The connecting/heartbeat watchdogs can false-fail a healthy long turn — the
+    // agent kept running (or was resumed) and then completed, but the run was
+    // stuck "failed" and the automation's consecutive-failure streak inflated,
+    // even though the session completed and pushed its PR. Flip it back to
+    // completed and undo the one spurious failure. Every other callback for a
+    // non-active run (a genuine terminal state, a late failure, a duplicate) is
+    // still ignored.
+    const reconcilesFailure = run?.status === "failed" && body.success;
+    if (!run || (!isActive && !reconcilesFailure)) {
       this.log.warn("Ignoring run-complete callback for non-active run", {
         event: "scheduler.run_complete_ignored",
         automation_id: body.automationId,
         run_id: body.runId,
         current_status: run?.status ?? "not_found",
+        success: body.success,
       });
       return new Response(JSON.stringify({ ok: true, ignored: true }), {
         headers: { "Content-Type": "application/json" },
@@ -695,14 +706,25 @@ export class SchedulerDO extends DurableObject<Env> {
         status: "completed",
         completed_at: Date.now(),
       });
-      await store.resetConsecutiveFailures(body.automationId);
-
-      this.log.info("Run completed successfully", {
-        event: "scheduler.run_complete",
-        automation_id: body.automationId,
-        run_id: body.runId,
-        session_id: body.sessionId,
-      });
+      if (reconcilesFailure) {
+        // Take back just the one spurious failure rather than resetting the whole
+        // streak, so unrelated later failures survive an old run reconciling late.
+        await store.decrementConsecutiveFailures(body.automationId);
+        this.log.info("Run reconciled failed→completed by late success", {
+          event: "scheduler.run_reconciled",
+          automation_id: body.automationId,
+          run_id: body.runId,
+          session_id: body.sessionId,
+        });
+      } else {
+        await store.resetConsecutiveFailures(body.automationId);
+        this.log.info("Run completed successfully", {
+          event: "scheduler.run_complete",
+          automation_id: body.automationId,
+          run_id: body.runId,
+          session_id: body.sessionId,
+        });
+      }
     } else {
       await this.failRunAndTrack(
         store,
@@ -723,8 +745,10 @@ export class SchedulerDO extends DurableObject<Env> {
     // Slack-triggered runs post the agent's result into the triggering message's
     // thread and clear the `eyes` reaction when they finish. The scheduler owns
     // this fan-out (not the session callback path) because the message
-    // coordinates live on the run row. Best-effort.
-    const slackMeta = getSlackRunMetadata(run);
+    // coordinates live on the run row. Best-effort. Skipped on a reconcile: the
+    // run's outcome was already posted to the thread when it first terminalized,
+    // so re-posting a late success would double-notify.
+    const slackMeta = isActive ? getSlackRunMetadata(run) : null;
     if (slackMeta) {
       const automation = await store.getById(body.automationId);
       await this.notifySlackCompletion(run, slackMeta, {
