@@ -44,4 +44,22 @@ describe("TunnelUrlsSection", () => {
     const link = screen.getByRole("link", { name: /preview/i });
     expect(link.getAttribute("href")).toContain("app.example.dev");
   });
+
+  it("uses a configured label instead of the default name", () => {
+    render(
+      <TunnelUrlsSection
+        urls={{ "8990": "https://a.example.dev", "8991": "https://b.example.dev" }}
+        labels={{ "8990": "API" }}
+        sandboxStatus="ready"
+      />
+    );
+    // Labeled port shows its label; unlabeled falls back to "Preview". Both keep
+    // the muted port suffix because more than one tunnel is exposed.
+    const apiLink = screen.getByRole("link", { name: /api/i });
+    expect(apiLink).toHaveTextContent("API");
+    expect(apiLink).toHaveTextContent("8990");
+    const previewLink = screen.getByRole("link", { name: /preview/i });
+    expect(previewLink).toHaveTextContent("Preview");
+    expect(previewLink).toHaveTextContent("8991");
+  });
 });

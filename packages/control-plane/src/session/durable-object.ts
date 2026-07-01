@@ -23,6 +23,7 @@ import {
 } from "@open-inspect/shared";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl } from "../sandbox/client";
+import { normalizeSandboxSettings } from "../sandbox/settings";
 import { resolveSandboxBackendName } from "../sandbox/provider-name";
 import { createSandboxProviderFromEnv } from "../sandbox/provider-factory";
 import { resolveRepoImageProvider } from "../repo-images/provider-policy";
@@ -2243,6 +2244,7 @@ export class SessionDO extends DurableObject<Env> {
       codeServerUrl: sandbox?.code_server_url ?? null,
       codeServerPassword,
       tunnelUrls: sandbox?.tunnel_urls ? this.safeParseTunnelUrls(sandbox.tunnel_urls) : null,
+      tunnelPortLabels: this.tunnelPortLabelsFromSettings(session),
       ttydUrl: sandbox?.ttyd_url ?? null,
       ttydToken,
       planMode: session?.plan_mode === 1,
@@ -2294,6 +2296,23 @@ export class SessionDO extends DurableObject<Env> {
       this.log.warn("Invalid sandbox tunnel_urls JSON");
     }
     return urls;
+  }
+
+  /**
+   * Display-only tunnel-port labels for the client, read from the session's
+   * persisted sandbox settings (already pruned to the configured ports at write
+   * time). Returns null when none are set. The sandbox tier never sees these —
+   * they only rename the preview links so multiple ports don't all read "Preview".
+   */
+  private tunnelPortLabelsFromSettings(session: SessionRow | null): Record<string, string> | null {
+    if (!session?.sandbox_settings) return null;
+    try {
+      const parsed: unknown = JSON.parse(session.sandbox_settings);
+      const labels = normalizeSandboxSettings(parsed, { invalid: "omit" }).tunnelPortLabels;
+      return labels && Object.keys(labels).length > 0 ? labels : null;
+    } catch {
+      return null;
+    }
   }
 
   // Database helpers

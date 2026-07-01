@@ -287,7 +287,11 @@ export function SessionRightSidebarContent({
           {previewUrls ? (
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <TunnelUrlsSection urls={previewUrls} sandboxStatus={sessionState.sandboxStatus} />
+                <TunnelUrlsSection
+                  urls={previewUrls}
+                  labels={sessionState.tunnelPortLabels}
+                  sandboxStatus={sessionState.sandboxStatus}
+                />
               </div>
               {isRestartable ? (
                 <SandboxRestartSection

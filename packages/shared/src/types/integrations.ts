@@ -46,6 +46,9 @@ export interface CodeServerSettings {
 /** Maximum number of tunnel ports a user can configure per sandbox. */
 export const MAX_TUNNEL_PORTS = 10;
 
+/** Maximum length of an optional, display-only tunnel-port label. */
+export const MAX_TUNNEL_PORT_LABEL_LENGTH = 40;
+
 /** Maximum number of AWS roles a user can configure per sandbox scope. */
 export const MAX_AWS_ROLES = 10;
 
@@ -115,6 +118,37 @@ export function findSandboxPortConflict(
   return null;
 }
 
+/**
+ * Normalize display-only tunnel-port labels against the ports that are actually
+ * configured. Trims each label, drops empty ones, caps length at
+ * {@link MAX_TUNNEL_PORT_LABEL_LENGTH}, and keeps only keys whose numeric port
+ * appears in {@link allowedPorts} — so a label can never outlive its port or
+ * reference a port that failed validation. Returns `undefined` when nothing
+ * survives, so callers can omit the field entirely.
+ *
+ * Shared by the control-plane spawn-time normalizer and the API write-path
+ * validator so the rule lives in exactly one place (same spirit as
+ * {@link findSandboxPortConflict}).
+ */
+export function normalizeTunnelPortLabels(
+  labels: unknown,
+  allowedPorts: number[]
+): Record<string, string> | undefined {
+  if (typeof labels !== "object" || labels === null || Array.isArray(labels)) {
+    return undefined;
+  }
+  const allowed = new Set(allowedPorts.map(String));
+  const result: Record<string, string> = {};
+  for (const [port, rawLabel] of Object.entries(labels as Record<string, unknown>)) {
+    if (!allowed.has(port)) continue;
+    if (typeof rawLabel !== "string") continue;
+    const label = rawLabel.trim().slice(0, MAX_TUNNEL_PORT_LABEL_LENGTH);
+    if (label === "") continue;
+    result[port] = label;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 /** Default maximum active agent-spawned child sessions per parent session. */
 export const DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS = 5;
 
@@ -147,6 +181,15 @@ export const MAX_BUILD_TIMEOUT_SECONDS = 3600;
 export interface SandboxSettings {
   /** Extra ports to expose via tunnels (e.g., dev server ports 3000, 5173). */
   tunnelPorts?: number[];
+  /**
+   * Optional, display-only labels for tunnel ports, keyed by port number as a
+   * string (e.g. `{ "3000": "API" }`). Purely cosmetic: the sandbox tier only
+   * needs {@link tunnelPorts}; labels rename the preview links in the UI so
+   * multiple ports don't all read "Preview". Pruned to configured ports so a
+   * removed port never keeps a stale label. Normalize with
+   * {@link normalizeTunnelPortLabels}.
+   */
+  tunnelPortLabels?: Record<string, string>;
   /** Enable a browser-based terminal (ttyd) in sandbox sessions. */
   terminalEnabled?: boolean;
   /**
