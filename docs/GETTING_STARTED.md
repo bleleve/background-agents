@@ -647,9 +647,9 @@ Now that the GitHub bot worker is deployed, configure the GitHub App for webhook
    - **Pull request review threads** (required for the review-suggestion acceptance-rate metric —
      the bot marks a suggestion resolved when its review thread is resolved)
    - **Pull request reviews** (required two ways: the bot submits a label-driven `APPROVE` here when
-     a PR is labeled `visual-qa: pass` and `reef: low risk`; and a backstop dismisses any bot review
-     left over when `autoApproveOnOpen` is off — an off-policy agent `REQUEST_CHANGES`, or a stray
-     `APPROVE` on a misconfigured repo)
+     a PR is labeled `visual-qa: pass` or `visual-qa: skip` and `reef: low risk`; and a backstop
+     dismisses any bot review left over when `autoApproveOnOpen` is off — an off-policy agent
+     `REQUEST_CHANGES`, or a stray `APPROVE` on a misconfigured repo)
 5. Click **Save changes**
 
 ### Find Your Bot Username

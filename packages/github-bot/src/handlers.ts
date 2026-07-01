@@ -46,9 +46,11 @@ import {
   hasLowRiskLabel,
   isAskForReviewLabel,
   isPreviewLabel,
-  isVisualQaPassLabel,
+  isVisualQaApprovalLabel,
+  isVisualQaSkipLabel,
   LOW_RISK_LABEL,
   VISUAL_QA_PASS_LABEL,
+  VISUAL_QA_SKIP_LABEL,
   type GitHubLabel,
 } from "./label-resolution";
 
@@ -1162,8 +1164,8 @@ export async function handlePullRequestLabeled(
     return dispatchPullRequestPreview(env, payload, traceId, "github_label_added");
   }
 
-  if (isVisualQaPassLabel(label.name)) {
-    return handleVisualQaPassLabel(env, log, payload, traceId);
+  if (isVisualQaApprovalLabel(label.name)) {
+    return handleVisualQaApprovalLabel(env, log, payload, traceId);
   }
 
   if (!isAskForReviewLabel(label.name)) {
@@ -1261,10 +1263,10 @@ export async function handlePullRequestLabeled(
 }
 
 /**
- * Label-driven auto-approval. When `visual-qa: pass` is added to a PR that
- * already carries `reef: low risk`, submit an APPROVE review as the Reef App,
- * gated by the repo's `autoApproveOnOpen` setting. This decision lives entirely
- * in the bot — the review agent no longer approves PRs.
+ * Label-driven auto-approval. When `visual-qa: pass` or `visual-qa: skip` is
+ * added to a PR that already carries `reef: low risk`, submit an APPROVE review
+ * as the Reef App, gated by the repo's `autoApproveOnOpen` setting. This
+ * decision lives entirely in the bot — the review agent no longer approves PRs.
  *
  * Trust model: GitHub only lets users with triage+ access add labels, and the
  * repo must opt in via `autoApproveOnOpen`, so the label pair plus the setting is
@@ -1272,13 +1274,13 @@ export async function handlePullRequestLabeled(
  * whether the PR can land. The resulting approval fires a `pull_request_review`
  * event; the review backstop sees `autoApproveOnOpen` is on and leaves it.
  */
-async function handleVisualQaPassLabel(
+async function handleVisualQaApprovalLabel(
   env: Env,
   log: Logger,
   payload: PullRequestLabeledPayload,
   traceId: string
 ): Promise<HandlerResult> {
-  const { pull_request: pr, repository: repo } = payload;
+  const { pull_request: pr, repository: repo, label } = payload;
   const owner = repo.owner.login;
   const repoName = repo.name;
   const repoFullName = `${owner}/${repoName}`.toLowerCase();
@@ -1295,7 +1297,7 @@ async function handleVisualQaPassLabel(
   }
 
   // The PR must already carry the agent-written low-risk verdict label. The
-  // webhook payload's labels include the just-added `visual-qa: pass`, so this
+  // webhook payload's labels include the just-added `visual-qa` label, so this
   // checks for the OTHER required label.
   if (!hasLowRiskLabel(pr.labels ?? [])) {
     log.debug("auto_approve.not_low_risk", meta);
@@ -1329,12 +1331,16 @@ async function handleVisualQaPassLabel(
     userAgent,
   });
 
+  const visualQaLabel = isVisualQaSkipLabel(label.name)
+    ? VISUAL_QA_SKIP_LABEL
+    : VISUAL_QA_PASS_LABEL;
+  const visualQaReason = isVisualQaSkipLabel(label.name) ? "skipped visual QA" : "passed visual QA";
   const approved = await approvePullRequest(
     token,
     owner,
     repoName,
     pr.number,
-    `Auto-approved by Reef: \`${LOW_RISK_LABEL}\` change passed visual QA (\`${VISUAL_QA_PASS_LABEL}\`).`,
+    `Auto-approved by Reef: \`${LOW_RISK_LABEL}\` change ${visualQaReason} (\`${visualQaLabel}\`).`,
     userAgent
   );
 
