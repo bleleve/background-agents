@@ -92,6 +92,18 @@ describe("SandboxSettingsPage — tunnel ports editor", () => {
     expect(inputs[1]).toHaveValue("5173");
   });
 
+  it("prefills the label input from stored tunnelPortLabels", () => {
+    renderWithSWR({
+      integrationId: "sandbox",
+      settings: { defaults: { tunnelPorts: [8990, 8991], tunnelPortLabels: { "8990": "API" } } },
+    });
+
+    const labelInputs = screen.getAllByPlaceholderText("Label (optional)");
+    expect(labelInputs).toHaveLength(2);
+    expect(labelInputs[0]).toHaveValue("API");
+    expect(labelInputs[1]).toHaveValue("");
+  });
+
   it("adds a new empty row when clicking Add port", async () => {
     renderWithSWR({ integrationId: "sandbox", settings: null });
     expect(screen.getByText("No tunnel ports configured.")).toBeInTheDocument();
@@ -202,6 +214,44 @@ describe("SandboxSettingsPage — tunnel ports editor", () => {
           }),
         })
       );
+    });
+  });
+
+  it("includes tunnel-port labels in the save payload", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        return new Response(JSON.stringify({}), { status: 200 });
+      }
+      throw new Error(`unexpected fetch: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          fallback: { [SETTINGS_KEY]: globalSettings([], ["acme/app"]) },
+          dedupingInterval: Infinity,
+          revalidateOnFocus: false,
+          revalidateIfStale: false,
+          revalidateOnReconnect: false,
+        }}
+      >
+        <SandboxSettingsPage />
+      </SWRConfig>
+    );
+
+    await user.click(screen.getByText("Add port"));
+    await user.type(screen.getByPlaceholderText("e.g. 3000"), "8990");
+    await user.type(screen.getByPlaceholderText("Label (optional)"), "API");
+    await user.click(screen.getByText("Save Settings"));
+
+    await waitFor(() => {
+      const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+      expect(putCall).toBeDefined();
+      const body = JSON.parse((putCall![1] as RequestInit).body as string);
+      expect(body.settings.defaults.tunnelPorts).toEqual([8990]);
+      expect(body.settings.defaults.tunnelPortLabels).toEqual({ "8990": "API" });
     });
   });
 

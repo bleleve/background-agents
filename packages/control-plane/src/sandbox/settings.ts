@@ -2,6 +2,7 @@ import {
   findSandboxPortConflict,
   MAX_AWS_ROLES,
   MAX_TUNNEL_PORTS,
+  normalizeTunnelPortLabels,
   type ConfiguredSandboxPort,
   type SandboxSettings,
 } from "@open-inspect/shared";
@@ -60,6 +61,18 @@ export function normalizeSandboxSettings(
 
   if (settings.tunnelPorts !== undefined) {
     normalizeTunnelPorts(settings.tunnelPorts, reject, result);
+  }
+
+  // Gross type errors are rejected here (throws on the write path); per-entry
+  // normalization/pruning against the surviving ports happens after collision
+  // resolution below (a dropped port must not keep its label).
+  if (
+    settings.tunnelPortLabels !== undefined &&
+    (typeof settings.tunnelPortLabels !== "object" ||
+      settings.tunnelPortLabels === null ||
+      Array.isArray(settings.tunnelPortLabels))
+  ) {
+    reject("tunnelPortLabels must be an object mapping port numbers to labels");
   }
 
   const codeServerPort = normalizePort(settings.codeServerPort, "codeServerPort", reject);
@@ -138,6 +151,16 @@ export function normalizeSandboxSettings(
   }
 
   checkPortCollisions(result, reject);
+
+  // Prune labels to the tunnel ports that actually survived (port validation and
+  // collision resolution above may have dropped some), so a label never outlives
+  // its port. Purely cosmetic, so per-entry issues are silently dropped rather
+  // than rejected.
+  const tunnelPortLabels = normalizeTunnelPortLabels(
+    settings.tunnelPortLabels,
+    result.tunnelPorts ?? []
+  );
+  if (tunnelPortLabels) result.tunnelPortLabels = tunnelPortLabels;
 
   return result;
 }

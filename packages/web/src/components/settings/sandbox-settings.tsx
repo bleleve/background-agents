@@ -17,6 +17,7 @@ import {
   findSandboxPortConflict,
   MAX_AWS_ROLES,
   MAX_BUILD_TIMEOUT_SECONDS,
+  MAX_TUNNEL_PORT_LABEL_LENGTH,
   MAX_TUNNEL_PORTS,
 } from "@open-inspect/shared";
 
@@ -52,6 +53,44 @@ function validateAwsRoleDraft(draft: AwsRoleDraft): string | null {
 interface AwsRoleDraft {
   profileName: string;
   roleArn: string;
+}
+
+/** One editable tunnel-port row: the port plus its optional display label. */
+interface TunnelPortDraft {
+  port: string;
+  label: string;
+}
+
+/**
+ * Normalize tunnel-port draft rows into the persisted shape. Trims and filters
+ * empty ports, dedupes, collects invalid ports for error reporting, and builds a
+ * port→label map from non-empty labels (capped at MAX_TUNNEL_PORT_LABEL_LENGTH,
+ * keyed only to valid ports). Shared by save and change-detection.
+ */
+function normalizeTunnelRows(input: TunnelPortDraft[]): {
+  ports: number[];
+  labels: Record<string, string>;
+  invalid: string[];
+} {
+  const seen = new Set<number>();
+  const ports: number[] = [];
+  const labels: Record<string, string> = {};
+  const invalid: string[] = [];
+  for (const row of input) {
+    const port = row.port.trim();
+    if (port === "") continue;
+    if (!isValidPort(port)) {
+      invalid.push(port);
+      continue;
+    }
+    const num = Number(port);
+    if (seen.has(num)) continue;
+    seen.add(num);
+    ports.push(num);
+    const label = row.label.trim().slice(0, MAX_TUNNEL_PORT_LABEL_LENGTH);
+    if (label !== "") labels[String(num)] = label;
+  }
+  return { ports, labels, invalid };
 }
 
 function isPositiveInteger(value: string): boolean {
@@ -142,6 +181,10 @@ function SandboxSettingsEditor({
     ? ((data as GlobalSettingsResponse)?.settings?.defaults?.tunnelPorts ?? [])
     : ((data as RepoSettingsResponse)?.settings?.tunnelPorts ?? []);
 
+  const currentTunnelPortLabels: Record<string, string> = isGlobal
+    ? ((data as GlobalSettingsResponse)?.settings?.defaults?.tunnelPortLabels ?? {})
+    : ((data as RepoSettingsResponse)?.settings?.tunnelPortLabels ?? {});
+
   const currentTerminalEnabled: boolean = isGlobal
     ? ((data as GlobalSettingsResponse)?.settings?.defaults?.terminalEnabled ?? false)
     : ((data as RepoSettingsResponse)?.settings?.terminalEnabled ?? false);
@@ -182,7 +225,7 @@ function SandboxSettingsEditor({
     "memoryMib"
   );
 
-  const [portRows, setPortRows] = useState<string[] | null>(null);
+  const [portRows, setPortRows] = useState<TunnelPortDraft[] | null>(null);
   const [terminalEnabled, setTerminalEnabled] = useState<boolean | null>(null);
   const [awsRoleDrafts, setAwsRoleDrafts] = useState<AwsRoleDraft[] | null>(null);
   const [codeServerPort, setCodeServerPort] = useState<string | null>(null);
@@ -200,7 +243,12 @@ function SandboxSettingsEditor({
   const resolvedTerminalEnabled = terminalEnabled ?? currentTerminalEnabled;
 
   // Use server state unless user is editing
-  const rows = portRows ?? currentPorts.map(String);
+  const rows: TunnelPortDraft[] =
+    portRows ??
+    currentPorts.map((port) => ({
+      port: String(port),
+      label: currentTunnelPortLabels[String(port)] ?? "",
+    }));
   const resolvedMaxConcurrentChildSessions =
     maxConcurrentChildSessions ?? String(currentMaxConcurrentChildSessions);
   const resolvedMaxTotalChildSessions =
@@ -224,12 +272,12 @@ function SandboxSettingsEditor({
 
   const handleAddRow = () => {
     if (rows.length >= MAX_TUNNEL_PORTS) return;
-    setPortRows([...rows, ""]);
+    setPortRows([...rows, { port: "", label: "" }]);
   };
 
-  const handleUpdateRow = (index: number, value: string) => {
+  const handleUpdateRow = (index: number, field: keyof TunnelPortDraft, value: string) => {
     const updated = [...rows];
-    updated[index] = value;
+    updated[index] = { ...updated[index], [field]: value };
     setPortRows(updated);
   };
 
@@ -253,21 +301,11 @@ function SandboxSettingsEditor({
     setAwsRoleDrafts(roleDrafts.filter((_, i) => i !== index));
   };
 
-  /** Trim, filter empty, validate, parse to number, dedupe. */
-  const normalizePorts = (input: string[]): { ports: number[]; invalid: string[] } => {
-    const nonEmpty = input.filter((r) => r.trim() !== "");
-    const invalid = nonEmpty.filter((r) => !isValidPort(r.trim()));
-    const ports = [
-      ...new Set(nonEmpty.filter((r) => isValidPort(r.trim())).map((r) => Number(r.trim()))),
-    ];
-    return { ports, invalid };
-  };
-
   const handleSave = useCallback(async () => {
     setError(null);
     setSuccess(false);
 
-    const { ports, invalid } = normalizePorts(rows);
+    const { ports, labels: tunnelPortLabels, invalid } = normalizeTunnelRows(rows);
     if (invalid.length > 0) {
       setError(`Invalid port numbers: ${invalid.join(", ")}`);
       return;
@@ -369,6 +407,7 @@ function SandboxSettingsEditor({
         : undefined;
       const settingsPayload: SandboxSettings = {
         tunnelPorts: ports,
+        tunnelPortLabels: Object.keys(tunnelPortLabels).length > 0 ? tunnelPortLabels : undefined,
         terminalEnabled: resolvedTerminalEnabled,
         awsRoles: validRoles.length > 0 ? validRoles : undefined,
       };
@@ -464,9 +503,19 @@ function SandboxSettingsEditor({
     globalDefaults?.terminalPort,
   ]);
 
+  const editedTunnels = portRows !== null ? normalizeTunnelRows(portRows) : null;
+  // Both sides run through normalizeTunnelRows so port/label key order aligns,
+  // making the JSON comparison order-stable.
+  const savedTunnels = normalizeTunnelRows(
+    currentPorts.map((port) => ({
+      port: String(port),
+      label: currentTunnelPortLabels[String(port)] ?? "",
+    }))
+  );
   const hasPortChanges =
-    portRows !== null &&
-    JSON.stringify(normalizePorts(portRows).ports) !== JSON.stringify(currentPorts);
+    editedTunnels !== null &&
+    JSON.stringify({ ports: editedTunnels.ports, labels: editedTunnels.labels }) !==
+      JSON.stringify({ ports: savedTunnels.ports, labels: savedTunnels.labels });
   const hasTerminalChange = terminalEnabled !== null && terminalEnabled !== currentTerminalEnabled;
   const hasAwsRolesChange =
     awsRoleDrafts !== null &&
@@ -601,20 +650,31 @@ function SandboxSettingsEditor({
         </div>
         <p className="text-xs text-muted-foreground mb-2">
           Expose additional ports from sandboxes via public tunnel URLs (e.g., dev server ports).
+          Add an optional label to name each preview link.
         </p>
         <div className="space-y-2 max-w-sm">
           {rows.length === 0 ? (
             <p className="text-sm text-muted-foreground py-2">No tunnel ports configured.</p>
           ) : (
-            rows.map((value, index) => (
+            rows.map((row, index) => (
               <div key={index} className="flex items-center gap-2">
                 <Input
                   type="text"
                   inputMode="numeric"
-                  value={value}
-                  onChange={(e) => handleUpdateRow(index, e.target.value)}
+                  value={row.port}
+                  onChange={(e) => handleUpdateRow(index, "port", e.target.value)}
                   placeholder="e.g. 3000"
+                  className="w-24"
+                  aria-label="Tunnel port"
+                />
+                <Input
+                  type="text"
+                  value={row.label}
+                  onChange={(e) => handleUpdateRow(index, "label", e.target.value)}
+                  placeholder="Label (optional)"
                   className="flex-1"
+                  maxLength={MAX_TUNNEL_PORT_LABEL_LENGTH}
+                  aria-label="Tunnel port label"
                 />
                 <Button
                   type="button"

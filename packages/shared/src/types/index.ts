@@ -549,6 +549,8 @@ export interface SessionState {
   codeServerUrl?: string | null;
   codeServerPassword?: string | null;
   tunnelUrls?: Record<string, string> | null;
+  /** Display-only labels for tunnel ports, keyed by port number as a string. */
+  tunnelPortLabels?: Record<string, string> | null;
   ttydUrl?: string | null;
   ttydToken?: string | null;
   planMode?: boolean;

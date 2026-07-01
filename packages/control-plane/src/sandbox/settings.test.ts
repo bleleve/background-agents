@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INTERNAL_TTYD_PORT } from "@open-inspect/shared";
+import { INTERNAL_TTYD_PORT, MAX_TUNNEL_PORT_LABEL_LENGTH } from "@open-inspect/shared";
 import { normalizeSandboxSettings, SandboxSettingsValidationError } from "./settings";
 
 class CustomSettingsValidationError extends Error {}
@@ -137,5 +137,67 @@ describe("normalizeSandboxSettings", () => {
     ).toEqual({
       tunnelPorts: [3000],
     });
+  });
+
+  it("keeps tunnel-port labels for configured ports, trimming and dropping empties", () => {
+    expect(
+      normalizeSandboxSettings({
+        tunnelPorts: [3000, 8080],
+        tunnelPortLabels: { "3000": "  API  ", "8080": "" },
+      })
+    ).toEqual({
+      tunnelPorts: [3000, 8080],
+      tunnelPortLabels: { "3000": "API" },
+    });
+  });
+
+  it("prunes labels whose port was dropped by validation or collision resolution", () => {
+    // 9000 collides with the code-server port and is dropped; its label must go too.
+    expect(
+      normalizeSandboxSettings(
+        {
+          codeServerPort: 9000,
+          tunnelPorts: [9000, 3000],
+          tunnelPortLabels: { "9000": "gone", "3000": "keep", "5173": "never-configured" },
+        },
+        { invalid: "omit" }
+      )
+    ).toEqual({
+      codeServerPort: 9000,
+      tunnelPorts: [3000],
+      tunnelPortLabels: { "3000": "keep" },
+    });
+  });
+
+  it("caps an over-long label at MAX_TUNNEL_PORT_LABEL_LENGTH", () => {
+    const long = "x".repeat(MAX_TUNNEL_PORT_LABEL_LENGTH + 10);
+    const result = normalizeSandboxSettings({
+      tunnelPorts: [3000],
+      tunnelPortLabels: { "3000": long },
+    });
+    expect(result.tunnelPortLabels).toEqual({
+      "3000": "x".repeat(MAX_TUNNEL_PORT_LABEL_LENGTH),
+    });
+  });
+
+  it("omits tunnelPortLabels entirely when nothing survives", () => {
+    expect(
+      normalizeSandboxSettings({ tunnelPorts: [3000], tunnelPortLabels: { "8080": "orphan" } })
+    ).toEqual({ tunnelPorts: [3000] });
+  });
+
+  it("throws for a non-object tunnelPortLabels in throw mode", () => {
+    expect(() =>
+      normalizeSandboxSettings({ tunnelPorts: [3000], tunnelPortLabels: ["nope"] })
+    ).toThrow(SandboxSettingsValidationError);
+  });
+
+  it("drops a non-object tunnelPortLabels in omit mode while keeping valid fields", () => {
+    expect(
+      normalizeSandboxSettings(
+        { tunnelPorts: [3000], tunnelPortLabels: "nope" },
+        { invalid: "omit" }
+      )
+    ).toEqual({ tunnelPorts: [3000] });
   });
 });

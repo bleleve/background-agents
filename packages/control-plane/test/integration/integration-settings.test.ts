@@ -542,7 +542,7 @@ describe("Integration settings API", () => {
         headers,
         body: JSON.stringify({
           settings: {
-            defaults: { tunnelPorts: [3000] },
+            defaults: { tunnelPorts: [3000], tunnelPortLabels: { "3000": "API" } },
           },
         }),
       });
@@ -554,10 +554,11 @@ describe("Integration settings API", () => {
       expect(getRes.status).toBe(200);
       const body = await getRes.json<{
         settings: {
-          defaults: { tunnelPorts: number[] };
+          defaults: { tunnelPorts: number[]; tunnelPortLabels?: Record<string, string> };
         };
       }>();
       expect(body.settings.defaults.tunnelPorts).toEqual([3000]);
+      expect(body.settings.defaults.tunnelPortLabels).toEqual({ "3000": "API" });
     });
 
     it("PUT /integration-settings/sandbox with invalid tunnelPorts returns 400", async () => {
