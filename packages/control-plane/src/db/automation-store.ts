@@ -691,6 +691,24 @@ export class AutomationStore {
       .run();
   }
 
+  /**
+   * Undo a single failure from the streak, floored at 0.
+   *
+   * Used when a run that was already marked `failed` is reconciled back to
+   * `completed` (a watchdog false-failed a healthy long turn that then finished).
+   * Unlike `resetConsecutiveFailures`, this only takes back the one spurious
+   * failure rather than clearing the whole streak, so unrelated later failures
+   * are not erased when an older run reconciles late.
+   */
+  async decrementConsecutiveFailures(automationId: string): Promise<void> {
+    await this.db
+      .prepare(
+        "UPDATE automations SET consecutive_failures = MAX(0, consecutive_failures - 1), updated_at = ? WHERE id = ? AND deleted_at IS NULL"
+      )
+      .bind(Date.now(), automationId)
+      .run();
+  }
+
   async autoPause(automationId: string): Promise<void> {
     const now = Date.now();
     await this.db

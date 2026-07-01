@@ -288,6 +288,30 @@ describe("AutomationStore (D1 integration)", () => {
     });
   });
 
+  // ─── Failure tracking ──────────────────────────────────────────────────────
+
+  describe("decrementConsecutiveFailures", () => {
+    it("takes back a single failure (used when a failed run reconciles to completed)", async () => {
+      const store = new AutomationStore(env.DB);
+      await store.create(makeAutomation({ id: "auto-d1", consecutive_failures: 3 }));
+
+      await store.decrementConsecutiveFailures("auto-d1");
+
+      const row = await store.getById("auto-d1");
+      expect(row!.consecutive_failures).toBe(2);
+    });
+
+    it("floors at 0 (never goes negative)", async () => {
+      const store = new AutomationStore(env.DB);
+      await store.create(makeAutomation({ id: "auto-d2", consecutive_failures: 0 }));
+
+      await store.decrementConsecutiveFailures("auto-d2");
+
+      const row = await store.getById("auto-d2");
+      expect(row!.consecutive_failures).toBe(0);
+    });
+  });
+
   // ─── Overdue queries ───────────────────────────────────────────────────────
 
   describe("overdue queries", () => {

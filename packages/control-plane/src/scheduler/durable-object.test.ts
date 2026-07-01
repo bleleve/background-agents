@@ -44,6 +44,7 @@ function createMockStore() {
     getTimedOutRunningRuns: vi.fn().mockResolvedValue([]),
     incrementConsecutiveFailures: vi.fn().mockResolvedValue(1),
     resetConsecutiveFailures: vi.fn().mockResolvedValue(undefined),
+    decrementConsecutiveFailures: vi.fn().mockResolvedValue(undefined),
     autoPause: vi.fn().mockResolvedValue(undefined),
     update: vi.fn().mockResolvedValue(undefined),
     bulkFailRuns: vi.fn().mockResolvedValue(undefined),
@@ -1021,18 +1022,18 @@ describe("SchedulerDO", () => {
       expect(mockStore.incrementConsecutiveFailures).toHaveBeenCalledWith("auto-1");
     });
 
-    it("ignores callback for already-completed run", async () => {
+    it("ignores callback for an already-completed run", async () => {
       mockStore.getRunById.mockResolvedValue({
         id: "run-1",
         automation_id: "auto-1",
-        status: "failed",
+        status: "completed",
         session_id: "sess-1",
         scheduled_at: now,
         started_at: now,
         completed_at: now,
         created_at: now,
         skip_reason: null,
-        failure_reason: "execution_timeout",
+        failure_reason: null,
       });
 
       const scheduler = createSchedulerDO();
@@ -1054,6 +1055,85 @@ describe("SchedulerDO", () => {
       expect(body.ignored).toBe(true);
       expect(mockStore.updateRun).not.toHaveBeenCalled();
       expect(mockStore.resetConsecutiveFailures).not.toHaveBeenCalled();
+    });
+
+    it("reconciles a failed run to completed on a late success callback", async () => {
+      // The watchdog false-failed a healthy long turn; the agent then completed
+      // (or was resumed). The late success must flip the run back to completed
+      // and take back the one spurious failure — not stay stuck "failed".
+      mockStore.getRunById.mockResolvedValue({
+        id: "run-1",
+        automation_id: "auto-1",
+        status: "failed",
+        session_id: "sess-1",
+        scheduled_at: now,
+        started_at: now,
+        completed_at: now,
+        created_at: now,
+        skip_reason: null,
+        failure_reason: "connecting_timeout",
+      });
+
+      const scheduler = createSchedulerDO();
+      const res = await scheduler.fetch(
+        new Request("http://internal/internal/run-complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            automationId: "auto-1",
+            runId: "run-1",
+            sessionId: "sess-1",
+            success: true,
+          }),
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json<{ ok: boolean; ignored?: boolean }>();
+      expect(body.ignored).toBeUndefined();
+      expect(mockStore.updateRun).toHaveBeenCalledWith("run-1", {
+        status: "completed",
+        completed_at: expect.any(Number),
+      });
+      // Undo the one spurious failure, not a full reset.
+      expect(mockStore.decrementConsecutiveFailures).toHaveBeenCalledWith("auto-1");
+      expect(mockStore.resetConsecutiveFailures).not.toHaveBeenCalled();
+    });
+
+    it("does NOT reconcile a failed run on a late failure callback", async () => {
+      mockStore.getRunById.mockResolvedValue({
+        id: "run-1",
+        automation_id: "auto-1",
+        status: "failed",
+        session_id: "sess-1",
+        scheduled_at: now,
+        started_at: now,
+        completed_at: now,
+        created_at: now,
+        skip_reason: null,
+        failure_reason: "connecting_timeout",
+      });
+
+      const scheduler = createSchedulerDO();
+      const res = await scheduler.fetch(
+        new Request("http://internal/internal/run-complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            automationId: "auto-1",
+            runId: "run-1",
+            sessionId: "sess-1",
+            success: false,
+            error: "another failure",
+          }),
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json<{ ok: boolean; ignored: boolean }>();
+      expect(body.ignored).toBe(true);
+      expect(mockStore.updateRun).not.toHaveBeenCalled();
+      expect(mockStore.decrementConsecutiveFailures).not.toHaveBeenCalled();
     });
 
     it("auto-pauses after run-complete pushes failures to 3", async () => {
