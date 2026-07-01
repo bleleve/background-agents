@@ -25,6 +25,7 @@ import {
   evaluateHeartbeatHealth,
   evaluateConnectingTimeout,
   evaluateWarmDecision,
+  inFlightSilenceMs,
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   DEFAULT_SPAWN_CONFIG,
   DEFAULT_INACTIVITY_CONFIG,
@@ -1195,22 +1196,30 @@ export class SandboxLifecycleManager {
       // While a turn is in flight, a sandbox that fell back to connecting/
       // spawning is a slow restore/respawn, not a death: the agent has already
       // run and is likely about to complete. Defer the terminal decision to the
-      // in-flight silence backstop (measured on the same last-sign-of-life
-      // clock) instead of failing on the short reconnect window — failing here
-      // would terminate a turn that then completes, leaving the timeline
-      // ("Execution complete") disagreeing with the status chip ("Failed"). The
-      // primary death signal during a restore is spawn_failed (handled above on
-      // a terminal "failed" status); this only defers the silent-provider case.
+      // in-flight silence backstop instead of failing on the short reconnect
+      // window — failing here would terminate a turn that then completes,
+      // leaving the timeline ("Execution complete") disagreeing with the status
+      // chip ("Failed"). The backstop's silence clock folds in agent activity
+      // (last_activity), not just last_heartbeat: an agent streaming tool calls
+      // over committed invocations while the heartbeat has lapsed is alive and
+      // must not be force-failed. The primary death signal during a restore is
+      // spawn_failed (handled above on a terminal "failed" status); this only
+      // defers the silent-provider case.
       // getIsProcessing() is false on a cold boot (the triggering prompt is
       // still "pending"), so a first-connect that never lands keeps its
-      // first-connect terminal — nothing is in flight to lose.
+      // first-connect terminal — nothing is in flight to lose. A null silence
+      // (no sign of life at all) also fails safe rather than deferring.
+      const silenceMs = inFlightSilenceMs(sandbox.last_heartbeat, sandbox.last_activity, now);
       if (
         this.storage.getIsProcessing() &&
-        connectingResult.elapsedMs < this.config.inFlightSilence.timeoutMs
+        silenceMs !== null &&
+        silenceMs < this.config.inFlightSilence.timeoutMs
       ) {
         this.log.info("Connecting timeout deferred: turn in flight, awaiting reconnect", {
           event: "sandbox.connecting_timeout_deferred",
           elapsed_ms: connectingResult.elapsedMs,
+          in_flight_silence_ms: silenceMs,
+          last_activity: sandbox.last_activity,
           silence_backstop_ms: this.config.inFlightSilence.timeoutMs,
         });
         await this.armConnectingTimeout("reconnect", now);
@@ -1291,17 +1300,22 @@ export class SandboxLifecycleManager {
       // turn — until the silence reaches the backstop. A real completion that
       // arrives before then lands on a still-"processing" message and completes
       // normally, so the status never flips failed→completed.
+      // Fold agent activity (last_activity) into the silence clock, not just
+      // last_heartbeat: an agent emitting step/tool events while the bridge
+      // heartbeat has lapsed is alive, so its in-flight turn must not be
+      // force-failed. A null silence (no sign of life at all) fails *safe* —
+      // fall through to the terminal path rather than deferring forever.
+      const silenceMs = inFlightSilenceMs(sandbox.last_heartbeat, sandbox.last_activity, now);
       if (
         this.storage.getIsProcessing() &&
-        // ?? Infinity (not 0) so a missing ageMs fails *safe*: fall through to
-        // the terminal path rather than deferring forever. Unreachable in
-        // practice (evaluateHeartbeatHealth only sets isStale with ageMs set),
-        // but the fail-safe direction matters if that ever changes.
-        (heartbeatHealth.ageMs ?? Infinity) < this.config.inFlightSilence.timeoutMs
+        silenceMs !== null &&
+        silenceMs < this.config.inFlightSilence.timeoutMs
       ) {
         this.log.info("Heartbeat stale deferred: turn in flight, awaiting recovery", {
           event: "sandbox.heartbeat_stale_deferred",
           last_heartbeat_ms: heartbeatHealth.ageMs ?? 0,
+          in_flight_silence_ms: silenceMs,
+          last_activity: sandbox.last_activity,
           silence_backstop_ms: this.config.inFlightSilence.timeoutMs,
         });
         await this.alarmScheduler.scheduleAlarm(now + this.config.heartbeat.timeoutMs);
