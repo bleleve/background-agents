@@ -148,7 +148,6 @@ class SandboxSupervisor:
     SIDECAR_TIMEOUT_SECONDS = 5
     LANGFUSE_PLUGIN_NAME = "opencode-plugin-langfuse"
     CODEX_AUTH_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/codex-auth-plugin.js"
-    SKILL_SPAN_PLUGIN_SOURCE_PATH = "/app/sandbox_runtime/plugins/skill-span-plugin.js"
     MCP_PACKAGE_INSTALL_TIMEOUT_SECONDS = 180
     # How often to ping the control plane while booting so a long setup.sh
     # doesn't trip the connecting-timeout watchdog. Must stay well under the
@@ -1013,15 +1012,6 @@ class SandboxSupervisor:
         if codex_source.exists() and os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN"):
             plugins_to_copy.append(
                 (codex_source, codex_source.name, "openai_oauth.plugin_deployed")
-            )
-
-        skill_span_source = Path(self.SKILL_SPAN_PLUGIN_SOURCE_PATH)
-        has_langfuse = bool(os.environ.get("LANGFUSE_PUBLIC_KEY")) and bool(
-            os.environ.get("LANGFUSE_SECRET_KEY")
-        )
-        if skill_span_source.exists() and has_langfuse:
-            plugins_to_copy.append(
-                (skill_span_source, skill_span_source.name, "langfuse.skill_span_plugin_deployed")
             )
 
         if not plugins_to_copy:
