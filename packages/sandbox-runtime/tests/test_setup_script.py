@@ -207,7 +207,7 @@ class TestSetupScriptTimeout:
         mock_killpg.assert_called_once_with(4321, signal.SIGKILL)
         fake_proc.wait.assert_awaited_once()
 
-    async def test_default_timeout_1800(self, tmp_path):
+    async def test_default_timeout_when_env_unset(self, tmp_path):
         sup = _make_supervisor(tmp_path)
         _create_setup_script(sup.repo_path)
         fake_proc = _fake_process(returncode=0, stdout=b"ok\n")
@@ -229,7 +229,7 @@ class TestSetupScriptTimeout:
             os.environ.pop("SETUP_TIMEOUT_SECONDS", None)
             await sup.run_setup_script()
 
-        assert captured_timeout["value"] == 1800
+        assert captured_timeout["value"] == sup.DEFAULT_SETUP_TIMEOUT_SECONDS
 
     async def test_custom_timeout_from_env(self, tmp_path):
         sup = _make_supervisor(tmp_path)
@@ -272,7 +272,7 @@ class TestSetupScriptTimeout:
             result = await sup.run_setup_script()
 
         assert result is True
-        assert captured_timeout["value"] == 1800
+        assert captured_timeout["value"] == sup.DEFAULT_SETUP_TIMEOUT_SECONDS
 
 
 # ---------------------------------------------------------------------------

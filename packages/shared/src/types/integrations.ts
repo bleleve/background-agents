@@ -160,7 +160,7 @@ export const DEFAULT_MAX_TOTAL_CHILD_SESSIONS = 15;
  * Mirrors `DEFAULT_BUILD_TIMEOUT_SECONDS` in the Modal data plane
  * (`packages/modal-infra/src/sandbox/manager.py`).
  */
-export const DEFAULT_BUILD_TIMEOUT_SECONDS = 1800;
+export const DEFAULT_BUILD_TIMEOUT_SECONDS = 2700;
 
 /**
  * Maximum configurable repo-image build timeout, in seconds. The Modal

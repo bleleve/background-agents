@@ -69,7 +69,9 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v95: merge upstream "Remove repo-image fallback tokens" (#722); SCM credential
 #      helper backed by control plane remains the sole credential path.
 # v96: add ripgrep to apt packages
-CACHE_BUSTER = "v96-add-ripgrep"
+# v97: raise setup.sh timeout to 45 min (DEFAULT_SETUP_TIMEOUT_SECONDS) so image
+#      builds match the 45-min build-sandbox lifetime
+CACHE_BUSTER = "v97-setup-timeout-45min"
 
 # Base image with all development tools
 base_image = (

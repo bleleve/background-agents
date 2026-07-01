@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_BUILD_TIMEOUT_SECONDS } from "@open-inspect/shared";
 import { VercelSandboxProvider, type VercelProviderConfig } from "./provider";
 import type { CreateSandboxConfig, RestoreConfig } from "../../provider";
 import type {
@@ -564,7 +565,7 @@ describe("VercelSandboxProvider", () => {
     expect(createCall).toEqual(
       expect.objectContaining({
         runtime: "node24",
-        timeoutMs: 1800 * 1000,
+        timeoutMs: DEFAULT_BUILD_TIMEOUT_SECONDS * 1000,
         sourceSnapshotId: "base-snapshot-1",
         tags: {
           openinspect_framework: "open-inspect",
