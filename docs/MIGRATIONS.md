@@ -108,9 +108,9 @@ not conflict on fresh environments where the upstream rebuild runs first.
 See `terraform/d1/migrations/fork/20260701130444_restore_fork_session_columns_after_0029.sql` for a
 concrete example: upstream `0029_allow_no_repository_context.sql` rebuilt `sessions`, dropping the
 three fork-added columns (`pr_number`, `sandbox_status`, `is_processing`). See also
-`terraform/d1/migrations/fork/20260702090605_restore_automations_last_run_at_after_0029.sql`:
-the same upstream migration also rebuilt `automations`, dropping the fork-added `last_run_at`
-column and its index.
+`terraform/d1/migrations/fork/20260702090605_restore_automations_last_run_at_after_0029.sql`: the
+same upstream migration also rebuilt `automations`, dropping the fork-added `last_run_at` column and
+its index.
 
 ## Durable Object migrations (separate system)
 
