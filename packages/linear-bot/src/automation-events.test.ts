@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handleLinearIssueEvent } from "./automation-events";
+import { postIssueComment } from "./utils/linear-client";
 import type { LinearWebhookPayload } from "@open-inspect/shared";
 import type { Env } from "./types";
 
@@ -8,6 +9,10 @@ import type { Env } from "./types";
 // Mock the internal auth helper so tests don't need Web Crypto
 vi.mock("./utils/internal", () => ({
   buildInternalAuthHeaders: vi.fn().mockResolvedValue({ Authorization: "Bearer test-token" }),
+}));
+
+vi.mock("./utils/linear-client", () => ({
+  postIssueComment: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 // ─── Fake KVNamespace ─────────────────────────────────────────────────────────
@@ -184,6 +189,62 @@ describe("handleLinearIssueEvent", () => {
         2,
         "https://internal/internal/linear-event",
         expect.objectContaining({ method: "POST" })
+      );
+    });
+
+    it("posts a Linear comment with the wx preview URL when the control-plane response includes previewUrls.wx", async () => {
+      const updatePayload: LinearWebhookPayload = {
+        ...baseCreatePayload,
+        action: "update",
+        updatedFrom: { labels: baseCreatePayload.data.labels },
+        data: {
+          ...baseCreatePayload.data,
+          labels: [
+            ...(baseCreatePayload.data.labels ?? []),
+            { id: "label-preview", name: "Preview", color: "#00ff00" },
+          ],
+        },
+      };
+      const kv = createFakeKV({
+        "config:project-repos": JSON.stringify(projectRepoMapping),
+        "issue:issue-abc": JSON.stringify({
+          sessionId: "session-existing",
+          issueId: "issue-abc",
+          issueIdentifier: "ENG-123",
+          repoOwner: "acme-org",
+          repoName: "my-app",
+          model: "test-model",
+          createdAt: Date.now(),
+        }),
+      });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              previewUrls: { wx: "https://wx-session-existing--testorg.r1.rwx.run/" },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          )
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+      const env = {
+        ...makeEnv(kv, { fetch: fetchMock } as unknown as Fetcher),
+        PREVIEW_LABEL_ENABLED: "true",
+        LINEAR_API_KEY: "lin_key_test",
+      } as unknown as Env;
+
+      await handleLinearIssueEvent(updatePayload, env);
+
+      expect(vi.mocked(postIssueComment)).toHaveBeenCalledWith(
+        "lin_key_test",
+        "issue-abc",
+        "[wx preview](https://wx-session-existing--testorg.r1.rwx.run/)"
       );
     });
 

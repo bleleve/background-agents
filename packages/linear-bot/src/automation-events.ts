@@ -72,11 +72,11 @@ async function enablePreviewForExistingSession(
         issue_identifier: payload.data.identifier,
         session_id: existingSession.sessionId,
       });
-      if (result.previewUrls?.hire && env.LINEAR_API_KEY) {
+      if (result.previewUrls?.wx && env.LINEAR_API_KEY) {
         await postIssueComment(
           env.LINEAR_API_KEY,
           payload.data.id,
-          `[hire preview](${result.previewUrls.hire})`
+          `[wx preview](${result.previewUrls.wx})`
         );
       }
     }
