@@ -110,7 +110,7 @@ concrete example: upstream `0029_allow_no_repository_context.sql` rebuilt `sessi
 three fork-added columns (`pr_number`, `sandbox_status`, `is_processing`). See also
 `terraform/d1/migrations/fork/20260702090605_restore_automations_last_run_at_after_0029.sql`: the
 same upstream migration also rebuilt `automations`, dropping the fork-added `last_run_at` column and
-its index.
+two indexes (`idx_automations_last_run_at` and `idx_automations_user_id`).
 
 ## Durable Object migrations (separate system)
 
