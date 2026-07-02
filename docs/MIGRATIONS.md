@@ -109,8 +109,9 @@ See `terraform/d1/migrations/fork/20260701130444_restore_fork_session_columns_af
 concrete example: upstream `0029_allow_no_repository_context.sql` rebuilt `sessions`, dropping the
 three fork-added columns (`pr_number`, `sandbox_status`, `is_processing`). See also
 `terraform/d1/migrations/fork/20260702090605_restore_automations_last_run_at_after_0029.sql`: the
-same upstream migration also rebuilt `automations`, dropping the fork-added `last_run_at` column and
-two indexes (`idx_automations_last_run_at` and `idx_automations_user_id`).
+same upstream migration also rebuilt `automations`, dropping the fork-added `last_run_at` column,
+its index (`idx_automations_last_run_at`), and the `idx_automations_user_id` index (originally from
+`fork/20260603204302_backfill_automation_user_ids.sql`).
 
 ## Durable Object migrations (separate system)
 
