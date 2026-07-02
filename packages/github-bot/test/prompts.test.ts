@@ -305,6 +305,17 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("never as a separate comment");
   });
 
+  it("keeps inline suggestions code-only — no inline comments on doc/prose files", () => {
+    const prompt = buildCodeReviewPrompt(baseParams);
+    // Instruction step 5 scopes inline feedback to code and routes docs to doc-sentinel.
+    expect(prompt).toContain("Inline suggestions are for code only");
+    // Eligibility gate hard-stops before writing any replacement for a doc/prose file.
+    expect(prompt).toContain("the target file must be code");
+    expect(prompt).toContain(
+      "Never open an inline comment (applyable or prose) on a documentation/prose file"
+    );
+  });
+
   it("delegates test coverage to pr-test-sentinel, scoped to must-test changes only", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
     expect(prompt).toContain("pr-test-sentinel");

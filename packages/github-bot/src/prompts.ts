@@ -65,11 +65,12 @@ A confidently-wrong inline comment costs reviewer time and erodes trust over man
 // quality changes to specific prompt versions via the review_suggestions D1 table.
 // The control-plane stamps this value against each recorded suggestion by looking
 // up the most recent github-bot session for the PR at record time.
-export const INLINE_SUGGESTION_PROMPT_VERSION = "v3";
+export const INLINE_SUGGESTION_PROMPT_VERSION = "v4";
 
 // Gate that every finding must pass BEFORE emitting an applyable ```suggestion block.
 // Evaluated step-by-step; a single failure → prose (or illustrative fence) instead.
 const SUGGESTION_APPLICABILITY_GATE = `**ELIGIBILITY GATE — evaluate BEFORE writing any replacement code.**
+**Hard stop first:** the target file must be code. Never open an inline comment (applyable or prose) on a documentation/prose file (\`*.md\`, \`*.mdx\`, \`docs/**\`) or a hunk that changes only comments/docstrings — send any such finding to \`pr-doc-sentinel\` → the **Docs drift** verdict line instead.
 An applyable \`\`\`suggestion block only when ALL of these hold:
 (a) The fix spans a **single contiguous range** in **one file** from the PR diff (RIGHT side). No second location needs a change for the fix to be complete.
 (b) No new symbol, import, method, or type is introduced that does not already exist at the anchor location. The replacement must be valid in isolation — it cannot call a function not yet imported there.
@@ -435,7 +436,7 @@ ${diffStep1}
    When the diff changes public or exported APIs, config, flags, CLI/commands, or documentation files, delegate a documentation-staleness pass to the \`pr-doc-sentinel\` subagent (read-only; it returns findings, it does not post). Fold anything it raises into the **Docs drift** line of the verdict — never as a separate comment.
    When the diff adds or modifies source code, delegate a test-coverage pass to the \`pr-test-sentinel\` subagent (read-only static analysis — it does NOT run the test suite and does not post). It flags only changes that *should* be tested but ship without one; most PRs come back with \`No test-worthy changes.\` and need no action. Fold any gaps it returns into the **Tests coverage** line of the verdict and apply the coverage floor to the risk badge — never as a separate comment. Do NOT alert just because a PR adds no tests.
 ${reviewInstruction}
-5. Leave feedback only as inline suggestion comments on specific changed files/lines when you find an issue worth calling out.
+5. Leave feedback only as inline suggestion comments on specific changed files/lines when you find an issue worth calling out. **Inline suggestions are for code only — never post one on a documentation or prose file** (\`*.md\`, \`*.mdx\`, \`docs/**\`, or a changed hunk that is only comments/docstrings). Documentation inaccuracies and staleness are the exclusive job of \`pr-doc-sentinel\`, which folds them into the **Docs drift** line of the verdict — routing a doc finding there instead of posting it inline avoids a badge-carrying suggestion that duplicates the Docs drift line.
 6. For each inline suggestion comment, use this flow:
 
 ${SUGGESTION_QUALITY_BAR}
