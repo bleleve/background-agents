@@ -629,6 +629,20 @@ describe("GitLabSourceControlProvider", () => {
       expect(spec.force).toBe(false);
     });
 
+    it("normalizes pushed branch names to lowercase", () => {
+      const provider = new GitLabSourceControlProvider(fakeConfig);
+      const spec = provider.buildGitPushSpec({
+        owner: "acme",
+        name: "web",
+        sourceRef: "HEAD",
+        targetBranch: "Feature/Mixed-Case",
+        auth: { authType: "pat", token: "glpat-secret" },
+      });
+
+      expect(spec.targetBranch).toBe("feature/mixed-case");
+      expect(spec.refspec).toBe("HEAD:refs/heads/feature/mixed-case");
+    });
+
     it("supports force push", () => {
       const provider = new GitLabSourceControlProvider(fakeConfig);
       const spec = provider.buildGitPushSpec({

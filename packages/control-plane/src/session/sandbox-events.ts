@@ -438,6 +438,7 @@ export class SessionSandboxEventProcessor {
     }
 
     const normalizedBranch = this.normalizeBranchName(branchName);
+    const normalizedPushSpec = this.normalizePushSpec(pushSpec, normalizedBranch);
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     const pushPromise = new Promise<void>((resolve, reject) => {
@@ -451,19 +452,19 @@ export class SessionSandboxEventProcessor {
       }, 360000);
     });
 
-    this.deps.log.info("Sending push command", { branch_name: branchName });
+    this.deps.log.info("Sending push command", { branch_name: normalizedBranch });
     this.deps.wsManager.send(sandboxWs, {
       type: "push",
-      pushSpec,
+      pushSpec: normalizedPushSpec,
     });
 
     try {
       await pushPromise;
-      this.deps.log.info("Push completed successfully", { branch_name: branchName });
+      this.deps.log.info("Push completed successfully", { branch_name: normalizedBranch });
       return { success: true };
     } catch (pushError) {
       this.deps.log.error("Push failed", {
-        branch_name: branchName,
+        branch_name: normalizedBranch,
         error: pushError instanceof Error ? pushError : String(pushError),
       });
       return { success: false, error: `Failed to push branch: ${pushError}` };
@@ -546,6 +547,27 @@ export class SessionSandboxEventProcessor {
 
   private normalizeBranchName(name: string): string {
     return name.trim().toLowerCase();
+  }
+
+  private normalizePushSpec(pushSpec: GitPushSpec, normalizedBranch: string): GitPushSpec {
+    const rawRefspec = pushSpec.refspec.trim();
+    const separatorIndex = rawRefspec.indexOf(":");
+    const sourceRef =
+      separatorIndex >= 0 ? rawRefspec.slice(0, separatorIndex).trim() : rawRefspec;
+
+    if (!sourceRef) {
+      return {
+        ...pushSpec,
+        refspec: rawRefspec,
+        targetBranch: normalizedBranch,
+      };
+    }
+
+    return {
+      ...pushSpec,
+      refspec: `${sourceRef}:refs/heads/${normalizedBranch}`,
+      targetBranch: normalizedBranch,
+    };
   }
 
   private persistPreviewDispatchArtifacts(result: PreviewDispatchResult | void): void {

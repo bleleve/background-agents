@@ -746,6 +746,38 @@ describe("SessionSandboxEventProcessor", () => {
     );
   });
 
+  it("normalizes push commands before sending them to the sandbox", async () => {
+    const h = createProcessor();
+    const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+
+    const pushPromise = h.processor.pushBranchToRemote("Feature/Mixed-Case", {
+      remoteUrl: "https://token@example.com/repo.git",
+      redactedRemoteUrl: "https://***@example.com/repo.git",
+      refspec: "HEAD:refs/heads/Feature/Mixed-Case",
+      targetBranch: "Feature/Mixed-Case",
+      force: false,
+    });
+
+    await h.processor.processSandboxEvent({
+      type: "push_complete",
+      branchName: "feature/mixed-case",
+      timestamp: 1000,
+    });
+
+    await expect(pushPromise).resolves.toEqual({ success: true });
+    expect(h.wsManager.send).toHaveBeenCalledWith(
+      sandboxWs,
+      expect.objectContaining({
+        type: "push",
+        pushSpec: expect.objectContaining({
+          refspec: "HEAD:refs/heads/feature/mixed-case",
+          targetBranch: "feature/mixed-case",
+        }),
+      })
+    );
+  });
+
   describe("activity tracking for intermediate events", () => {
     it("resets activity timer on tool_call", async () => {
       const h = createProcessor();

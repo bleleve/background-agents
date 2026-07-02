@@ -3,7 +3,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { Image, Snapshots } from "@opencomputer/sdk/node";
 
-const OPENCODE_VERSION = "1.14.41";
+const OPENCODE_VERSION = "1.17.13";
 const CODE_SERVER_VERSION = "4.109.5";
 const PYTHON_VERSION = "3.12";
 const AGENT_BROWSER_VERSION = "0.21.2";

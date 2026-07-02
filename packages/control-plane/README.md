@@ -343,7 +343,7 @@ Optional variables:
 - `RWX_BASE_URL` - Override the RWX API base URL (default: `https://cloud.rwx.com/mint/api`). Useful
   for testing against a non-production RWX environment.
 - `RWX_ORG_SLUG` - RWX organization slug. When set, preview responses include per-product frontend
-  URLs (e.g. `hire-<slug>--<org>.r1.rwx.run`) alongside the run URL.
+  URLs (e.g. `wx-<slug>--<org>.r1.rwx.run`) alongside the run URL.
 
 Sandbox lifecycle tuning knobs (all in milliseconds):
 

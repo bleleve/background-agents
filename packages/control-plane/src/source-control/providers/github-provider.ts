@@ -5,7 +5,7 @@
  * wrapping existing GitHub API functions.
  */
 
-import type { InstallationRepository } from "@open-inspect/shared";
+import { normalizeBranchName, type InstallationRepository } from "@open-inspect/shared";
 import type {
   SourceControlProvider,
   SourceControlAuthContext,
@@ -371,14 +371,15 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
 
   buildGitPushSpec(config: BuildGitPushSpecConfig): GitPushSpec {
     const force = config.force ?? false;
+    const targetBranch = normalizeBranchName(config.targetBranch);
     const remoteUrl = `https://x-access-token:${config.auth.token}@github.com/${config.owner}/${config.name}.git`;
     const redactedRemoteUrl = `https://x-access-token:<redacted>@github.com/${config.owner}/${config.name}.git`;
 
     return {
       remoteUrl,
       redactedRemoteUrl,
-      refspec: `${config.sourceRef}:refs/heads/${config.targetBranch}`,
-      targetBranch: config.targetBranch,
+      refspec: `${config.sourceRef}:refs/heads/${targetBranch}`,
+      targetBranch,
       force,
     };
   }

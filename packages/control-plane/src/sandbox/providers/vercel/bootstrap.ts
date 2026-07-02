@@ -15,7 +15,7 @@ export function buildVercelBootstrapScript(params: { runtimeExtractDir?: string 
   return `
 set -euo pipefail
 
-OPENCODE_VERSION="1.14.41"
+OPENCODE_VERSION="1.17.13"
 CODE_SERVER_VERSION="4.109.5"
 AGENT_BROWSER_VERSION="0.21.2"
 PLAYWRIGHT_VERSION="1.61.0"

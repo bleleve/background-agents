@@ -238,6 +238,23 @@ describe("GitHubSourceControlProvider", () => {
     expect(spec.force).toBe(false);
   });
 
+  it("normalizes pushed branch names to lowercase", () => {
+    const provider = new GitHubSourceControlProvider();
+    const spec = provider.buildGitPushSpec({
+      owner: "acme",
+      name: "web",
+      sourceRef: "HEAD",
+      targetBranch: "Feature/Mixed-Case",
+      auth: {
+        authType: "app",
+        token: "token-789",
+      },
+    });
+
+    expect(spec.targetBranch).toBe("feature/mixed-case");
+    expect(spec.refspec).toBe("HEAD:refs/heads/feature/mixed-case");
+  });
+
   describe("userAgent threading", () => {
     it("forwards configured userAgent to listInstallationRepositories", async () => {
       mockListInstallationRepositories.mockResolvedValueOnce({
