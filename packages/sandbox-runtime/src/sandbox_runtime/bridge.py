@@ -247,6 +247,23 @@ class AgentBridge:
 
         return re.sub(r"(https?://)([^/\s@]+)@", r"\1***@", redacted_stderr)
 
+    @staticmethod
+    def _normalize_branch_name(branch_name: str) -> str:
+        return branch_name.strip().lower()
+
+    @staticmethod
+    def _normalize_push_refspec(refspec: str, branch_name: str) -> str:
+        """Force push specs to create/update lowercase remote branch refs."""
+        raw_refspec = refspec.strip()
+        if not raw_refspec or not branch_name:
+            return raw_refspec
+
+        source_ref, separator, _destination_ref = raw_refspec.partition(":")
+        if not separator or not source_ref.strip():
+            return raw_refspec
+
+        return f"{source_ref.strip()}:refs/heads/{branch_name}"
+
     async def run(self) -> None:
         """Main bridge loop with reconnection handling.
 
@@ -705,7 +722,8 @@ class AgentBridge:
         "<system_instruction>\n"
         "After completing all changes for this turn, push your commits to the remote "
         "branch before finishing. Use git push so the latest work is immediately "
-        "available on the remote.\n"
+        "available on the remote. If you create or choose a branch to push, its "
+        "name must be all lowercase.\n"
         "</system_instruction>"
     )
 
@@ -1958,7 +1976,8 @@ class AgentBridge:
     async def _handle_push(self, cmd: dict[str, Any]) -> None:
         """Handle push command using provider-generated push spec."""
         push_spec = cmd.get("pushSpec") if isinstance(cmd.get("pushSpec"), dict) else None
-        branch_name = str(push_spec.get("targetBranch", "")).strip() if push_spec else ""
+        raw_branch_name = str(push_spec.get("targetBranch", "")).strip() if push_spec else ""
+        branch_name = self._normalize_branch_name(raw_branch_name)
 
         self.log.info(
             "git.push_start",
@@ -2008,10 +2027,20 @@ class AgentBridge:
                 )
                 return
 
-            refspec = str(push_spec.get("refspec", "")).strip()
+            raw_refspec = str(push_spec.get("refspec", "")).strip()
+            refspec = self._normalize_push_refspec(raw_refspec, branch_name)
             push_url = str(push_spec.get("remoteUrl", "")).strip()
             redacted_push_url = str(push_spec.get("redactedRemoteUrl", "")).strip()
             force_push = bool(push_spec.get("force", False))
+
+            if raw_branch_name != branch_name or raw_refspec != refspec:
+                self.log.info(
+                    "git.push_normalized",
+                    original_branch_name=raw_branch_name,
+                    branch_name=branch_name,
+                    original_refspec=raw_refspec,
+                    refspec=refspec,
+                )
 
             if not refspec or not push_url:
                 self.log.warn("git.push_error", reason="invalid_push_spec")

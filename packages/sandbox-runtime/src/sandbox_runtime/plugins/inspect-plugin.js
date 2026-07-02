@@ -66,7 +66,7 @@ async function getCurrentBranch() {
 export default tool({
   name: "create-pull-request",
   description:
-    "Create a pull request for the committed changes. DO NOT use 'gh' CLI - use this tool instead. It handles git push and PR creation automatically with pre-configured authentication. You MUST provide a descriptive title and body that explain what changes were made. Call this after committing your changes.",
+    "Create a pull request for the committed changes. DO NOT use 'gh' CLI - use this tool instead. It handles git push and PR creation automatically with pre-configured authentication, and remote branch names are normalized to lowercase. You MUST provide a descriptive title and body that explain what changes were made. Call this after committing your changes.",
   args: {
     title: z
       .string()

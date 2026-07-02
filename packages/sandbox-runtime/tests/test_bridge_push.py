@@ -70,6 +70,30 @@ async def test_handle_push_sends_push_complete_on_success(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_handle_push_normalizes_mixed_case_target_branch(tmp_path: Path):
+    bridge = _create_bridge(tmp_path)
+    bridge._send_event = AsyncMock()
+    bridge._get_head_sha = AsyncMock(return_value="abc123")
+    process = _fake_process(returncode=0)
+    command = _push_command()
+    command["pushSpec"]["targetBranch"] = "Feature/Mixed-Case"
+    command["pushSpec"]["refspec"] = "HEAD:refs/heads/Feature/Mixed-Case"
+    create_subprocess_exec = AsyncMock(return_value=process)
+
+    with patch("sandbox_runtime.bridge.asyncio.create_subprocess_exec", create_subprocess_exec):
+        await bridge._handle_push(command)
+
+    create_subprocess_exec.assert_awaited_once()
+    assert create_subprocess_exec.await_args is not None
+    assert "HEAD:refs/heads/feature/mixed-case" in create_subprocess_exec.await_args.args
+
+    bridge._send_event.assert_awaited_once()
+    event = bridge._send_event.await_args.args[0]
+    assert event["type"] == "push_complete"
+    assert event["branchName"] == "feature/mixed-case"
+
+
+@pytest.mark.asyncio
 async def test_handle_push_sends_redacted_stderr_on_nonzero_exit(tmp_path: Path):
     bridge = _create_bridge(tmp_path)
     bridge._send_event = AsyncMock()

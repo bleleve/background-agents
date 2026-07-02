@@ -5,7 +5,7 @@
  * using Personal Access Tokens (PAT) for authentication.
  */
 
-import type { InstallationRepository } from "@open-inspect/shared";
+import { normalizeBranchName, type InstallationRepository } from "@open-inspect/shared";
 import type {
   SourceControlProvider,
   SourceControlAuthContext,
@@ -391,6 +391,7 @@ export class GitLabSourceControlProvider implements SourceControlProvider {
 
   buildGitPushSpec(config: BuildGitPushSpecConfig): GitPushSpec {
     const force = config.force ?? false;
+    const targetBranch = normalizeBranchName(config.targetBranch);
     // GitLab project paths are always URL-safe (alphanumeric, hyphens, underscores, dots).
     // No percent-encoding — git clients expect literal path segments in remote URLs.
     const remoteUrl = `https://oauth2:${config.auth.token}@gitlab.com/${config.owner}/${config.name}.git`;
@@ -399,8 +400,8 @@ export class GitLabSourceControlProvider implements SourceControlProvider {
     return {
       remoteUrl,
       redactedRemoteUrl,
-      refspec: `${config.sourceRef}:refs/heads/${config.targetBranch}`,
-      targetBranch: config.targetBranch,
+      refspec: `${config.sourceRef}:refs/heads/${targetBranch}`,
+      targetBranch,
       force,
     };
   }
