@@ -64,10 +64,16 @@ function parseCommentMaxLength(raw: string | undefined): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-export function buildPromptContextPrompt(promptContext: string): string {
+export function buildPromptContextPrompt(promptContext: string, labelNames?: string[]): string {
+  // Linear's promptContext is opaque and may not surface custom labels (e.g. the
+  // FTN Product label). Restate them explicitly so a repo's app-detection skill can
+  // key off the product label. Mirrors the `**Labels:**` line in buildPrompt.
+  const labelsLine =
+    labelNames && labelNames.length > 0 ? [`**Labels:** ${labelNames.join(", ")}`, ""] : [];
   return [
     "Create a pull request when done.",
     "",
+    ...labelsLine,
     "Linear provided additional issue context below.",
     "",
     buildUntrustedUserContentBlock({
@@ -969,7 +975,7 @@ async function handleNewSession(
   const commentMaxLength = parseCommentMaxLength(env.LINEAR_COMMENT_MAX_LENGTH);
 
   let prompt = webhook.agentSession.promptContext
-    ? buildPromptContextPrompt(webhook.agentSession.promptContext)
+    ? buildPromptContextPrompt(webhook.agentSession.promptContext, labelNames)
     : buildPrompt(issue, issueDetails, comment, commentMaxLength);
 
   if (integrationConfig.issueSessionInstructions) {
