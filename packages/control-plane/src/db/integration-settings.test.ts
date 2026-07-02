@@ -686,6 +686,28 @@ describe("IntegrationSettingsStore", () => {
       expect(result).toEqual({ tunnelPorts: [5173] });
     });
 
+    it("round-trips tunnel-port labels, pruning ones without a configured port", async () => {
+      await store.setRepoSettings("sandbox", "acme/app", {
+        tunnelPorts: [8990, 8991],
+        tunnelPortLabels: { "8990": "API", "5173": "orphan" },
+      });
+
+      const result = await store.getRepoSettings("sandbox", "acme/app");
+      expect(result).toEqual({
+        tunnelPorts: [8990, 8991],
+        tunnelPortLabels: { "8990": "API" },
+      });
+    });
+
+    it("rejects non-object tunnelPortLabels", async () => {
+      await expect(
+        store.setRepoSettings("sandbox", "acme/app", {
+          tunnelPorts: [8990],
+          tunnelPortLabels: ["nope"] as unknown as Record<string, string>,
+        })
+      ).rejects.toThrow(IntegrationSettingsValidationError);
+    });
+
     it("getResolvedConfig merges global defaults with repo overrides", async () => {
       await store.setGlobal("sandbox", { defaults: { tunnelPorts: [3000, 3001] } });
       await store.setRepoSettings("sandbox", "acme/app", { tunnelPorts: [5173] });

@@ -356,8 +356,13 @@ Sandbox lifecycle tuning knobs (all in milliseconds):
   connecting/heartbeat blip is treated as a recoverable reconnection (slow restore/respawn) until
   the box has been silent for this long — so an actively-working turn is never failed on the short
   90s heartbeat / 120s reconnect watchdog windows (a cold boot with no turn in flight instead uses
-  the separate 240s first-connect window). Measured on last sign of life, never on total turn
-  duration; must exceed the worst legitimate restore/respawn silence.
+  the separate 240s first-connect window). Silence is measured as the time since the most recent of
+  `last_heartbeat` (bridge heartbeats and boot-progress pings) or `last_activity` (agent
+  step/tool/tool_result/artifact events) — whichever arrived most recently. An agent actively
+  streaming tool calls keeps the silence clock fresh even if the bridge heartbeat lapses; only
+  genuine silence across both signals (no heartbeat AND no agent event) for the full backstop window
+  triggers failure. Measured from the most recent sign of life, never on total turn duration; must
+  exceed the worst legitimate restore/respawn silence.
 
 See [terraform/terraform.tfvars.example](../../terraform/terraform.tfvars.example) for the complete
 list.

@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_BUILD_TIMEOUT_SECONDS } from "@open-inspect/shared";
 import { VercelSandboxProvider, type VercelProviderConfig } from "./provider";
 import type { CreateSandboxConfig, RestoreConfig } from "../../provider";
 import type {
@@ -208,6 +209,28 @@ describe("VercelSandboxProvider", () => {
         ttydUrl: "https://term.test",
       })
     );
+  });
+
+  it("omits repo tag for no-repository sandboxes", async () => {
+    const client = createMockClient();
+    const provider = new VercelSandboxProvider(client, providerConfig);
+
+    await provider.createSandbox({
+      ...baseCreateConfig,
+      repoOwner: null,
+      repoName: null,
+    });
+
+    const createCall = vi.mocked(client.createSandbox).mock.calls[0][0];
+    expect(createCall.env).toMatchObject({
+      REPO_OWNER: "",
+      REPO_NAME: "",
+    });
+    expect(createCall.tags).toEqual({
+      openinspect_framework: "open-inspect",
+      openinspect_session_id: "session-123",
+      openinspect_expected_sandbox_id: "sandbox-456",
+    });
   });
 
   it("caps the default sandbox timeout at Vercel's 45 minute limit", async () => {
@@ -542,7 +565,7 @@ describe("VercelSandboxProvider", () => {
     expect(createCall).toEqual(
       expect.objectContaining({
         runtime: "node24",
-        timeoutMs: 1800 * 1000,
+        timeoutMs: DEFAULT_BUILD_TIMEOUT_SECONDS * 1000,
         sourceSnapshotId: "base-snapshot-1",
         tags: {
           openinspect_framework: "open-inspect",

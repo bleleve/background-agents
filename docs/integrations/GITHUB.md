@@ -78,9 +78,10 @@ structured risk map:
 - **Tests coverage** — flagged only when a change that _should_ be tested ships without one. The
   coverage sentinel targets must-test changes (new non-trivial logic, bug fixes, auth, migrations,
   parsing of untrusted input, concurrency, new public APIs) and stays silent for the many PRs that
-  legitimately add no tests. A genuine gap is listed here and raises the risk badge as a floor — an
-  uncovered behavioral change to at least 🟡, an uncovered critical-path change to 🔴 (omitted when
-  there is no gap).
+  legitimately add no tests. A genuine gap is listed here — always 🟡 or 🔴, never 🔵 Low — and
+  raises the risk badge as a floor: an uncovered behavioral change lifts the header to at least 🟡,
+  an uncovered critical-path change to 🔴. The floor is a hard coupling, so the header badge is
+  never lower than the highest severity shown in any section below.
 - **Docs drift** — any documentation that drifted from the change (omitted when there is none).
 - **Reviewed, no concerns** — the areas that were checked and had nothing notable, in a collapsed
   `<details>` block so it stays out of the way of the summary.
@@ -193,12 +194,12 @@ Open the web app and go to **Settings > Integrations > GitHub** to configure the
 
 ### Defaults and Scope
 
-| Setting                   | What it controls                                                                                                                                                                                                            |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Auto-review new PRs       | Whether new non-draft PRs should be reviewed automatically                                                                                                                                                                  |
-| Auto-approve low-risk PRs | Whether the bot approves a PR once it is labeled `visual-qa: pass` **and** the review agent has marked it `reef: low risk`. The agent never approves on its own — this is a label-driven decision made entirely by the bot. |
-| Repository Scope          | Whether the bot responds in all accessible repositories or only selected repositories                                                                                                                                       |
-| Allowed Trigger Users     | Who can trigger the bot from GitHub                                                                                                                                                                                         |
+| Setting                   | What it controls                                                                                                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Auto-review new PRs       | Whether new non-draft PRs should be reviewed automatically                                                                                                                                                                                       |
+| Auto-approve low-risk PRs | Whether the bot approves a PR once it is labeled `visual-qa: pass` or `visual-qa: skip` **and** the review agent has marked it `reef: low risk`. The agent never approves on its own — this is a label-driven decision made entirely by the bot. |
+| Repository Scope          | Whether the bot responds in all accessible repositories or only selected repositories                                                                                                                                                            |
+| Allowed Trigger Users     | Who can trigger the bot from GitHub                                                                                                                                                                                                              |
 
 If no GitHub Bot settings are configured, Open-Inspect uses permissive defaults: all repositories
 available to the GitHub App are in scope, auto-review is enabled, and users with write, maintain, or

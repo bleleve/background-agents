@@ -485,6 +485,66 @@ describe("SandboxLifecycleManager", () => {
       expect(provider.createSandbox).toHaveBeenCalledWith(expect.objectContaining({ userEnvVars }));
     });
 
+    it("spawns no-repository sessions without repo-only sandbox features", async () => {
+      const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
+      const storage = createMockStorage(
+        createMockSession({
+          repo_owner: null,
+          repo_name: null,
+          repo_id: null,
+          base_branch: null,
+          code_server_enabled: 1,
+        }),
+        sandbox
+      );
+      const provider = createMockProvider();
+      const mcpServerLookup = {
+        getDecryptedForSession: vi.fn(async () => []),
+      };
+      const slackAgentNotifyLookup: SlackAgentNotifyLookup = {
+        isEnabledForRepo: vi.fn(async () => true),
+      };
+      const repoImageLookup: RepoImageLookup = {
+        getLatestReady: vi.fn(async () => ({
+          provider_image_id: "repo-image-1",
+          base_sha: "abc123",
+        })),
+      };
+
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        {
+          ...createTestConfig(),
+          mcpServerLookup,
+          slackAgentNotifyLookup,
+        },
+        {},
+        repoImageLookup
+      );
+
+      await manager.spawnSandbox();
+
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repoOwner: null,
+          repoName: null,
+          branch: null,
+          codeServerEnabled: true,
+          agentSlackNotifyEnabled: true,
+          repoImageId: null,
+          repoImageSha: null,
+        })
+      );
+      expect(mcpServerLookup.getDecryptedForSession).toHaveBeenCalledWith(null, null);
+      expect(slackAgentNotifyLookup.isEnabledForRepo).toHaveBeenCalledWith(null, null);
+      expect(repoImageLookup.getLatestReady).not.toHaveBeenCalled();
+    });
+
     it("respects circuit breaker blocking", async () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
@@ -1150,6 +1210,95 @@ describe("SandboxLifecycleManager", () => {
       expect(wsManager.closeSandboxWebSocket).toHaveBeenCalledWith(1000, "Heartbeat stale");
     });
 
+    it("defers a stale heartbeat mid-turn when agent activity is fresh (in-flight sign-of-life)", async () => {
+      const now = Date.now();
+      // Heartbeat lapsed 11 min ago — past the 10-min in-flight backstop on its
+      // own — but the agent emitted a tool event 2s ago, so it is demonstrably
+      // alive. The in-flight turn must be deferred, not force-failed to "stale".
+      const sandbox = createMockSandbox({
+        status: "ready",
+        last_heartbeat: now - 11 * 60 * 1000,
+        last_activity: now - 2000,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      storage.getIsProcessing = vi.fn(() => true);
+      const alarmScheduler = createMockAlarmScheduler();
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        alarmScheduler,
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.handleAlarm();
+
+      expect(storage.calls).not.toContain("updateSandboxStatus:stale");
+      expect(alarmScheduler.alarms.length).toBe(1); // deferred — alarm rescheduled
+    });
+
+    it("defers a connecting-timeout mid-turn when agent activity is fresh", async () => {
+      const now = Date.now();
+      // A long-running turn whose box fell back to "connecting"; its heartbeat
+      // would trip the watchdog, but a tool event 2s ago proves it is alive.
+      const sandbox = createMockSandbox({
+        status: "connecting",
+        created_at: now - 60 * 60 * 1000,
+        last_heartbeat: now - 11 * 60 * 1000,
+        last_activity: now - 2000,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      storage.getIsProcessing = vi.fn(() => true);
+      const alarmScheduler = createMockAlarmScheduler();
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        alarmScheduler,
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.handleAlarm();
+
+      expect(storage.calls).not.toContain("updateSandboxStatus:failed");
+      expect(storage.calls).not.toContain("updateSandboxStatus:stopped");
+      expect(alarmScheduler.alarms.length).toBeGreaterThanOrEqual(1); // deferred — watchdog re-armed
+    });
+
+    it("still fails an in-flight turn after genuine silence across both signals", async () => {
+      const now = Date.now();
+      // Neither the heartbeat nor any agent event has arrived for >10 min — a
+      // genuinely unreachable box. The backstop must still terminalize it.
+      const sandbox = createMockSandbox({
+        status: "connecting",
+        created_at: now - 60 * 60 * 1000,
+        last_heartbeat: now - 11 * 60 * 1000,
+        last_activity: now - 12 * 60 * 1000,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      storage.getIsProcessing = vi.fn(() => true);
+
+      const manager = new SandboxLifecycleManager(
+        createMockProvider(),
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.handleAlarm();
+
+      expect(storage.calls).toContain("updateSandboxStatus:failed");
+    });
+
     it("handles inactivity timeout", async () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
@@ -1657,8 +1806,9 @@ describe("SandboxLifecycleManager", () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
         status: "connecting" as SandboxStatus,
-        created_at: now - 11 * 60 * 1000, // 11min of silence > 10min backstop
+        created_at: now - 11 * 60 * 1000,
         last_heartbeat: null,
+        last_activity: now - 11 * 60 * 1000, // silent across BOTH signals for 11min > 10min backstop
       });
       const storage = createMockStorage(createMockSession(), sandbox);
       storage.getIsProcessing = vi.fn(() => true);
@@ -1782,7 +1932,8 @@ describe("SandboxLifecycleManager", () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
         status: "ready",
-        last_heartbeat: now - 11 * 60 * 1000, // 11min silence > 10min backstop
+        last_heartbeat: now - 11 * 60 * 1000,
+        last_activity: now - 11 * 60 * 1000, // silent across BOTH signals for 11min > 10min backstop
       });
       const storage = createMockStorage(createMockSession(), sandbox);
       storage.getIsProcessing = vi.fn(() => true);
@@ -2695,10 +2846,11 @@ describe("SandboxLifecycleManager", () => {
       lookup?: SlackAgentNotifyLookup;
       provider?: ReturnType<typeof createMockProvider>;
       sandbox?: ReturnType<typeof createMockSandbox>;
+      session?: ReturnType<typeof createMockSession>;
     }) {
       const sandbox =
         opts.sandbox ?? createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
-      const storage = createMockStorage(createMockSession(), sandbox);
+      const storage = createMockStorage(opts.session ?? createMockSession(), sandbox);
       const provider = opts.provider ?? createMockProvider();
       const config = { ...createTestConfig(), slackAgentNotifyLookup: opts.lookup };
       const manager = new SandboxLifecycleManager(
@@ -2754,6 +2906,26 @@ describe("SandboxLifecycleManager", () => {
       );
     });
 
+    it("uses the global slack-notify lookup for no-repository sessions", async () => {
+      const lookup: SlackAgentNotifyLookup = {
+        isEnabledForRepo: vi.fn(async () => true),
+      };
+      const session = createMockSession({
+        repo_owner: null,
+        repo_name: null,
+        repo_id: null,
+        base_branch: null,
+      });
+      const { manager, provider } = buildManagerWith({ lookup, session });
+
+      await manager.spawnSandbox();
+
+      expect(lookup.isEnabledForRepo).toHaveBeenCalledWith(null, null);
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({ agentSlackNotifyEnabled: true })
+      );
+    });
+
     it("treats lookup failure as disabled and continues spawning", async () => {
       const lookup: SlackAgentNotifyLookup = {
         isEnabledForRepo: vi.fn(async () => {
@@ -2802,6 +2974,30 @@ describe("SandboxLifecycleManager", () => {
 
       expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
         expect.objectContaining({ agentSlackNotifyEnabled: false })
+      );
+    });
+
+    it("uses the global slack-notify lookup for no-repository snapshot restores", async () => {
+      const lookup: SlackAgentNotifyLookup = {
+        isEnabledForRepo: vi.fn(async () => true),
+      };
+      const session = createMockSession({
+        repo_owner: null,
+        repo_name: null,
+        repo_id: null,
+        base_branch: null,
+      });
+      const { manager, provider } = buildManagerWith({
+        lookup,
+        session,
+        sandbox: snapshotSandbox(),
+      });
+
+      await manager.spawnSandbox();
+
+      expect(lookup.isEnabledForRepo).toHaveBeenCalledWith(null, null);
+      expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ agentSlackNotifyEnabled: true })
       );
     });
 

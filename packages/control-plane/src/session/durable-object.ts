@@ -23,6 +23,7 @@ import {
 } from "@open-inspect/shared";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl } from "../sandbox/client";
+import { normalizeSandboxSettings } from "../sandbox/settings";
 import { resolveSandboxBackendName } from "../sandbox/provider-name";
 import { createSandboxProviderFromEnv } from "../sandbox/provider-factory";
 import { resolveRepoImageProvider } from "../repo-images/provider-policy";
@@ -631,11 +632,18 @@ export class SessionDO extends DurableObject<Env> {
         dispatchPreview: async (reason?: string, commitSha?: string) => {
           const session = this.getSession();
           if (!session) throw new Error("Session not found");
+          if (!session.repo_owner || !session.repo_name) {
+            throw new Error("Cannot dispatch preview for a session without repository context");
+          }
+          const branchName = session.branch_name ?? session.base_branch;
+          if (!branchName) {
+            throw new Error("Cannot dispatch preview for a session without a branch");
+          }
           const sessionId = this.getPublicSessionId(session);
           return dispatchPreview(this.env, {
             repoOwner: session.repo_owner,
             repoName: session.repo_name,
-            branchName: session.branch_name ?? session.base_branch,
+            branchName,
             commitSha,
             slug: sessionId,
             sessionId,
@@ -779,11 +787,18 @@ export class SessionDO extends DurableObject<Env> {
         dispatchPreview: async (reason: string, commitSha?: string) => {
           const session = this.getSession();
           if (!session) throw new Error("Session not found");
+          if (!session.repo_owner || !session.repo_name) {
+            throw new Error("Cannot dispatch preview for a session without repository context");
+          }
+          const branchName = session.branch_name ?? session.base_branch;
+          if (!branchName) {
+            throw new Error("Cannot dispatch preview for a session without a branch");
+          }
           const sessionId = this.getPublicSessionId(session);
           return dispatchPreview(this.env, {
             repoOwner: session.repo_owner,
             repoName: session.repo_name,
-            branchName: session.branch_name ?? session.base_branch,
+            branchName,
             commitSha,
             slug: sessionId,
             sessionId,
@@ -918,10 +933,11 @@ export class SessionDO extends DurableObject<Env> {
       slackAgentNotifyLookup = {
         isEnabledForRepo: async (repoOwner, repoName) => {
           if (!tokenPresent) return false;
-          const { settings } = await settingsStore.getResolvedConfig(
-            "slack",
-            `${repoOwner}/${repoName}`
-          );
+          const settings =
+            repoOwner && repoName
+              ? (await settingsStore.getResolvedConfig("slack", `${repoOwner}/${repoName}`))
+                  .settings
+              : ((await settingsStore.getGlobal("slack"))?.defaults ?? {});
           return resolveSlackSettings(settings).agentNotificationsEnabled;
         },
       };
@@ -2211,9 +2227,9 @@ export class SessionDO extends DurableObject<Env> {
     return {
       id: this.getPublicSessionId(session),
       title: session?.title ?? null,
-      repoOwner: session?.repo_owner ?? "",
-      repoName: session?.repo_name ?? "",
-      baseBranch: session?.base_branch ?? "main",
+      repoOwner: session?.repo_owner ?? null,
+      repoName: session?.repo_name ?? null,
+      baseBranch: session?.base_branch ?? null,
       branchName: session?.branch_name ?? null,
       status: session?.status ?? "created",
       spawnSource: session?.spawn_source,
@@ -2228,6 +2244,7 @@ export class SessionDO extends DurableObject<Env> {
       codeServerUrl: sandbox?.code_server_url ?? null,
       codeServerPassword,
       tunnelUrls: sandbox?.tunnel_urls ? this.safeParseTunnelUrls(sandbox.tunnel_urls) : null,
+      tunnelPortLabels: this.tunnelPortLabelsFromSettings(session),
       ttydUrl: sandbox?.ttyd_url ?? null,
       ttydToken,
       planMode: session?.plan_mode === 1,
@@ -2281,6 +2298,23 @@ export class SessionDO extends DurableObject<Env> {
     return urls;
   }
 
+  /**
+   * Display-only tunnel-port labels for the client, read from the session's
+   * persisted sandbox settings (already pruned to the configured ports at write
+   * time). Returns null when none are set. The sandbox tier never sees these —
+   * they only rename the preview links so multiple ports don't all read "Preview".
+   */
+  private tunnelPortLabelsFromSettings(session: SessionRow | null): Record<string, string> | null {
+    if (!session?.sandbox_settings) return null;
+    try {
+      const parsed: unknown = JSON.parse(session.sandbox_settings);
+      const labels = normalizeSandboxSettings(parsed, { invalid: "omit" }).tunnelPortLabels;
+      return labels && Object.keys(labels).length > 0 ? labels : null;
+    } catch {
+      return null;
+    }
+  }
+
   // Database helpers
 
   private getSession(): SessionRow | null {
@@ -2294,6 +2328,9 @@ export class SessionDO extends DurableObject<Env> {
   private async ensureRepoId(session: SessionRow): Promise<number> {
     if (session.repo_id) {
       return session.repo_id;
+    }
+    if (!session.repo_owner || !session.repo_name) {
+      throw new Error("Session has no repository context");
     }
 
     const result = await this.sourceControlProvider.checkRepositoryAccess({
@@ -2325,12 +2362,14 @@ export class SessionDO extends DurableObject<Env> {
 
     // Fail hard on secret loading — sandboxes must not silently lose secrets
     const globalStore = new GlobalSecretsStore(this.env.DB, this.env.REPO_SECRETS_ENCRYPTION_KEY);
-    const [globalSecrets, repoId] = await Promise.all([
-      globalStore.getDecryptedSecrets(),
-      this.ensureRepoId(session),
-    ]);
-    const repoStore = new RepoSecretsStore(this.env.DB, this.env.REPO_SECRETS_ENCRYPTION_KEY);
-    const repoSecrets = await repoStore.getDecryptedSecrets(repoId);
+    const globalSecrets = await globalStore.getDecryptedSecrets();
+
+    let repoSecrets: Record<string, string> = {};
+    if (session.repo_owner && session.repo_name) {
+      const repoId = await this.ensureRepoId(session);
+      const repoStore = new RepoSecretsStore(this.env.DB, this.env.REPO_SECRETS_ENCRYPTION_KEY);
+      repoSecrets = await repoStore.getDecryptedSecrets(repoId);
+    }
 
     // Merge: repo overrides global
     const { merged, totalBytes, exceedsLimit } = mergeSecrets(globalSecrets, repoSecrets);
@@ -2386,9 +2425,11 @@ export class SessionDO extends DurableObject<Env> {
     }
 
     try {
-      const repoJson = await store.getRepoConfig(session.repo_owner, session.repo_name);
-      if (repoJson) {
-        repoConfig = JSON.parse(repoJson) as Record<string, unknown>;
+      if (session.repo_owner && session.repo_name) {
+        const repoJson = await store.getRepoConfig(session.repo_owner, session.repo_name);
+        if (repoJson) {
+          repoConfig = JSON.parse(repoJson) as Record<string, unknown>;
+        }
       }
     } catch (e) {
       this.log.warn("Failed to load repo OpenCode config, proceeding without", {

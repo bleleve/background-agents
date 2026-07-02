@@ -7,12 +7,15 @@ import type { SandboxStatus } from "@open-inspect/shared";
 interface TunnelUrlsSectionProps {
   urls: Record<string, string>;
   sandboxStatus: SandboxStatus;
+  /** Optional per-port display labels, keyed by port number as a string. */
+  labels?: Record<string, string> | null;
 }
 
-export function TunnelUrlsSection({ urls }: TunnelUrlsSectionProps) {
+export function TunnelUrlsSection({ urls, labels }: TunnelUrlsSectionProps) {
   const entries = Object.entries(urls);
-  // "Preview" is the user-facing name for the running app's tunnel. When more
-  // than one port is exposed, keep the port as a muted suffix to disambiguate.
+  // Each link is named by its configured label, or "Preview" as the default.
+  // When more than one port is exposed, keep the port as a muted suffix to
+  // disambiguate — useful even for labeled links (e.g. "API · 8990").
   const showPort = entries.length > 1;
 
   return (
@@ -21,7 +24,7 @@ export function TunnelUrlsSection({ urls }: TunnelUrlsSectionProps) {
         const safeUrl = getSafeExternalUrl(url);
         const label = (
           <>
-            Preview
+            {labels?.[port] || "Preview"}
             {showPort && <span className="text-muted-foreground/70"> · {port}</span>}
           </>
         );

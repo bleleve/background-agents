@@ -23,10 +23,10 @@ export interface SessionRow {
   id: string;
   session_name: string | null; // External session name for WebSocket routing
   title: string | null;
-  repo_owner: string;
-  repo_name: string;
+  repo_owner: string | null;
+  repo_name: string | null;
   repo_id: number | null;
-  base_branch: string;
+  base_branch: string | null;
   branch_name: string | null;
   base_sha: string | null;
   current_sha: string | null;
@@ -48,6 +48,15 @@ export interface SessionRow {
   preview_dispatched_sha?: string | null;
   created_at: number;
   updated_at: number;
+}
+
+export type RepositorySessionRow = SessionRow & {
+  repo_owner: string;
+  repo_name: string;
+};
+
+export function sessionHasRepository(session: SessionRow): session is RepositorySessionRow {
+  return Boolean(session.repo_owner && session.repo_name);
 }
 
 export interface ParticipantRow {

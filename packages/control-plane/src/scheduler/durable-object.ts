@@ -46,6 +46,7 @@ import {
   resolveCodeServerEnabled,
   resolveSandboxSettings,
 } from "../session/integration-settings-resolution";
+import { resolveAutomationRepository } from "../automation/repository";
 
 /** Max automations to process per tick (backpressure). */
 const MAX_PER_TICK = 25;
@@ -64,11 +65,19 @@ const RECOVERY_SWEEP_LIMIT = 50;
 
 /**
  * How long after a slack run's first trigger that thread replies keep continuing
- * the same session (matches the interactive thread→session KV TTL of 24h). Steering
+ * the same session (matches the interactive thread→session KV TTL of 7 days). Steering
  * does not create new runs, so this is measured from the root run's `created_at` and
  * does not slide — a reply after the window forks a fresh run.
  */
-const SLACK_THREAD_CONTINUITY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const SLACK_THREAD_CONTINUITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+function formatAutomationTargetLabel(
+  automation: Pick<AutomationRow, "repo_owner" | "repo_name"> | null | undefined
+): string {
+  return automation?.repo_owner && automation?.repo_name
+    ? `${automation.repo_owner}/${automation.repo_name}`
+    : "No repository";
+}
 
 export class SchedulerDO extends DurableObject<Env> {
   private readonly log: Logger;
@@ -678,12 +687,23 @@ export class SchedulerDO extends DurableObject<Env> {
     // Verify the run exists and is still in an active state.
     // The recovery sweep may have already marked it as failed.
     const run = await store.getRunById(body.automationId, body.runId);
-    if (!run || (run.status !== "starting" && run.status !== "running")) {
+    const isActive = run?.status === "starting" || run?.status === "running";
+    // A late `success` callback for a run already marked `failed` reconciles it.
+    // The connecting/heartbeat watchdogs can false-fail a healthy long turn — the
+    // agent kept running (or was resumed) and then completed, but the run was
+    // stuck "failed" and the automation's consecutive-failure streak inflated,
+    // even though the session completed and pushed its PR. Flip it back to
+    // completed and undo the one spurious failure. Every other callback for a
+    // non-active run (a genuine terminal state, a late failure, a duplicate) is
+    // still ignored.
+    const reconcilesFailure = run?.status === "failed" && body.success;
+    if (!run || (!isActive && !reconcilesFailure)) {
       this.log.warn("Ignoring run-complete callback for non-active run", {
         event: "scheduler.run_complete_ignored",
         automation_id: body.automationId,
         run_id: body.runId,
         current_status: run?.status ?? "not_found",
+        success: body.success,
       });
       return new Response(JSON.stringify({ ok: true, ignored: true }), {
         headers: { "Content-Type": "application/json" },
@@ -695,14 +715,25 @@ export class SchedulerDO extends DurableObject<Env> {
         status: "completed",
         completed_at: Date.now(),
       });
-      await store.resetConsecutiveFailures(body.automationId);
-
-      this.log.info("Run completed successfully", {
-        event: "scheduler.run_complete",
-        automation_id: body.automationId,
-        run_id: body.runId,
-        session_id: body.sessionId,
-      });
+      if (reconcilesFailure) {
+        // Take back just the one spurious failure rather than resetting the whole
+        // streak, so unrelated later failures survive an old run reconciling late.
+        await store.decrementConsecutiveFailures(body.automationId);
+        this.log.info("Run reconciled failed→completed by late success", {
+          event: "scheduler.run_reconciled",
+          automation_id: body.automationId,
+          run_id: body.runId,
+          session_id: body.sessionId,
+        });
+      } else {
+        await store.resetConsecutiveFailures(body.automationId);
+        this.log.info("Run completed successfully", {
+          event: "scheduler.run_complete",
+          automation_id: body.automationId,
+          run_id: body.runId,
+          session_id: body.sessionId,
+        });
+      }
     } else {
       await this.failRunAndTrack(
         store,
@@ -723,8 +754,10 @@ export class SchedulerDO extends DurableObject<Env> {
     // Slack-triggered runs post the agent's result into the triggering message's
     // thread and clear the `eyes` reaction when they finish. The scheduler owns
     // this fan-out (not the session callback path) because the message
-    // coordinates live on the run row. Best-effort.
-    const slackMeta = getSlackRunMetadata(run);
+    // coordinates live on the run row. Best-effort. Skipped on a reconcile: the
+    // run's outcome was already posted to the thread when it first terminalized,
+    // so re-posting a late success would double-notify.
+    const slackMeta = isActive ? getSlackRunMetadata(run) : null;
     if (slackMeta) {
       const automation = await store.getById(body.automationId);
       await this.notifySlackCompletion(run, slackMeta, {
@@ -732,7 +765,7 @@ export class SchedulerDO extends DurableObject<Env> {
         messageId: body.messageId ?? "",
         success: body.success,
         error: body.error,
-        repoFullName: automation ? `${automation.repo_owner}/${automation.repo_name}` : "",
+        repoFullName: formatAutomationTargetLabel(automation),
         model: automation?.model ?? "",
         reasoningEffort: automation?.reasoning_effort ?? undefined,
       });
@@ -872,40 +905,7 @@ export class SchedulerDO extends DurableObject<Env> {
     runId: string
   ): Promise<{ sessionId: string }> {
     const sessionId = generateId();
-    const doId = this.env.SESSION.idFromName(sessionId);
-    const stub = this.env.SESSION.get(doId);
-
-    // Resolve sandbox settings (e.g. awsRoles for kubectl/kubeconfig) and
-    // code-server enabled flag for this repo so automation sessions receive the
-    // same sandbox configuration as user-created sessions for the same repo.
-    const [codeServerEnabled, sandboxSettings] = await Promise.all([
-      resolveCodeServerEnabled(this.env.DB, automation.repo_owner, automation.repo_name),
-      resolveSandboxSettings(this.env.DB, automation.repo_owner, automation.repo_name),
-    ]);
-
-    // Initialize the session DO
-    const initResponse = await stub.fetch("http://internal/internal/init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionName: sessionId,
-        repoOwner: automation.repo_owner,
-        repoName: automation.repo_name,
-        repoId: automation.repo_id,
-        defaultBranch: automation.base_branch,
-        model: automation.model,
-        reasoningEffort: automation.reasoning_effort,
-        title: `[Auto] ${automation.name}`,
-        userId: automation.created_by,
-        spawnSource: "automation",
-        codeServerEnabled,
-        sandboxSettings,
-      }),
-    });
-
-    if (!initResponse.ok) {
-      throw new Error(`Session init failed with status ${initResponse.status}`);
-    }
+    const repository = await resolveAutomationRepository(this.env, automation);
 
     // Resolve the canonical user_id for the session index.
     // Automations created through the web UI populate user_id at creation time
@@ -927,14 +927,24 @@ export class SchedulerDO extends DurableObject<Env> {
       }
     }
 
+    const repoOwner = repository?.repoOwner ?? null;
+    const repoName = repository?.repoName ?? null;
+    const repoId = repository?.repoId ?? null;
+    const baseBranch = repository?.baseBranch ?? null;
+
+    const [codeServerEnabled, sandboxSettings] = await Promise.all([
+      resolveCodeServerEnabled(this.env.DB, repoOwner, repoName),
+      resolveSandboxSettings(this.env.DB, repoOwner, repoName),
+    ]);
+
     await initializeSession(
       this.env,
       {
         sessionId,
-        repoOwner: automation.repo_owner,
-        repoName: automation.repo_name,
-        repoId: automation.repo_id,
-        defaultBranch: automation.base_branch,
+        repoOwner,
+        repoName,
+        repoId,
+        defaultBranch: baseBranch,
         title: `[Auto] ${automation.name}`,
         model: automation.model,
         reasoningEffort: automation.reasoning_effort,
@@ -1002,7 +1012,7 @@ export class SchedulerDO extends DurableObject<Env> {
       threadTs: event.threadTs ?? event.ts,
       // React on (and later clear) the follow-up message itself.
       reactionMessageTs: event.ts,
-      repoFullName: `${automation.repo_owner}/${automation.repo_name}`,
+      repoFullName: formatAutomationTargetLabel(automation),
       model: automation.model,
       reasoningEffort: automation.reasoning_effort ?? undefined,
     };

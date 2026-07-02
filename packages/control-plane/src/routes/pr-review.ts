@@ -10,8 +10,9 @@
  * session index, never from caller input, so the agent can't target another PR.
  *
  * The agent cannot APPROVE: approvals are decided entirely by the github-bot from
- * PR labels (`visual-qa: pass` + `reef: low risk`), so this route rejects APPROVE
- * outright and only handles REQUEST_CHANGES (policy-gated) and COMMENT.
+ * PR labels (`visual-qa: pass` or `visual-qa: skip` + `reef: low risk`), so this
+ * route rejects APPROVE outright and only handles REQUEST_CHANGES (policy-gated)
+ * and COMMENT.
  */
 import { getCachedInstallationToken, getGitHubAppConfig } from "../auth/github-app";
 import { IntegrationSettingsStore } from "../db/integration-settings";
@@ -51,6 +52,9 @@ export async function handleSubmitPrReview(
   if (!session) return error("Session not found", 404);
   if (session.prNumber == null) {
     return error("This session is not associated with a pull request", 422);
+  }
+  if (!session.repoOwner || !session.repoName) {
+    return error("This session is not associated with a repository", 422);
   }
 
   const owner = session.repoOwner;

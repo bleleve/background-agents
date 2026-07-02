@@ -113,17 +113,18 @@ built for internal use where all employees are trusted and have access to compan
 
 ## Packages
 
-| Package                                     | Description                                       |
-| ------------------------------------------- | ------------------------------------------------- |
-| [control-plane](packages/control-plane)     | Cloudflare Workers + Durable Objects              |
-| [web](packages/web)                         | Next.js web client                                |
-| [slack-bot](packages/slack-bot)             | Slack integration (sessions from messages)        |
-| [github-bot](packages/github-bot)           | GitHub integration (auto-review, @mention)        |
-| [linear-bot](packages/linear-bot)           | Linear integration (issue → coding session)       |
-| [shared](packages/shared)                   | Shared types and utilities (build first)          |
-| [modal-infra](packages/modal-infra)         | Modal sandbox infrastructure and lifecycle        |
-| [sandbox-runtime](packages/sandbox-runtime) | Provider-agnostic sandbox runtime (bridge, agent) |
-| [daytona-infra](packages/daytona-infra)     | Daytona base-snapshot seeding scripts             |
+| Package                                           | Description                                       |
+| ------------------------------------------------- | ------------------------------------------------- |
+| [control-plane](packages/control-plane)           | Cloudflare Workers + Durable Objects              |
+| [web](packages/web)                               | Next.js web client                                |
+| [slack-bot](packages/slack-bot)                   | Slack integration (sessions from messages)        |
+| [github-bot](packages/github-bot)                 | GitHub integration (auto-review, @mention)        |
+| [linear-bot](packages/linear-bot)                 | Linear integration (issue → coding session)       |
+| [shared](packages/shared)                         | Shared types and utilities (build first)          |
+| [modal-infra](packages/modal-infra)               | Modal sandbox infrastructure and lifecycle        |
+| [sandbox-runtime](packages/sandbox-runtime)       | Provider-agnostic sandbox runtime (bridge, agent) |
+| [daytona-infra](packages/daytona-infra)           | Daytona base-snapshot seeding scripts             |
+| [opencomputer-infra](packages/opencomputer-infra) | OpenComputer template infrastructure              |
 
 ## Getting Started
 
@@ -263,7 +264,7 @@ docker compose up -d postgres redis
 - `start.sh` runs for every non-build session startup (fresh, repo-image, snapshot-restore)
 - `start.sh` failures are strict: if present and it fails, session startup fails
 - Default timeouts:
-  - `SETUP_TIMEOUT_SECONDS` (default `1800`)
+  - `SETUP_TIMEOUT_SECONDS` (default `2700`)
   - `START_TIMEOUT_SECONDS` (default `120`)
 - Both hooks receive `OPENINSPECT_BOOT_MODE` (`build`, `fresh`, `repo_image`, `snapshot_restore`)
 - Git operations in hooks can authenticate to other private repos on the configured SCM host when
@@ -281,6 +282,7 @@ built with:
 - [Modal](https://modal.com) - Cloud sandbox infrastructure
 - [Daytona](https://www.daytona.io) - Cloud development sandboxes
 - [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) - Cloud sandbox infrastructure
+- [OpenComputer](https://www.opencomputer.dev) - Cloud sandbox infrastructure
 - [Cloudflare Workers](https://workers.cloudflare.com) - Edge computing
 - [OpenCode](https://opencode.ai) - Coding agent runtime
 - [Next.js](https://nextjs.org) - Web framework

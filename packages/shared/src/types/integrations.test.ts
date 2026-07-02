@@ -3,11 +3,49 @@ import {
   DEFAULT_BUILD_TIMEOUT_SECONDS,
   MAX_BUILD_TIMEOUT_SECONDS,
   MAX_SLACK_ROUTING_RULES,
+  MAX_TUNNEL_PORT_LABEL_LENGTH,
   matchRoutingRules,
   normalizeRoutingRules,
+  normalizeTunnelPortLabels,
   resolveBuildTimeoutSeconds,
   type SlackRoutingRule,
 } from "./integrations";
+
+describe("normalizeTunnelPortLabels", () => {
+  it("keeps labels for allowed ports, trimming whitespace", () => {
+    expect(normalizeTunnelPortLabels({ "3000": "  API  ", "8080": "Web" }, [3000, 8080])).toEqual({
+      "3000": "API",
+      "8080": "Web",
+    });
+  });
+
+  it("drops labels whose port is not in the allowed list", () => {
+    expect(normalizeTunnelPortLabels({ "3000": "API", "5173": "orphan" }, [3000])).toEqual({
+      "3000": "API",
+    });
+  });
+
+  it("drops empty and whitespace-only labels", () => {
+    expect(normalizeTunnelPortLabels({ "3000": "", "8080": "   " }, [3000, 8080])).toBeUndefined();
+  });
+
+  it("caps a label at MAX_TUNNEL_PORT_LABEL_LENGTH", () => {
+    const long = "x".repeat(MAX_TUNNEL_PORT_LABEL_LENGTH + 5);
+    expect(normalizeTunnelPortLabels({ "3000": long }, [3000])).toEqual({
+      "3000": "x".repeat(MAX_TUNNEL_PORT_LABEL_LENGTH),
+    });
+  });
+
+  it("returns undefined for non-object or array input", () => {
+    expect(normalizeTunnelPortLabels(["nope"], [3000])).toBeUndefined();
+    expect(normalizeTunnelPortLabels("nope", [3000])).toBeUndefined();
+    expect(normalizeTunnelPortLabels(null, [3000])).toBeUndefined();
+  });
+
+  it("ignores non-string label values", () => {
+    expect(normalizeTunnelPortLabels({ "3000": 42 as unknown as string }, [3000])).toBeUndefined();
+  });
+});
 
 describe("resolveBuildTimeoutSeconds", () => {
   it("defaults when no setting is present", () => {

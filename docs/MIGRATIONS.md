@@ -81,6 +81,38 @@ This runs automatically on every deploy (staging and production), is a no-op onc
 gracefully handles environments where the migration was never applied (the `WHERE` does not match,
 so the migration applies fresh instead). Entries are safe to keep forever as an audit log.
 
+## Hazard: upstream table rebuilds silently drop fork columns
+
+SQLite has no `ALTER TABLE DROP COLUMN` before 3.35, so upstream migrations that need to remove or
+rename a column instead use the **table-rebuild pattern**:
+
+```sql
+CREATE TABLE sessions_new ( ...upstream columns only... );
+INSERT INTO sessions_new SELECT ...upstream columns... FROM sessions;
+DROP TABLE sessions;
+ALTER TABLE sessions_new RENAME TO sessions;
+```
+
+If a fork column-add migration (`ALTER TABLE sessions ADD COLUMN …`) ran before this upstream
+migration is merged, **that column is silently deleted** by the `DROP TABLE`. The column-add
+migration's tracking row already exists in `_schema_migrations`, so it never re-runs — the column
+stays missing until a new fork migration explicitly re-adds it.
+
+**What to watch for when merging upstream:** scan each incoming numeric migration for
+`DROP TABLE sessions` or `ALTER TABLE … RENAME TO sessions` (and any other fork-extended table).
+When you find one, check whether any fork migrations have added columns that are absent from the
+upstream `CREATE TABLE` statement. If they have, you must write a new fork migration that re-adds
+those columns **after** the upstream rebuild. Remove the original column-add migrations so they do
+not conflict on fresh environments where the upstream rebuild runs first.
+
+See `terraform/d1/migrations/fork/20260701130444_restore_fork_session_columns_after_0029.sql` for a
+concrete example: upstream `0029_allow_no_repository_context.sql` rebuilt `sessions`, dropping the
+three fork-added columns (`pr_number`, `sandbox_status`, `is_processing`). See also
+`terraform/d1/migrations/fork/20260702090605_restore_automations_last_run_at_after_0029.sql`: the
+same upstream migration also rebuilt `automations`, dropping the fork-added `last_run_at` column,
+its index (`idx_automations_last_run_at`), and the `idx_automations_user_id` index (originally from
+`fork/20260603204302_backfill_automation_user_ids.sql`).
+
 ## Durable Object migrations (separate system)
 
 `packages/control-plane/src/session/schema.ts` holds a `MIGRATIONS` array keyed by integer `id`. The

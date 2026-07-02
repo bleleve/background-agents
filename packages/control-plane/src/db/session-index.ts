@@ -3,8 +3,8 @@ import type { SandboxStatus, SessionStatus, SpawnSource } from "@open-inspect/sh
 export interface SessionEntry {
   id: string;
   title: string | null;
-  repoOwner: string;
-  repoName: string;
+  repoOwner: string | null;
+  repoName: string | null;
   prNumber?: number | null;
   model: string;
   reasoningEffort: string | null;
@@ -30,8 +30,8 @@ export interface SessionEntry {
 interface SessionRow {
   id: string;
   title: string | null;
-  repo_owner: string;
-  repo_name: string;
+  repo_owner: string | null;
+  repo_name: string | null;
   pr_number: number | null;
   model: string;
   reasoning_effort: string | null;
@@ -99,10 +99,36 @@ function toEntry(row: SessionRow): SessionEntry {
   };
 }
 
+function normalizeRepoIdentifier(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.toLowerCase() : null;
+}
+
+function normalizeSessionRepository(session: SessionEntry): {
+  repoOwner: string | null;
+  repoName: string | null;
+  baseBranch: string | null;
+} {
+  const repoOwner = normalizeRepoIdentifier(session.repoOwner);
+  const repoName = normalizeRepoIdentifier(session.repoName);
+
+  if ((repoOwner === null) !== (repoName === null)) {
+    throw new Error("Session repository must include repoOwner and repoName together");
+  }
+
+  return {
+    repoOwner,
+    repoName,
+    baseBranch: repoOwner && repoName ? session.baseBranch : null,
+  };
+}
+
 export class SessionIndexStore {
   constructor(private readonly db: D1Database) {}
 
   async create(session: SessionEntry): Promise<void> {
+    const repository = normalizeSessionRepository(session);
+
     await this.db
       .prepare(
         `INSERT OR IGNORE INTO sessions (id, title, repo_owner, repo_name, pr_number, model, reasoning_effort, base_branch, status, parent_session_id, spawn_source, spawn_depth, automation_id, automation_run_id, scm_login, user_id, created_at, updated_at)
@@ -111,12 +137,12 @@ export class SessionIndexStore {
       .bind(
         session.id,
         session.title,
-        session.repoOwner.toLowerCase(),
-        session.repoName.toLowerCase(),
+        repository.repoOwner,
+        repository.repoName,
         session.prNumber ?? null,
         session.model,
         session.reasoningEffort,
-        session.baseBranch,
+        repository.baseBranch,
         session.status,
         session.parentSessionId ?? null,
         session.spawnSource ?? "user",
@@ -185,14 +211,16 @@ export class SessionIndexStore {
       params.push(excludeStatus);
     }
 
-    if (repoOwner) {
+    const normalizedRepoOwner = normalizeRepoIdentifier(repoOwner);
+    if (normalizedRepoOwner) {
       conditions.push("repo_owner = ?");
-      params.push(repoOwner.toLowerCase());
+      params.push(normalizedRepoOwner);
     }
 
-    if (repoName) {
+    const normalizedRepoName = normalizeRepoIdentifier(repoName);
+    if (normalizedRepoName) {
       conditions.push("repo_name = ?");
-      params.push(repoName.toLowerCase());
+      params.push(normalizedRepoName);
     }
 
     if (createdByUserIds?.length) {

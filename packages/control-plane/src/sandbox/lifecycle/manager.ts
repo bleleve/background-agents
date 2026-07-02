@@ -16,7 +16,7 @@ import {
   type SandboxSettings,
 } from "@open-inspect/shared";
 import type { SandboxStatus } from "../../types";
-import type { SandboxRow, SessionRow } from "../../session/types";
+import { sessionHasRepository, type SandboxRow, type SessionRow } from "../../session/types";
 import { SandboxProviderError, type SandboxProvider, type CreateSandboxConfig } from "../provider";
 import {
   evaluateCircuitBreaker,
@@ -25,6 +25,7 @@ import {
   evaluateHeartbeatHealth,
   evaluateConnectingTimeout,
   evaluateWarmDecision,
+  inFlightSilenceMs,
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   DEFAULT_SPAWN_CONFIG,
   DEFAULT_INACTIVITY_CONFIG,
@@ -211,6 +212,13 @@ export const DEFAULT_LIFECYCLE_CONFIG: Omit<SandboxLifecycleConfig, "controlPlan
 /** Child (agent-spawned) sessions get a shorter sandbox timeout. */
 const CHILD_SANDBOX_TIMEOUT_SECONDS = 3600; // 1 hour (vs default 2 hours)
 
+function buildSandboxIdForSession(session: SessionRow, now: number): string {
+  const sandboxName = sessionHasRepository(session)
+    ? `${session.repo_owner}-${session.repo_name}`
+    : session.id;
+  return `sandbox-${sandboxName}-${now}`;
+}
+
 // ==================== MCP Server Lookup ====================
 
 /**
@@ -218,7 +226,10 @@ const CHILD_SANDBOX_TIMEOUT_SECONDS = 3600; // 1 hour (vs default 2 hours)
  * Keeps the lifecycle manager free of direct D1Database dependencies.
  */
 export interface McpServerLookup {
-  getDecryptedForSession(repoOwner: string, repoName: string): Promise<McpServerConfig[]>;
+  getDecryptedForSession(
+    repoOwner: string | null,
+    repoName: string | null
+  ): Promise<McpServerConfig[]>;
 }
 
 // ==================== Repo Image Lookup ====================
@@ -238,11 +249,12 @@ export interface RepoImageLookup {
 // ==================== Slack Agent-Notify Lookup ====================
 
 /**
- * Resolves the spawn-time agent-slack-notify gate for a given repo.
+ * Resolves the spawn-time agent-slack-notify gate for a repository or the
+ * global no-repository scope.
  * False (or throwing) means do not install the tool in this sandbox.
  */
 export interface SlackAgentNotifyLookup {
-  isEnabledForRepo(repoOwner: string, repoName: string): Promise<boolean>;
+  isEnabledForRepo(repoOwner: string | null, repoName: string | null): Promise<boolean>;
 }
 
 // ==================== Callbacks ====================
@@ -469,7 +481,8 @@ export class SandboxLifecycleManager {
       const sessionId = session.session_name || session.id;
       const sandboxAuthToken = this.idGenerator.generateId();
       const sandboxAuthTokenHash = await hashToken(sandboxAuthToken);
-      const expectedSandboxId = `sandbox-${session.repo_owner}-${session.repo_name}-${now}`;
+      const hasRepository = sessionHasRepository(session);
+      const expectedSandboxId = buildSandboxIdForSession(session, now);
 
       // Store expected sandbox ID and auth token BEFORE calling provider. The
       // prior identity is demoted into the prev_* slots and stays valid for the
@@ -514,7 +527,7 @@ export class SandboxLifecycleManager {
       // sandbox can do a fast git-switch instead of a full cold clone.
       let repoImageId: string | null = null;
       let repoImageSha: string | null = null;
-      if (this.repoImageLookup) {
+      if (hasRepository && this.repoImageLookup) {
         try {
           let repoImage = await this.repoImageLookup.getLatestReady(
             session.repo_owner,
@@ -676,8 +689,8 @@ export class SandboxLifecycleManager {
     if (!this.config.slackAgentNotifyLookup) return false;
     try {
       return await this.config.slackAgentNotifyLookup.isEnabledForRepo(
-        session.repo_owner,
-        session.repo_name
+        sessionHasRepository(session) ? session.repo_owner : null,
+        sessionHasRepository(session) ? session.repo_name : null
       );
     } catch (err) {
       this.log.warn("Failed to resolve agent slack-notify gate; treating as disabled", {
@@ -742,7 +755,7 @@ export class SandboxLifecycleManager {
       const now = Date.now();
       const sandboxAuthToken = this.idGenerator.generateId();
       const sandboxAuthTokenHash = await hashToken(sandboxAuthToken);
-      const expectedSandboxId = `sandbox-${session.repo_owner}-${session.repo_name}-${now}`;
+      const expectedSandboxId = buildSandboxIdForSession(session, now);
 
       // Store expected sandbox ID and auth token. As in doSpawn, demote the prior
       // identity into the prev_* slots with a grace window so a sandbox still
@@ -1195,22 +1208,30 @@ export class SandboxLifecycleManager {
       // While a turn is in flight, a sandbox that fell back to connecting/
       // spawning is a slow restore/respawn, not a death: the agent has already
       // run and is likely about to complete. Defer the terminal decision to the
-      // in-flight silence backstop (measured on the same last-sign-of-life
-      // clock) instead of failing on the short reconnect window — failing here
-      // would terminate a turn that then completes, leaving the timeline
-      // ("Execution complete") disagreeing with the status chip ("Failed"). The
-      // primary death signal during a restore is spawn_failed (handled above on
-      // a terminal "failed" status); this only defers the silent-provider case.
+      // in-flight silence backstop instead of failing on the short reconnect
+      // window — failing here would terminate a turn that then completes,
+      // leaving the timeline ("Execution complete") disagreeing with the status
+      // chip ("Failed"). The backstop's silence clock folds in agent activity
+      // (last_activity), not just last_heartbeat: an agent streaming tool calls
+      // over committed invocations while the heartbeat has lapsed is alive and
+      // must not be force-failed. The primary death signal during a restore is
+      // spawn_failed (handled above on a terminal "failed" status); this only
+      // defers the silent-provider case.
       // getIsProcessing() is false on a cold boot (the triggering prompt is
       // still "pending"), so a first-connect that never lands keeps its
-      // first-connect terminal — nothing is in flight to lose.
+      // first-connect terminal — nothing is in flight to lose. A null silence
+      // (no sign of life at all) also fails safe rather than deferring.
+      const silenceMs = inFlightSilenceMs(sandbox.last_heartbeat, sandbox.last_activity, now);
       if (
         this.storage.getIsProcessing() &&
-        connectingResult.elapsedMs < this.config.inFlightSilence.timeoutMs
+        silenceMs !== null &&
+        silenceMs < this.config.inFlightSilence.timeoutMs
       ) {
         this.log.info("Connecting timeout deferred: turn in flight, awaiting reconnect", {
           event: "sandbox.connecting_timeout_deferred",
           elapsed_ms: connectingResult.elapsedMs,
+          in_flight_silence_ms: silenceMs,
+          last_activity: sandbox.last_activity,
           silence_backstop_ms: this.config.inFlightSilence.timeoutMs,
         });
         await this.armConnectingTimeout("reconnect", now);
@@ -1291,17 +1312,22 @@ export class SandboxLifecycleManager {
       // turn — until the silence reaches the backstop. A real completion that
       // arrives before then lands on a still-"processing" message and completes
       // normally, so the status never flips failed→completed.
+      // Fold agent activity (last_activity) into the silence clock, not just
+      // last_heartbeat: an agent emitting step/tool events while the bridge
+      // heartbeat has lapsed is alive, so its in-flight turn must not be
+      // force-failed. A null silence (no sign of life at all) fails *safe* —
+      // fall through to the terminal path rather than deferring forever.
+      const silenceMs = inFlightSilenceMs(sandbox.last_heartbeat, sandbox.last_activity, now);
       if (
         this.storage.getIsProcessing() &&
-        // ?? Infinity (not 0) so a missing ageMs fails *safe*: fall through to
-        // the terminal path rather than deferring forever. Unreachable in
-        // practice (evaluateHeartbeatHealth only sets isStale with ageMs set),
-        // but the fail-safe direction matters if that ever changes.
-        (heartbeatHealth.ageMs ?? Infinity) < this.config.inFlightSilence.timeoutMs
+        silenceMs !== null &&
+        silenceMs < this.config.inFlightSilence.timeoutMs
       ) {
         this.log.info("Heartbeat stale deferred: turn in flight, awaiting recovery", {
           event: "sandbox.heartbeat_stale_deferred",
           last_heartbeat_ms: heartbeatHealth.ageMs ?? 0,
+          in_flight_silence_ms: silenceMs,
+          last_activity: sandbox.last_activity,
           silence_backstop_ms: this.config.inFlightSilence.timeoutMs,
         });
         await this.alarmScheduler.scheduleAlarm(now + this.config.heartbeat.timeoutMs);
@@ -1553,7 +1579,7 @@ export class SandboxLifecycleManager {
    * remote branch is guaranteed to exist and fetch cleanly. Before any PR it is
    * null and we fall back to the base branch.
    */
-  private resolveCheckoutBranch(session: SessionRow): string {
+  private resolveCheckoutBranch(session: SessionRow): string | null {
     return session.branch_name ?? session.base_branch;
   }
 

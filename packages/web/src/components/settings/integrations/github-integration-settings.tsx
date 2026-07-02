@@ -275,7 +275,7 @@ function GlobalSettingsSection({
   };
 
   return (
-    <Section title="Defaults & Scope" description="Global behavior and repository targeting.">
+    <Section title="Defaults & Scope" description="Global behavior and repository scope.">
       {error && <Message tone="error" text={error} />}
 
       <label
@@ -306,8 +306,8 @@ function GlobalSettingsSection({
         <div>
           <span className="text-sm font-medium text-foreground">Auto-approve low-risk PRs</span>
           <span className="text-sm text-muted-foreground ml-2">
-            Approve a PR once it&apos;s labeled <code>visual-qa: pass</code> and Reef has marked it{" "}
-            <code>reef: low risk</code>
+            Approve a PR once it&apos;s labeled <code>visual-qa: pass</code> or{" "}
+            <code>visual-qa: skip</code> and Reef has marked it <code>reef: low risk</code>
           </span>
         </div>
         <Switch

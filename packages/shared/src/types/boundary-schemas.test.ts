@@ -21,9 +21,45 @@ describe("boundary schemas", () => {
       expect(result.success).toBe(true);
     });
 
-    it("rejects a malformed session creation request", () => {
+    it("parses a valid repo-less session creation request", () => {
+      const result = createSessionRequestSchema.safeParse({
+        title: "Incident sweep",
+        model: "anthropic/claude-sonnet-4-6",
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects a partial repository session creation request", () => {
       const result = createSessionRequestSchema.safeParse({
         repoOwner: "open-inspect",
+      });
+
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects a whitespace-only partial repository session creation request", () => {
+      const result = createSessionRequestSchema.safeParse({
+        repoOwner: "   ",
+        repoName: "background-agents",
+      });
+
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects whitespace-only repository identifiers", () => {
+      const result = createSessionRequestSchema.safeParse({
+        repoOwner: "   ",
+        repoName: "\t",
+      });
+
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects branch without repository context", () => {
+      const result = createSessionRequestSchema.safeParse({
+        title: "Incident sweep",
+        branch: "main",
       });
 
       expect(result.success).toBe(false);
@@ -87,6 +123,32 @@ describe("boundary schemas", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.ackId).toBe("ack-1");
+      }
+    });
+
+    // Regression: OpenCode/the bridge send step_finish `tokens` as an object.
+    // A z.number() type dropped the whole event at the WS boundary, so session
+    // cost silently stopped accumulating. The event must parse and keep `cost`.
+    it("parses a step_finish event with object-shaped token usage", () => {
+      const result = sandboxEventSchema.safeParse({
+        type: "step_finish",
+        cost: 0.043449,
+        tokens: {
+          total: 11572,
+          input: 3,
+          output: 5,
+          reasoning: 0,
+          cache: { read: 0, write: 11564 },
+        },
+        reason: "stop",
+        messageId: "message-1",
+        sandboxId: "sandbox-1",
+        timestamp: 123,
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success && result.data.type === "step_finish") {
+        expect(result.data.cost).toBe(0.043449);
       }
     });
   });

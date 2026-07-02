@@ -159,9 +159,9 @@ export interface SessionParticipant {
 export interface Session {
   id: string;
   title: string | null;
-  repoOwner: string;
-  repoName: string;
-  baseBranch: string;
+  repoOwner: string | null;
+  repoName: string | null;
+  baseBranch: string | null;
   branchName: string | null;
   baseSha: string | null;
   currentSha: string | null;
@@ -359,7 +359,23 @@ export const sandboxEventSchema = z.discriminatedUnion("type", [
   messageSandboxEventBaseSchema.extend({
     type: z.literal("step_finish"),
     cost: z.number().optional(),
-    tokens: z.number().optional(),
+    // OpenCode / the bridge emit token usage as an object
+    // ({ total, input, output, reasoning, cache: { read, write } }), NOT a
+    // number. Typing this as z.number() made the whole discriminated-union
+    // variant fail boundary validation, so every step_finish was dropped and
+    // session cost stopped accumulating. Model the object loosely and allow
+    // unknown keys so future OpenCode usage fields never drop the event again.
+    tokens: z
+      .object({
+        total: z.number(),
+        input: z.number(),
+        output: z.number(),
+        reasoning: z.number(),
+        cache: z.object({ read: z.number(), write: z.number() }).partial(),
+      })
+      .partial()
+      .passthrough()
+      .optional(),
     reason: z.string().optional(),
     isSubtask: z.boolean().optional(),
   }),
@@ -515,9 +531,9 @@ export type ServerMessage =
 export interface SessionState {
   id: string;
   title: string | null;
-  repoOwner: string;
-  repoName: string;
-  baseBranch: string;
+  repoOwner: string | null;
+  repoName: string | null;
+  baseBranch: string | null;
   branchName: string | null;
   status: SessionStatus;
   sandboxStatus: SandboxStatus;
@@ -533,6 +549,8 @@ export interface SessionState {
   codeServerUrl?: string | null;
   codeServerPassword?: string | null;
   tunnelUrls?: Record<string, string> | null;
+  /** Display-only labels for tunnel ports, keyed by port number as a string. */
+  tunnelPortLabels?: Record<string, string> | null;
   ttydUrl?: string | null;
   ttydToken?: string | null;
   planMode?: boolean;
@@ -747,15 +765,34 @@ export type CallbackContext =
   | AutomationCallbackContext
   | GitHubCallbackContext;
 
+function hasRepositoryIdentifier(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+interface CreateSessionRepositoryFields {
+  repoOwner?: string | null;
+  repoName?: string | null;
+  branch?: string;
+}
+
+function hasMatchingRepositoryIdentifiers(data: CreateSessionRepositoryFields): boolean {
+  return hasRepositoryIdentifier(data.repoOwner) === hasRepositoryIdentifier(data.repoName);
+}
+
+function hasRepositoryForBranch(data: CreateSessionRepositoryFields): boolean {
+  return hasRepositoryIdentifier(data.repoOwner) || !data.branch?.trim();
+}
+
 // API response types
 //
 // `CreateSessionRequest` is a Zod schema (upstream) so request bodies are
 // validated at the boundary. Fork-local fields (PR descriptor, plan-mode, and
 // preview-mode options) are folded into the schema so they remain validated
-// rather than dropped.
-export const createSessionRequestSchema = z.object({
-  repoOwner: z.string(),
-  repoName: z.string(),
+// rather than dropped. Repository identifiers are nullish (upstream) so a
+// session can be created without a repository configured.
+const createSessionRequestBaseSchema = z.object({
+  repoOwner: z.string().trim().min(1).nullish(),
+  repoName: z.string().trim().min(1).nullish(),
   title: z.string().optional(),
   model: z.string().optional(),
   reasoningEffort: z.string().optional(),
@@ -788,29 +825,48 @@ export const createSessionRequestSchema = z.object({
   previewEnabled: z.boolean().optional(),
 });
 
+export const createSessionRequestSchema = createSessionRequestBaseSchema
+  .refine(hasMatchingRepositoryIdentifiers, {
+    message: "repoOwner and repoName must be provided together",
+    path: ["repoName"],
+  })
+  .refine(hasRepositoryForBranch, {
+    message: "branch requires repoOwner and repoName",
+    path: ["branch"],
+  });
+
 export type CreateSessionRequest = z.infer<typeof createSessionRequestSchema>;
 
-export const createSessionInputSchema = createSessionRequestSchema.extend({
-  userId: z.string().optional(),
-  spawnSource: spawnSourceSchema.optional(),
-  authProvider: z.enum(["github", "google"]).optional(),
-  authUserId: z.string().optional(),
-  authEmail: z.string().optional(),
-  authName: z.string().optional(),
-  authAvatarUrl: z.string().optional(),
-  scmUserId: z.string().optional(),
-  scmLogin: z.string().optional(),
-  scmName: z.string().optional(),
-  scmEmail: z.string().optional(),
-  scmAvatarUrl: z.string().optional(),
-  actorUserId: z.string().optional(),
-  actorDisplayName: z.string().optional(),
-  actorEmail: z.string().optional(),
-  actorAvatarUrl: z.string().optional(),
-  scmToken: z.string().optional(),
-  scmRefreshToken: z.string().optional(),
-  scmTokenExpiresAt: z.number().optional(),
-});
+export const createSessionInputSchema = createSessionRequestBaseSchema
+  .extend({
+    userId: z.string().optional(),
+    spawnSource: spawnSourceSchema.optional(),
+    authProvider: z.enum(["github", "google"]).optional(),
+    authUserId: z.string().optional(),
+    authEmail: z.string().optional(),
+    authName: z.string().optional(),
+    authAvatarUrl: z.string().optional(),
+    scmUserId: z.string().optional(),
+    scmLogin: z.string().optional(),
+    scmName: z.string().optional(),
+    scmEmail: z.string().optional(),
+    scmAvatarUrl: z.string().optional(),
+    actorUserId: z.string().optional(),
+    actorDisplayName: z.string().optional(),
+    actorEmail: z.string().optional(),
+    actorAvatarUrl: z.string().optional(),
+    scmToken: z.string().optional(),
+    scmRefreshToken: z.string().optional(),
+    scmTokenExpiresAt: z.number().optional(),
+  })
+  .refine(hasMatchingRepositoryIdentifiers, {
+    message: "repoOwner and repoName must be provided together",
+    path: ["repoName"],
+  })
+  .refine(hasRepositoryForBranch, {
+    message: "branch requires repoOwner and repoName",
+    path: ["branch"],
+  });
 
 export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
 
@@ -848,8 +904,8 @@ export interface SpawnChildSessionRequest {
 
 /** Returned by parent DO's GET /internal/spawn-context */
 export interface SpawnContext {
-  repoOwner: string;
-  repoName: string;
+  repoOwner: string | null;
+  repoName: string | null;
   repoId: number | null;
   model: string;
   reasoningEffort: string | null;
@@ -886,8 +942,8 @@ export interface ChildSessionDetail {
     id: string;
     title: string;
     status: SessionStatus;
-    repoOwner: string;
-    repoName: string;
+    repoOwner: string | null;
+    repoName: string | null;
     branchName: string | null;
     model: string;
     createdAt: number;
@@ -1013,10 +1069,6 @@ import type { TriggerConfig } from "../triggers/conditions";
 export interface Automation {
   id: string;
   name: string;
-  repoOwner: string;
-  repoName: string;
-  baseBranch: string;
-  repoId: number | null;
   instructions: string;
   triggerType: AutomationTriggerType;
   scheduleCron: string | null;
@@ -1033,15 +1085,16 @@ export interface Automation {
   lastRunAt: number | null;
   eventType: string | null;
   triggerConfig: TriggerConfig | null;
+  repoOwner: string | null;
+  repoName: string | null;
+  baseBranch: string | null;
+  repoId: number | null;
   /** Present on API responses when the request includes actor context. */
   canDelete?: boolean;
 }
 
 export interface CreateAutomationRequest {
   name: string;
-  repoOwner: string;
-  repoName: string;
-  baseBranch?: string;
   instructions: string;
   triggerType?: AutomationTriggerType;
   scheduleCron?: string;
@@ -1051,16 +1104,21 @@ export interface CreateAutomationRequest {
   eventType?: string;
   triggerConfig?: TriggerConfig;
   sentryClientSecret?: string;
+  repoOwner?: string | null;
+  repoName?: string | null;
+  baseBranch?: string | null;
 }
 
 export interface UpdateAutomationRequest {
   name?: string;
   instructions?: string;
+  repoOwner?: string | null;
+  repoName?: string | null;
   scheduleCron?: string;
   scheduleTz?: string;
   model?: string;
   reasoningEffort?: string | null;
-  baseBranch?: string;
+  baseBranch?: string | null;
   eventType?: string;
   triggerConfig?: TriggerConfig;
 }
