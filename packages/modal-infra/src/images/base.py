@@ -74,7 +74,8 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 #      moved out of github-bot into on-demand OpenCode skills)
 # v99: submit-review-verdict tool + gh guard blocks raw issue comments in github-bot
 #      sessions (verdict posts server-side); reef-verdict skill calls the tool
-CACHE_BUSTER = "v99-verdict-tool-guard"
+# v100: add claude-sonnet-5 to the Anthropic adaptive-thinking set in bridge.py
+CACHE_BUSTER = "v100-sonnet-5"
 
 # Base image with all development tools
 base_image = (

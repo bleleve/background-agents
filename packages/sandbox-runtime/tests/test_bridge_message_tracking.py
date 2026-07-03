@@ -284,6 +284,19 @@ class TestBuildPromptRequestBody:
             "outputConfig": {"effort": "high"},
         }
 
+    def test_with_sonnet_5_adaptive_thinking(self, bridge: AgentBridge):
+        """Sonnet 5 should use adaptive thinking instead of manual budgets."""
+        body = bridge._build_prompt_request_body(
+            "Hello",
+            "anthropic/claude-sonnet-5",
+            reasoning_effort="xhigh",
+        )
+
+        assert body["model"]["options"] == {
+            "thinking": {"type": "adaptive"},
+            "outputConfig": {"effort": "xhigh"},
+        }
+
     @pytest.mark.asyncio
     async def test_prompt_suffix_applies_only_on_first_prompt(
         self, monkeypatch: pytest.MonkeyPatch, bridge: AgentBridge
