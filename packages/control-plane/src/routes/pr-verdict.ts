@@ -20,6 +20,7 @@ import { SessionIndexStore } from "../db/session-index";
 import { createLogger } from "../logger";
 import type { Env } from "../types";
 import { error, json, parsePattern, type RequestContext, type Route } from "./shared";
+import { enforceVerdictFloor } from "./verdict-floor";
 
 const logger = createLogger("pr-verdict");
 
@@ -105,6 +106,18 @@ export async function handleSubmitVerdict(
       }
     );
 
+  // Deterministically enforce the coverage floor: the posted comment can never
+  // show a badge below the highest-severity finding it lists, regardless of
+  // model adherence to the prompt's coupling rule (see verdict-floor.ts).
+  const floored = enforceVerdictFloor(parsed.body);
+  if (floored.changed) {
+    logger.info("pr_verdict.floor_enforced", {
+      ...meta,
+      from: floored.from ?? null,
+      to: floored.to ?? null,
+    });
+  }
+
   // Delete any prior verdict comment(s) first — a fresh comment notifies
   // subscribers, an in-place edit would be silent. Best-effort: a failure to
   // delete one stale verdict must not block posting the new one.
@@ -114,7 +127,7 @@ export async function handleSubmitVerdict(
   try {
     postResponse = await gh(`/issues/${prNumber}/comments`, {
       method: "POST",
-      body: JSON.stringify({ body: parsed.body }),
+      body: JSON.stringify({ body: floored.body }),
     });
   } catch (e) {
     logger.error("pr_verdict.github_fetch_failed", {
