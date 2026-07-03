@@ -83,6 +83,15 @@ export interface CreateSandboxConfig {
   sandboxSettings?: SandboxSettings;
   /** User-supplied OpenCode config JSON string (deep-merged on top of system config in sandbox) */
   opencodeUserConfig?: string;
+  /**
+   * True when this session was started by the github-bot (spawn_source ===
+   * "github-bot"). Delivered to the sandbox as the GITHUB_BOT_SESSION env var,
+   * which (a) installs the `submit-review-verdict` tool and (b) tells the gh
+   * guard to block raw issue comments — in a github-bot session the only
+   * legitimate issue comment is the review verdict, which must go through the
+   * tool. See git_credential_helper.py `_run_gh_guard`.
+   */
+  githubBotSession?: boolean;
 }
 
 /**
@@ -149,6 +158,8 @@ export interface RestoreConfig {
   sandboxSettings?: SandboxSettings;
   /** User-supplied OpenCode config JSON string (deep-merged on top of system config in sandbox) */
   opencodeUserConfig?: string;
+  /** True for github-bot sessions — see CreateSandboxConfig. Re-resolved on each restore. */
+  githubBotSession?: boolean;
 }
 
 /**

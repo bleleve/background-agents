@@ -84,6 +84,12 @@ export interface CreateSandboxRequest {
   mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
   opencodeUserConfig?: string;
+  /**
+   * True for github-bot sessions. Sent as `github_bot_session`; modal-infra
+   * turns it into the GITHUB_BOT_SESSION env var (see manager.py). Gates the
+   * `submit-review-verdict` tool and the gh guard's raw-issue-comment block.
+   */
+  githubBotSession?: boolean;
 }
 
 export interface CreateSandboxResponse {
@@ -116,6 +122,8 @@ export interface RestoreSandboxRequest {
   mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
   opencodeUserConfig?: string;
+  /** True for github-bot sessions — see CreateSandboxRequest.githubBotSession. */
+  githubBotSession?: boolean;
 }
 
 export interface RestoreSandboxResponse {
@@ -290,6 +298,7 @@ export class ModalClient {
           code_server_enabled: request.codeServerEnabled ?? false,
           agent_slack_notify_enabled: request.agentSlackNotifyEnabled ?? false,
           agent_tool_flags: request.agentToolFlags ?? null,
+          github_bot_session: request.githubBotSession ?? false,
           mcp_servers: request.mcpServers || null,
           sandbox_settings: request.sandboxSettings ?? null,
           opencode_user_config: request.opencodeUserConfig ?? null,
@@ -386,6 +395,7 @@ export class ModalClient {
           code_server_enabled: request.codeServerEnabled ?? false,
           agent_slack_notify_enabled: request.agentSlackNotifyEnabled ?? false,
           agent_tool_flags: request.agentToolFlags ?? null,
+          github_bot_session: request.githubBotSession ?? false,
           sandbox_settings: request.sandboxSettings ?? null,
           opencode_user_config: request.opencodeUserConfig ?? null,
         }),

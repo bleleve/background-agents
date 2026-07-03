@@ -273,9 +273,9 @@ describe("buildCodeReviewPrompt", () => {
     // Decoupled from findings: a clean review must not skip the verdict
     expect(prompt).toContain("mandatory");
     expect(prompt).toContain("regardless of your conclusion");
-    // Self-verification stays inline even though the posting call moved to the skill:
-    // the agent must confirm the post printed the comment's html_url.
-    expect(prompt).toContain("printed the comment's `html_url`");
+    // Self-verification stays inline even though the posting call moved to the skill/tool:
+    // the agent must confirm the submit-review-verdict tool returned the comment URL.
+    expect(prompt).toContain("`submit-review-verdict` tool returned the comment's URL");
     expect(prompt).toContain("Do not end the review without a posted verdict");
   });
 

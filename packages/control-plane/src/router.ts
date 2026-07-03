@@ -28,6 +28,7 @@ import { sessionRoutes } from "./routes/sessions";
 import { handleBootProgress } from "./routes/boot-progress";
 import { handleSlackNotify } from "./routes/slack-notify";
 import { prReviewRoutes } from "./routes/pr-review";
+import { prVerdictRoutes } from "./routes/pr-verdict";
 import { reviewSuggestionRoutes } from "./routes/review-suggestions";
 import { recordSuggestionRoutes } from "./routes/record-suggestion";
 import { webhookRoutes } from "./webhooks";
@@ -77,6 +78,7 @@ const PUBLIC_ROUTES: RegExp[] = [
 const SANDBOX_AUTH_ROUTES: RegExp[] = [
   /^\/sessions\/[^/]+\/pr$/, // PR creation from sandbox
   /^\/sessions\/[^/]+\/pr-review$/, // Formal PR review submission from sandbox (policy-checked)
+  /^\/sessions\/[^/]+\/pr-verdict$/, // Review verdict comment posted server-side from sandbox
   /^\/sessions\/[^/]+\/openai-token-refresh$/, // OpenAI token refresh from sandbox
   /^\/sessions\/[^/]+\/scm-credentials$/, // SCM credential broker for git credential helper
   /^\/sessions\/[^/]+\/tunnel-urls$/, // Tunnel URL fetch for sandboxes whose .tunnels.env write isn't visible from inside
@@ -366,6 +368,11 @@ const routes: Route[] = [
   // Formal PR review submission from the sandbox (sandbox-authenticated,
   // policy-checked server-side). The `submit-pr-review` tool's only backend.
   ...prReviewRoutes,
+
+  // Review verdict comment posted server-side from the sandbox. The
+  // `submit-review-verdict` tool's only backend; deletes the prior verdict and
+  // posts the fresh one under the bot identity.
+  ...prVerdictRoutes,
 
   // Repository management
   ...reposRoutes,

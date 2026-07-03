@@ -72,7 +72,9 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v97: bump OpenCode to 1.17.13
 # v98: bundle reef-inline-suggestion + reef-verdict skills (PR-review prompt mechanics
 #      moved out of github-bot into on-demand OpenCode skills)
-CACHE_BUSTER = "v98-reef-review-skills"
+# v99: submit-review-verdict tool + gh guard blocks raw issue comments in github-bot
+#      sessions (verdict posts server-side); reef-verdict skill calls the tool
+CACHE_BUSTER = "v99-verdict-tool-guard"
 
 # Base image with all development tools
 base_image = (

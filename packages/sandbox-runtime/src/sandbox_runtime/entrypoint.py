@@ -77,6 +77,10 @@ AGENT_TOOLS_GATED_ON_ENV: dict[str, str] = {
     "ast-anchor.js": "AGENT_TOOL_AST_ANCHOR_JS",
     "validate-suggestion.js": "AGENT_TOOL_VALIDATE_SUGGESTION_JS",
     "record-suggestion.js": "AGENT_TOOL_RECORD_SUGGESTION_JS",
+    # Only github-bot sessions post a review verdict. GITHUB_BOT_SESSION also
+    # switches the gh guard to block raw issue comments (git_credential_helper),
+    # so the tool being installed and the block being active are one signal.
+    "submit-review-verdict.js": "GITHUB_BOT_SESSION",
 }
 
 AGENT_TOOLS_REQUIRING_REPOSITORY: set[str] = set()

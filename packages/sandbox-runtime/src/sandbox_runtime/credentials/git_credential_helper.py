@@ -337,8 +337,32 @@ GH_GUARD_BLOCK_RC = 3
 _REVIEWS_PATH_RE = re.compile(
     r"^(?:https?://[^/]+/)?/?(?:repos/)?[^/\s]+/[^/\s]+/pulls/\d+/reviews/?$"
 )
+# A gh-api path argument that targets an issue's *comments collection* — POSTing
+# to it creates a conversation comment. Deliberately excludes
+# `.../issues/comments/{id}` (edit/delete a comment by id) and the `pulls/`
+# review-comment endpoints (inline suggestions + `.../comments/{id}/replies`),
+# which stay allowed. Accepts a leading slash, an optional `repos/` prefix, and a
+# full api.github.com URL form. On a PR, `issues/{n}` and `pulls/{n}` share the
+# number, so this also matches an issue comment posted against a PR.
+_ISSUE_COMMENTS_PATH_RE = re.compile(
+    r"^(?:https?://[^/]+/)?/?(?:repos/)?[^/\s]+/[^/\s]+/issues/\d+/comments/?$"
+)
 _GH_FIELD_FLAGS = frozenset({"-f", "--field", "-F", "--raw-field"})
 _GH_BLOCKED_EVENTS = frozenset({"APPROVE", "REQUEST_CHANGES"})
+
+
+def _is_github_bot_session() -> bool:
+    """True when this sandbox is a github-bot session (GITHUB_BOT_SESSION set).
+
+    In a github-bot review/@mention session the ONLY legitimate issue comment is
+    the review verdict, which must go through the `submit-review-verdict` tool
+    (posted server-side). So raw issue-comment creation is blocked here — but
+    left alone in ordinary coding sessions (Slack, web, Linear, user), which may
+    legitimately comment on an issue or PR. The env var is set by the control
+    plane / modal-infra only for github-bot sessions.
+    """
+    return os.environ.get("GITHUB_BOT_SESSION", "").strip().lower() == "true"
+
 
 _GH_GUARD_BLOCK_MESSAGE = (
     "BLOCKED: do not submit a formal pull request review with raw gh (event "
@@ -350,8 +374,23 @@ _GH_GUARD_BLOCK_MESSAGE = (
     "For everything else, raw gh is fine:\n"
     "  - Inline code comment:  gh api repos/OWNER/REPO/pulls/N/comments "
     "-f body=... -f path=... -F line=...\n"
-    "  - Overall verdict:      gh api repos/OWNER/REPO/issues/N/comments "
-    "-f body='<your summary>'\n"
+    "  - Review verdict:       use the `submit-review-verdict` tool "
+    "(raw issue comments are blocked in this session)\n"
+)
+
+_GH_GUARD_ISSUE_COMMENT_BLOCK_MESSAGE = (
+    "BLOCKED: do not post a raw issue/PR conversation comment in a review "
+    "session.\n"
+    "\n"
+    "The review verdict is the only conversation comment a review posts — use "
+    "the `submit-review-verdict` tool for it (it deletes any prior verdict and "
+    "posts the fresh one server-side).\n"
+    "\n"
+    "For everything else, raw gh is fine:\n"
+    "  - Inline code suggestion:  gh api repos/OWNER/REPO/pulls/N/comments "
+    "-f body=... -f path=... -F line=...\n"
+    "  - Reply in a review thread: gh api "
+    "repos/OWNER/REPO/pulls/N/comments/COMMENT_ID/replies -f body=...\n"
 )
 
 
@@ -445,6 +484,63 @@ def _api_is_formal_review(args: list[str]) -> bool:
     return any(ev.upper() in _GH_BLOCKED_EVENTS for ev in events)
 
 
+def _api_posts_issue_comment(args: list[str]) -> bool:
+    """True if a ``gh api ...`` invocation POSTs a new issue/PR conversation comment.
+
+    Blocks only when both hold: the path is the issue *comments collection*
+    (``.../issues/N/comments``) and the effective method is POST (explicit
+    ``-X POST`` or implicit because a field/input flag is present). Editing or
+    deleting a comment by id (``.../issues/comments/{id}``), GETs, and the
+    ``pulls/`` review-comment endpoints do not match, so they stay allowed.
+    """
+    path_is_issue_comments = False
+    method: str | None = None
+    has_field_or_input = False
+
+    i = 0
+    n = len(args)
+    while i < n:
+        a = args[i]
+        if a in ("-X", "--method"):
+            if i + 1 < n:
+                method = args[i + 1].upper()
+            i += 2
+            continue
+        if a.startswith("--method="):
+            method = a.split("=", 1)[1].upper()
+            i += 1
+            continue
+        if a.startswith("-X") and len(a) > 2:  # glued, e.g. -XPOST
+            method = a[2:].upper()
+            i += 1
+            continue
+        if a in _GH_FIELD_FLAGS:  # spaced form: `-f body=...`
+            has_field_or_input = True
+            i += 2
+            continue
+        if a.startswith("--field=") or a.startswith("--raw-field="):
+            has_field_or_input = True
+            i += 1
+            continue
+        if (a.startswith("-f") or a.startswith("-F")) and len(a) > 2:  # glued -fbody=...
+            has_field_or_input = True
+            i += 1
+            continue
+        if a == "--input" or a.startswith("--input="):
+            has_field_or_input = True
+            i += 1 if "=" in a else 2
+            continue
+        if not a.startswith("-") and _ISSUE_COMMENTS_PATH_RE.match(a):
+            path_is_issue_comments = True
+        i += 1
+
+    if not path_is_issue_comments:
+        return False
+    if method in ("GET", "HEAD", "DELETE", "PATCH", "PUT"):
+        return False
+    return method == "POST" or (method is None and has_field_or_input)
+
+
 def _gh_command_is_blocked(gh_args: list[str]) -> bool:
     """True if ``gh_args`` is a raw formal-review submission (always blocked).
 
@@ -461,14 +557,43 @@ def _gh_command_is_blocked(gh_args: list[str]) -> bool:
     return False
 
 
+def _gh_command_posts_issue_comment(gh_args: list[str]) -> bool:
+    """True if ``gh_args`` creates an issue/PR conversation comment via raw gh.
+
+    Covers ``gh pr comment``, ``gh issue comment``, and a ``gh api`` POST to the
+    issue comments collection. Blocked ONLY in github-bot sessions (see
+    ``_run_gh_guard``): those post exactly one conversation comment — the review
+    verdict — which must go through the `submit-review-verdict` tool instead.
+    """
+    if not gh_args:
+        return False
+    sub = gh_args[0]
+    if sub == "pr" and len(gh_args) >= 2 and gh_args[1] == "comment":
+        return True
+    if sub == "issue" and len(gh_args) >= 2 and gh_args[1] == "comment":
+        return True
+    if sub == "api":
+        return _api_posts_issue_comment(gh_args[1:])
+    return False
+
+
 def _run_gh_guard(gh_args: list[str]) -> int:
     """Guard action for the gh wrapper: exit 3 to block, 0 to allow.
 
     Receives the full argv passed to ``gh`` (the wrapper's ``"$@"``). Never reads
     stdin, so the wrapper's subsequent ``exec gh "$@"`` keeps stdin intact.
     """
+    # Formal reviews are blocked in every session (the sanctioned path is the
+    # submit-pr-review tool).
     if _gh_command_is_blocked(gh_args):
         sys.stderr.write(_GH_GUARD_BLOCK_MESSAGE)
+        sys.stderr.flush()
+        return GH_GUARD_BLOCK_RC
+    # Raw issue comments are blocked only in github-bot sessions, where the
+    # verdict is the sole conversation comment and goes through the
+    # submit-review-verdict tool.
+    if _is_github_bot_session() and _gh_command_posts_issue_comment(gh_args):
+        sys.stderr.write(_GH_GUARD_ISSUE_COMMENT_BLOCK_MESSAGE)
         sys.stderr.flush()
         return GH_GUARD_BLOCK_RC
     return 0
