@@ -276,7 +276,7 @@ Three prompt templates in `src/prompts.ts`:
   `reef-verdict` skill (`packages/sandbox-runtime/src/sandbox_runtime/skills/reef-verdict/`). The
   prompt decides the content; the skill renders the body and posts it with the
   `submit-review-verdict` tool, which deletes any prior verdict and posts the fresh one server-side
-  (raw `gh api .../issues/{n}/comments` is blocked in github-bot sessions — see below). The skill
+  (raw `gh api .../issues/{n}/comments` is blocked in dedicated review sessions (`REEF_REVIEW_SESSION`) — see below). The skill
   then syncs the matching `reef: low risk`/`reef: medium risk`/`reef: high risk` label on the PR via
   `gh`; the session link in the footer is built from `sessionUrl`, the only extra param the handler
   passes beyond webhook metadata
