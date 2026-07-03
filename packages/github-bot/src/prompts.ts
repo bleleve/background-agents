@@ -123,8 +123,9 @@ export const REEF_VERDICT_MARKER = "<!-- reef-verdict -->";
 // Hidden per-suggestion risk marker the agent prepends to each inline comment body.
 // Invisible when rendered, it carries the finding's risk so the webhook handler can
 // record it for the "by risk" suggestion analytics (which would otherwise be all
-// `unknown`). The capture group is the risk level. Keep in sync with the heredoc in
-// buildInlineSuggestionWorkflow.
+// `unknown`). The capture group is the risk level. Keep in sync with the hidden marker
+// written in Step 3 of the `reef-inline-suggestion` skill
+// (packages/sandbox-runtime/src/sandbox_runtime/skills/reef-inline-suggestion/SKILL.md).
 export const REEF_RISK_MARKER_RE = /<!--\s*reef-risk:\s*(low|medium|high)\s*-->/i;
 
 function buildVerdictWorkflow(params: {

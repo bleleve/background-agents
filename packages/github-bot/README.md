@@ -259,13 +259,18 @@ Three prompt templates in `src/prompts.ts`:
   lookup), resolves the repo's `autoApproveOnOpen` live to gate `REQUEST_CHANGES`, and posts the
   review with the App token. As a backstop, the `pull_request_review` webhook handler dismisses any
   off-policy formal review the bot lands when `autoApproveOnOpen` is off.
-- Post inline `suggestion` comments via `gh api .../pulls/{n}/comments`
-- Use `gh pr view ... --json headRefOid` for `commit_id`, temp markdown files for body, and
-  `side=RIGHT`
-- Post a single editable risk-map **verdict** comment (anchored by a hidden marker), set the
-  matching `reef: low risk`/`reef: medium risk`/`reef: high risk` label on the PR, and link the
-  originating session in the footer (built from `sessionUrl`, the only extra param the handler
-  passes beyond webhook metadata)
+- Post inline `suggestion` comments via `gh api .../pulls/{n}/comments`; the mechanical
+  posting steps (head SHA fetch, temp markdown files, `side=RIGHT` anchor derivation,
+  read-back) are delegated to the bundled `reef-inline-suggestion` OpenCode skill
+  (`packages/sandbox-runtime/src/sandbox_runtime/skills/reef-inline-suggestion/`) loaded
+  on demand
+- Post a single risk-map **verdict** comment (anchored by a hidden marker) via the bundled
+  `reef-verdict` skill (`packages/sandbox-runtime/src/sandbox_runtime/skills/reef-verdict/`),
+  which handles the paginated delete-then-post and label sync; the prompt decides the content,
+  the skill handles the mechanics. The skill also sets the matching
+  `reef: low risk`/`reef: medium risk`/`reef: high risk` label on the PR; the session link in
+  the footer is built from `sessionUrl`, the only extra param the handler passes beyond webhook
+  metadata
 
 **`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and asks the
 agent to first classify the request into one of two paths (the model decides from the comment's
