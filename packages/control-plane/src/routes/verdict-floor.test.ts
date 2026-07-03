@@ -30,11 +30,13 @@ describe("enforceVerdictFloor", () => {
   ].join("\n");
 
   it("raises the header to the highest coverage gap and fixes the summary (PR #68)", () => {
-    const { body, changed, from, to } = enforceVerdictFloor(pr68);
+    const { body, changed, from, to, level } = enforceVerdictFloor(pr68);
 
     expect(changed).toBe(true);
     expect(from).toBe("🔵 Low");
     expect(to).toBe("🟡 Medium");
+    // The label-driving level reflects the enforced badge, not the model's.
+    expect(level).toBe("medium");
 
     // Header badge is floored to Medium.
     expect(body).toContain("## 🟡 Reef Review — Medium risk");
@@ -55,6 +57,26 @@ describe("enforceVerdictFloor", () => {
     const twice = enforceVerdictFloor(once);
     expect(twice.changed).toBe(false);
     expect(twice.body).toBe(once);
+  });
+
+  it("reports the final risk level (for the server-side label sync)", () => {
+    const clean = [
+      "<!-- reef-verdict -->",
+      "## 🔵 Reef Review — Low risk",
+      "**No findings.**",
+    ].join("\n");
+    expect(enforceVerdictFloor(clean).level).toBe("low");
+
+    const red = [
+      "<!-- reef-verdict -->",
+      "## 🔵 Reef Review — Low risk",
+      "### Worth a look",
+      "- 🔴 `x.ts:1` — bug → [inline](https://e/1)",
+    ].join("\n");
+    expect(enforceVerdictFloor(red).level).toBe("high");
+
+    // No recognizable header → no level to sync a label from.
+    expect(enforceVerdictFloor("not a verdict").level).toBeUndefined();
   });
 
   it("floors the header to a 🔴 Worth-a-look finding (not just coverage)", () => {

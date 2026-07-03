@@ -217,15 +217,15 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).not.toContain("-X PATCH");
   });
 
-  it("sets a risk label derived from the verdict header, replacing any prior one", () => {
+  it("delegates the risk label to the server-side control plane, not the agent", () => {
     const prompt = buildCodeReviewPrompt(baseParams);
-    // The label-sync shell (gh label create/remove/add, badge parse) moved into the
-    // reef-verdict skill; it is asserted there in skills.test.ts. The prompt keeps the
-    // mechanical-derivation directive so the label can never drift from the badge.
-    expect(prompt).toContain("`reef-verdict` skill");
-    expect(prompt).toContain("do not re-judge the risk here");
-    // The old free-choice placeholder must be gone — it let the label diverge from the badge.
+    // The label is now set server-side from the posted (floor-enforced) badge, so it
+    // can never drift from the comment; the prompt tells the agent NOT to set it.
+    expect(prompt).toContain("all server-side");
+    expect(prompt).toContain("You do not set the label yourself");
+    // No client-side label mechanics leak into the prompt.
     expect(prompt).not.toContain('--add-label "<low|medium|high>-risk"');
+    expect(prompt).not.toContain("do not re-judge the risk here");
   });
 
   it("links the session in the verdict footer when a sessionUrl is provided", () => {

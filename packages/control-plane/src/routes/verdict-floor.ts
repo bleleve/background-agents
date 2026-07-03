@@ -39,6 +39,10 @@ const BADGE: Record<number, { emoji: Severity; word: string }> = {
   3: { emoji: "🔴", word: "High" },
 };
 
+/** The risk level a badge maps to — also the suffix of the `reef: <level> risk` PR label. */
+export type RiskLevel = "low" | "medium" | "high";
+const LEVEL_BY_RANK: Record<number, RiskLevel> = { 1: "low", 2: "medium", 3: "high" };
+
 /** The verdict header, e.g. `## 🟡 Reef Review — Medium risk`. */
 const HEADER_RE = /^(#{1,6}\s*)(🔵|🟡|🔴)(\s*Reef Review\s*—\s*)(Low|Medium|High)(\s*risk\b.*)$/;
 /** A markdown list item whose badge is a severity emoji (a finding bullet). */
@@ -61,6 +65,12 @@ export interface FloorResult {
   from?: string;
   /** Header badge after the raise, e.g. `🟡 Medium` (set only when the header moved). */
   to?: string;
+  /**
+   * The final (post-enforcement) risk level, for syncing the `reef: <level> risk`
+   * PR label from the same authoritative badge. Undefined when the body has no
+   * recognizable verdict header.
+   */
+  level?: RiskLevel;
 }
 
 /**
@@ -136,5 +146,5 @@ export function enforceVerdictFloor(body: string): FloorResult {
     );
   }
 
-  return { body: result, changed: result !== body, from, to };
+  return { body: result, changed: result !== body, from, to, level: LEVEL_BY_RANK[headerRank] };
 }

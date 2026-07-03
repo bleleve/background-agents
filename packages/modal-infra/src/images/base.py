@@ -77,7 +77,9 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v100: add claude-sonnet-5 to the Anthropic adaptive-thinking set in bridge.py
 # v101: scope the gh raw-issue-comment guard to REEF_REVIEW_SESSION (dedicated PR
 #       reviews) instead of all github-bot sessions; verdict tool always installed
-CACHE_BUSTER = "v101-review-guard-scope"
+# v102: reef-verdict skill drops its client-side risk-label sync (Step C) — the
+#       control plane now sets the label server-side from the enforced badge
+CACHE_BUSTER = "v102-server-verdict-label"
 
 # Base image with all development tools
 base_image = (

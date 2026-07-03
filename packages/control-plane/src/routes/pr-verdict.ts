@@ -11,16 +11,18 @@
  * bot identity. The PR is derived from the session index, never from caller
  * input, so the agent can't target another PR.
  *
- * The risk LABEL is intentionally NOT set here: it is not an issue comment, so
- * the guard does not block it, and the `reef-verdict` skill keeps syncing it via
- * `gh` right after this call — one place, unchanged.
+ * The risk LABEL is synced here too, from the SAME enforced badge as the posted
+ * comment (see enforceVerdictFloor), so the label can never drift from the
+ * verdict — even when the agent's original badge did. Best-effort: a label
+ * failure never blocks the (already posted) comment. This supersedes the old
+ * client-side sync in the `reef-verdict` skill, which is being removed.
  */
 import { getCachedInstallationToken, getGitHubAppConfig } from "../auth/github-app";
 import { SessionIndexStore } from "../db/session-index";
 import { createLogger } from "../logger";
 import type { Env } from "../types";
 import { error, json, parsePattern, type RequestContext, type Route } from "./shared";
-import { enforceVerdictFloor } from "./verdict-floor";
+import { enforceVerdictFloor, type RiskLevel } from "./verdict-floor";
 
 const logger = createLogger("pr-verdict");
 
@@ -39,6 +41,18 @@ const VERDICT_BODY_MAX_LENGTH = 60_000;
 /** Safety cap on comment pages scanned when deleting prior verdicts. */
 const MAX_COMMENT_PAGES = 20;
 const COMMENTS_PER_PAGE = 100;
+
+/**
+ * The `reef: <level> risk` labels, keyed by risk level. Colors/descriptions
+ * match what the `reef-verdict` skill used to create client-side, so moving the
+ * sync server-side does not recolor existing labels.
+ */
+const REEF_RISK_LABELS: Record<RiskLevel, { name: string; color: string; description: string }> = {
+  low: { name: "reef: low risk", color: "1D76DB", description: "Reef: low risk" },
+  medium: { name: "reef: medium risk", color: "FBCA04", description: "Reef: medium risk" },
+  high: { name: "reef: high risk", color: "D93F0B", description: "Reef: high risk" },
+};
+const ALL_REEF_RISK_LABEL_NAMES = Object.values(REEF_RISK_LABELS).map((l) => l.name);
 
 export async function handleSubmitVerdict(
   request: Request,
@@ -145,7 +159,85 @@ export async function handleSubmitVerdict(
 
   const result = (await postResponse.json()) as { html_url?: string };
   logger.info("pr_verdict.posted", { ...meta, deleted_prior: deleted });
-  return json({ status: "posted", verdictUrl: result.html_url ?? null, deletedPrior: deleted });
+
+  // Sync the PR risk label from the same enforced badge (best-effort — the
+  // comment is already posted, so a label failure must not fail the request).
+  if (floored.level) {
+    await syncRiskLabel(gh, prNumber, floored.level, meta);
+  }
+
+  return json({
+    status: "posted",
+    verdictUrl: result.html_url ?? null,
+    deletedPrior: deleted,
+    riskLevel: floored.level ?? null,
+  });
+}
+
+/**
+ * Set the PR's `reef: <level> risk` label to match the enforced verdict badge:
+ * ensure the label exists, then replace any reef risk label already on the PR
+ * with this one while preserving every other label. Best-effort — every failure
+ * is logged and swallowed so it never blocks the posted verdict.
+ */
+async function syncRiskLabel(
+  gh: (path: string, init?: RequestInit) => Promise<Response>,
+  prNumber: number,
+  level: RiskLevel,
+  meta: Record<string, unknown>
+): Promise<void> {
+  const target = REEF_RISK_LABELS[level];
+  try {
+    // Ensure the label exists in the repo (422 = already exists → fine).
+    const createResponse = await gh(`/labels`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: target.name,
+        color: target.color,
+        description: target.description,
+      }),
+    });
+    if (!createResponse.ok && createResponse.status !== 422) {
+      logger.warn("pr_verdict.label_create_error", { ...meta, status: createResponse.status });
+    }
+
+    // Read the PR's current labels (a PR is an issue) so we can preserve
+    // non-reef labels and only swap the reef risk one.
+    const listResponse = await gh(`/issues/${prNumber}/labels`);
+    if (!listResponse.ok) {
+      logger.warn("pr_verdict.label_list_error", { ...meta, status: listResponse.status });
+      return;
+    }
+    const current = (await listResponse.json()) as Array<{ name: string }>;
+    const currentNames = current.map((l) => l.name);
+
+    // Already exactly right (this reef label present, no other reef label) → skip.
+    if (
+      currentNames.includes(target.name) &&
+      !currentNames.some((n) => n !== target.name && ALL_REEF_RISK_LABEL_NAMES.includes(n))
+    ) {
+      return;
+    }
+
+    const next = [
+      ...currentNames.filter((n) => !ALL_REEF_RISK_LABEL_NAMES.includes(n)),
+      target.name,
+    ];
+    const putResponse = await gh(`/issues/${prNumber}/labels`, {
+      method: "PUT",
+      body: JSON.stringify({ labels: next }),
+    });
+    if (putResponse.ok) {
+      logger.info("pr_verdict.label_synced", { ...meta, level });
+    } else {
+      logger.warn("pr_verdict.label_set_error", { ...meta, status: putResponse.status });
+    }
+  } catch (e) {
+    logger.warn("pr_verdict.label_sync_failed", {
+      ...meta,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
 }
 
 /**
