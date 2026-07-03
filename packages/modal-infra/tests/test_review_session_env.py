@@ -1,8 +1,8 @@
-"""Tests for GITHUB_BOT_SESSION env var passthrough in sandbox creation.
+"""Tests for REEF_REVIEW_SESSION env var passthrough in sandbox creation.
 
 Mirrors test_agent_slack_notify_env.py: the flag is a per-session boolean that
-becomes the GITHUB_BOT_SESSION env var, which gates the submit-review-verdict
-tool and switches the gh guard to block raw issue comments.
+becomes the REEF_REVIEW_SESSION env var, which switches the gh guard to block
+raw issue comments in a dedicated PR review session (verdict-only via the tool).
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -34,8 +34,8 @@ def _patch_create(monkeypatch, captured: dict) -> None:
     )
 
 
-class TestCreateSandboxGithubBotSession:
-    """create_sandbox sets GITHUB_BOT_SESSION only when configured on."""
+class TestCreateSandboxReviewSession:
+    """create_sandbox sets REEF_REVIEW_SESSION only when configured on."""
 
     @pytest.mark.asyncio
     async def test_env_set_when_enabled(self, monkeypatch):
@@ -48,12 +48,12 @@ class TestCreateSandboxGithubBotSession:
             repo_name="repo",
             control_plane_url="https://cp.example.com",
             sandbox_auth_token="token-123",
-            github_bot_session=True,
+            review_session=True,
         )
 
         await manager.create_sandbox(config)
 
-        assert captured["env"]["GITHUB_BOT_SESSION"] == "true"
+        assert captured["env"]["REEF_REVIEW_SESSION"] == "true"
 
     @pytest.mark.asyncio
     async def test_env_omitted_when_default(self, monkeypatch):
@@ -70,11 +70,11 @@ class TestCreateSandboxGithubBotSession:
 
         await manager.create_sandbox(config)
 
-        assert "GITHUB_BOT_SESSION" not in captured["env"]
+        assert "REEF_REVIEW_SESSION" not in captured["env"]
 
 
-class TestRestoreFromSnapshotGithubBotSession:
-    """restore_from_snapshot sets GITHUB_BOT_SESSION only when configured on."""
+class TestRestoreFromSnapshotReviewSession:
+    """restore_from_snapshot sets REEF_REVIEW_SESSION only when configured on."""
 
     @pytest.mark.asyncio
     async def test_env_set_when_enabled(self, monkeypatch):
@@ -93,10 +93,10 @@ class TestRestoreFromSnapshotGithubBotSession:
             sandbox_id="sb-1",
             control_plane_url="https://cp.example.com",
             sandbox_auth_token="token-123",
-            github_bot_session=True,
+            review_session=True,
         )
 
-        assert captured["env"]["GITHUB_BOT_SESSION"] == "true"
+        assert captured["env"]["REEF_REVIEW_SESSION"] == "true"
 
     @pytest.mark.asyncio
     async def test_env_omitted_when_default(self, monkeypatch):
@@ -117,4 +117,4 @@ class TestRestoreFromSnapshotGithubBotSession:
             sandbox_auth_token="token-123",
         )
 
-        assert "GITHUB_BOT_SESSION" not in captured["env"]
+        assert "REEF_REVIEW_SESSION" not in captured["env"]

@@ -47,6 +47,7 @@ function createSession(overrides: Partial<SessionRow> = {}): SessionRow {
     plan_mode: 0,
     plan_approval_status: null,
     plan_model: null,
+    review_session: 0,
     plan_cost_snapshot: null,
     created_at: 1000,
     updated_at: 1000,

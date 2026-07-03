@@ -260,12 +260,14 @@ Three prompt templates in `src/prompts.ts`:
   review with the App token. As a backstop, the `pull_request_review` webhook handler dismisses any
   off-policy formal review the bot lands when `autoApproveOnOpen` is off.
 - Post the review **verdict** only through the `submit-review-verdict` tool, never raw
-  `gh api .../issues/{n}/comments` or `gh pr comment`. In a github-bot session (signalled by the
-  `GITHUB_BOT_SESSION` env var) the verdict is the only conversation comment a review posts, so the
-  `gh` wrapper's `gh-guard` blocks raw issue comments there; the tool routes to the control plane
-  (`POST /sessions/:id/pr-verdict`), which deletes any prior verdict by its marker and posts the
-  fresh one with the App token. Inline suggestions (`pulls/{n}/comments`) and review-thread replies
-  (`pulls/{n}/comments/{id}/replies`) are unaffected.
+  `gh api .../issues/{n}/comments` or `gh pr comment`. In a dedicated **review** session (signalled
+  by the `REEF_REVIEW_SESSION` env var, set only for the `runCodeReview` path) the verdict is the
+  only conversation comment, so the `gh` wrapper's `gh-guard` blocks raw issue comments there; the
+  tool routes to the control plane (`POST /sessions/:id/pr-verdict`), which deletes any prior
+  verdict by its marker and posts the fresh one with the App token. The block is scoped to reviews:
+  **@mention/command sessions are not blocked**, since they legitimately post a top-level issue
+  comment to answer the user. Inline suggestions (`pulls/{n}/comments`) and review-thread replies
+  (`pulls/{n}/comments/{id}/replies`) are always unaffected.
 - Post inline `suggestion` comments via `gh api .../pulls/{n}/comments`; the mechanical posting
   steps (head SHA fetch, temp markdown files, `side=RIGHT` anchor derivation, read-back) are
   delegated to the bundled `reef-inline-suggestion` OpenCode skill

@@ -54,6 +54,7 @@ interface InitRequest {
   sandboxSettings?: SandboxSettings;
   planMode?: boolean;
   planModel?: string | null;
+  reviewSession?: boolean;
   previewEnabled?: boolean;
 }
 
@@ -214,6 +215,7 @@ export function createSessionLifecycleHandler(
         sandboxSettings: body.sandboxSettings ? JSON.stringify(body.sandboxSettings) : null,
         planMode,
         planModel,
+        reviewSession: body.reviewSession === true,
         previewEnabled: body.previewEnabled,
         createdAt: now,
         updatedAt: now,

@@ -62,6 +62,7 @@ function createMockSession(overrides: Partial<SessionRow> = {}): SessionRow {
     plan_approval_status: null,
     plan_model: null,
     plan_cost_snapshot: null,
+    review_session: 0,
     created_at: Date.now() - 60000,
     updated_at: Date.now(),
     ...overrides,
@@ -3017,20 +3018,22 @@ describe("SandboxLifecycleManager", () => {
     });
   });
 
-  describe("github-bot session gate", () => {
-    // `githubBotSession` (derived from spawn_source) becomes the
-    // GITHUB_BOT_SESSION env var, which installs the verdict tool and switches
-    // the gh guard to block raw issue comments. It must flow on BOTH the fresh
-    // spawn and the snapshot-restore paths — a silent regression on restore
-    // would drop the guard after a github-bot session resumes from a snapshot.
+  describe("review session gate", () => {
+    // `reviewSession` (from the persisted review_session column) becomes the
+    // REEF_REVIEW_SESSION env var, which switches the gh guard to block raw
+    // issue comments. It must flow on BOTH the fresh spawn and the snapshot-
+    // restore paths — a silent regression on restore would drop the guard after
+    // a review session resumes from a snapshot. It is derived from the column,
+    // NOT spawn_source, so @mention/command sessions (review_session=0) are not
+    // blocked even though they share spawn_source="github-bot".
     function buildManager(opts: {
-      spawnSource: SessionRow["spawn_source"];
+      reviewSession: number;
       sandbox?: ReturnType<typeof createMockSandbox>;
     }) {
       const sandbox =
         opts.sandbox ?? createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
       const storage = createMockStorage(
-        createMockSession({ spawn_source: opts.spawnSource }),
+        createMockSession({ spawn_source: "github-bot", review_session: opts.reviewSession }),
         sandbox
       );
       const provider = createMockProvider();
@@ -3050,41 +3053,41 @@ describe("SandboxLifecycleManager", () => {
       return createMockSandbox({ status: "stopped", snapshot_image_id: "img-abc123" });
     }
 
-    it("passes githubBotSession=true on a fresh spawn of a github-bot session", async () => {
-      const { manager, provider } = buildManager({ spawnSource: "github-bot" });
+    it("passes reviewSession=true on a fresh spawn of a review session", async () => {
+      const { manager, provider } = buildManager({ reviewSession: 1 });
       await manager.spawnSandbox();
       expect(provider.createSandbox).toHaveBeenCalledWith(
-        expect.objectContaining({ githubBotSession: true })
+        expect.objectContaining({ reviewSession: true })
       );
     });
 
-    it("passes githubBotSession=false on a fresh spawn of a non-github-bot session", async () => {
-      const { manager, provider } = buildManager({ spawnSource: "user" });
+    it("passes reviewSession=false for a github-bot @mention session (review_session=0)", async () => {
+      const { manager, provider } = buildManager({ reviewSession: 0 });
       await manager.spawnSandbox();
       expect(provider.createSandbox).toHaveBeenCalledWith(
-        expect.objectContaining({ githubBotSession: false })
+        expect.objectContaining({ reviewSession: false })
       );
     });
 
-    it("passes githubBotSession=true on snapshot restore of a github-bot session", async () => {
+    it("passes reviewSession=true on snapshot restore of a review session", async () => {
       const { manager, provider } = buildManager({
-        spawnSource: "github-bot",
+        reviewSession: 1,
         sandbox: snapshotSandbox(),
       });
       await manager.spawnSandbox();
       expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
-        expect.objectContaining({ githubBotSession: true })
+        expect.objectContaining({ reviewSession: true })
       );
     });
 
-    it("passes githubBotSession=false on snapshot restore of a non-github-bot session", async () => {
+    it("passes reviewSession=false on snapshot restore of a non-review session", async () => {
       const { manager, provider } = buildManager({
-        spawnSource: "user",
+        reviewSession: 0,
         sandbox: snapshotSandbox(),
       });
       await manager.spawnSandbox();
       expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
-        expect.objectContaining({ githubBotSession: false })
+        expect.objectContaining({ reviewSession: false })
       );
     });
   });

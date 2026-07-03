@@ -77,11 +77,12 @@ AGENT_TOOLS_GATED_ON_ENV: dict[str, str] = {
     "ast-anchor.js": "AGENT_TOOL_AST_ANCHOR_JS",
     "validate-suggestion.js": "AGENT_TOOL_VALIDATE_SUGGESTION_JS",
     "record-suggestion.js": "AGENT_TOOL_RECORD_SUGGESTION_JS",
-    # Only github-bot sessions post a review verdict. GITHUB_BOT_SESSION also
-    # switches the gh guard to block raw issue comments (git_credential_helper),
-    # so the tool being installed and the block being active are one signal.
-    "submit-review-verdict.js": "GITHUB_BOT_SESSION",
 }
+# Note: submit-review-verdict.js is NOT gated — it is always installed, like
+# submit-pr-review.js. Both review sessions and @mention "full review" sessions
+# post a verdict through it, and it is inert elsewhere (the /pr-verdict route
+# 422s when the session has no PR). The gh guard's raw-issue-comment block is
+# what's scoped to review sessions (REEF_REVIEW_SESSION), not the tool.
 
 AGENT_TOOLS_REQUIRING_REPOSITORY: set[str] = set()
 

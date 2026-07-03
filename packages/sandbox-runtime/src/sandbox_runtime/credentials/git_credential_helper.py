@@ -351,17 +351,18 @@ _GH_FIELD_FLAGS = frozenset({"-f", "--field", "-F", "--raw-field"})
 _GH_BLOCKED_EVENTS = frozenset({"APPROVE", "REQUEST_CHANGES"})
 
 
-def _is_github_bot_session() -> bool:
-    """True when this sandbox is a github-bot session (GITHUB_BOT_SESSION set).
+def _is_review_session() -> bool:
+    """True when this sandbox is a dedicated PR review session (REEF_REVIEW_SESSION).
 
-    In a github-bot review/@mention session the ONLY legitimate issue comment is
-    the review verdict, which must go through the `submit-review-verdict` tool
-    (posted server-side). So raw issue-comment creation is blocked here — but
-    left alone in ordinary coding sessions (Slack, web, Linear, user), which may
-    legitimately comment on an issue or PR. The env var is set by the control
-    plane / modal-infra only for github-bot sessions.
+    In a review the ONLY legitimate conversation comment is the verdict, which
+    must go through the `submit-review-verdict` tool (posted server-side). So raw
+    issue-comment creation is blocked here. It is left alone everywhere else —
+    including github-bot @mention/command sessions, which legitimately post a
+    top-level issue comment to answer the user, and ordinary coding sessions
+    (Slack, web, Linear, user). The env var is set by the control plane /
+    modal-infra only for the github-bot's dedicated review sessions.
     """
-    return os.environ.get("GITHUB_BOT_SESSION", "").strip().lower() == "true"
+    return os.environ.get("REEF_REVIEW_SESSION", "").strip().lower() == "true"
 
 
 _GH_GUARD_BLOCK_MESSAGE = (
@@ -561,8 +562,8 @@ def _gh_command_posts_issue_comment(gh_args: list[str]) -> bool:
     """True if ``gh_args`` creates an issue/PR conversation comment via raw gh.
 
     Covers ``gh pr comment``, ``gh issue comment``, and a ``gh api`` POST to the
-    issue comments collection. Blocked ONLY in github-bot sessions (see
-    ``_run_gh_guard``): those post exactly one conversation comment — the review
+    issue comments collection. Blocked ONLY in a dedicated review session (see
+    ``_run_gh_guard``): a review posts exactly one conversation comment — the
     verdict — which must go through the `submit-review-verdict` tool instead.
     """
     if not gh_args:
@@ -589,10 +590,10 @@ def _run_gh_guard(gh_args: list[str]) -> int:
         sys.stderr.write(_GH_GUARD_BLOCK_MESSAGE)
         sys.stderr.flush()
         return GH_GUARD_BLOCK_RC
-    # Raw issue comments are blocked only in github-bot sessions, where the
-    # verdict is the sole conversation comment and goes through the
-    # submit-review-verdict tool.
-    if _is_github_bot_session() and _gh_command_posts_issue_comment(gh_args):
+    # Raw issue comments are blocked only in a dedicated review session, where
+    # the verdict is the sole conversation comment and goes through the
+    # submit-review-verdict tool. @mention/command sessions are left alone.
+    if _is_review_session() and _gh_command_posts_issue_comment(gh_args):
         sys.stderr.write(_GH_GUARD_ISSUE_COMMENT_BLOCK_MESSAGE)
         sys.stderr.flush()
         return GH_GUARD_BLOCK_RC

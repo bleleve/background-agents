@@ -225,6 +225,13 @@ async function createSession(
     cloneBranch?: string;
     planMode?: boolean;
     planModel?: string;
+    /**
+     * True for a dedicated PR review session (runCodeReview). Marks the session
+     * so the sandbox gh guard blocks raw issue comments (the verdict is the only
+     * conversation comment, posted via the submit-review-verdict tool). Omit for
+     * @mention/command sessions, which legitimately post top-level replies.
+     */
+    reviewSession?: boolean;
   }
 ): Promise<string> {
   const body: Record<string, unknown> = {
@@ -259,6 +266,9 @@ async function createSession(
   if (params.planMode) {
     body.planMode = true;
     if (params.planModel) body.planModel = params.planModel;
+  }
+  if (params.reviewSession) {
+    body.reviewSession = true;
   }
   const response = await controlPlane.fetch("https://internal/sessions", {
     method: "POST",
@@ -768,6 +778,10 @@ async function runCodeReview(
       prState: params.prState,
       prHeadRef: params.prHeadRef,
       prBaseRef: params.prBaseRef,
+      // Dedicated review session: the gh guard blocks raw issue comments so the
+      // verdict (via the submit-review-verdict tool) is the only conversation
+      // comment. @mention/command sessions omit this and may reply top-level.
+      reviewSession: true,
       // Clone the PR head branch so the sandbox tree reflects the PR content.
       // Resolved fork-aware by each caller (forks → undefined → default branch),
       // since a fork's head ref is not fetchable from the base repo's origin.
