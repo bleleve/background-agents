@@ -28,6 +28,13 @@ const PROMPT_SUBSCRIPTION_RETRY_DELAY_MS = 500;
 const HISTORY_PAGE_SIZE = 200;
 const PING_INTERVAL_MS = 30000;
 
+// The ws-token endpoint proxies to the session's Durable Object, which can be
+// briefly unreachable (5xx / network error) while a new control-plane version
+// rolls out. Retry transient failures with backoff before surfacing a terminal
+// auth error so a rollout blip doesn't strand the view on "Failed to authenticate".
+const WS_TOKEN_MAX_ATTEMPTS = 3;
+const WS_TOKEN_RETRY_BASE_DELAY_MS = 400;
+
 interface Message {
   id: string;
   authorId: string;
@@ -555,32 +562,53 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
   );
 
   const fetchWsToken = useCallback(async (): Promise<string | null> => {
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}/ws-token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
+    for (let attempt = 1; attempt <= WS_TOKEN_MAX_ATTEMPTS; attempt++) {
+      if (attempt > 1) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, WS_TOKEN_RETRY_BASE_DELAY_MS * (attempt - 1))
+        );
+      }
+      try {
+        const response = await fetch(`/api/sessions/${sessionId}/ws-token`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
 
-      if (!response.ok) {
+        if (response.ok) {
+          const data = await response.json();
+          return data.token;
+        }
+
+        // 401 (sign-in required) and other 4xx are deterministic — don't retry.
         if (response.status === 401) {
           setAuthError("Please sign in to connect");
           return null;
         }
-        const error = await response.text();
-        console.error("Failed to fetch WS token:", error);
-        setAuthError("Failed to authenticate");
-        return null;
-      }
+        if (response.status < 500) {
+          const error = await response.text().catch(() => "");
+          console.error("Failed to fetch WS token:", error);
+          setAuthError("Failed to authenticate");
+          return null;
+        }
 
-      const data = await response.json();
-      return data.token;
-    } catch (error) {
-      console.error("Failed to fetch WS token:", error);
-      setAuthError("Failed to authenticate");
-      return null;
+        // 5xx: transient DO unavailability — fall through to retry.
+        console.warn(
+          `WS token fetch failed (${response.status}), attempt ${attempt}/${WS_TOKEN_MAX_ATTEMPTS}`
+        );
+      } catch (error) {
+        // Network error — transient, fall through to retry.
+        console.warn(
+          `WS token fetch network error, attempt ${attempt}/${WS_TOKEN_MAX_ATTEMPTS}`,
+          error
+        );
+      }
     }
+
+    console.error("Failed to fetch WS token after retries");
+    setAuthError("Failed to authenticate");
+    return null;
   }, [sessionId]);
 
   const connect = useCallback(async () => {

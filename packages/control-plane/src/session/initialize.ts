@@ -7,6 +7,20 @@ import { createLogger } from "../logger";
 
 const logger = createLogger("session-init");
 
+/**
+ * Bounded retry for the session DO `/init` fetch. Each session is its own
+ * Durable Object, and a DO is briefly unreachable while a new control-plane
+ * version rolls out — a single failed fetch would otherwise mark the session
+ * permanently failed and un-resumable (resume re-hits the same DO). `/init` is
+ * idempotent, so retrying transient failures is safe.
+ */
+const SESSION_INIT_MAX_ATTEMPTS = 3;
+const SESSION_INIT_RETRY_BASE_DELAY_MS = 250;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function hasBranchContext(value: string | null | undefined): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -145,54 +159,88 @@ export async function initializeSession(
   headers.set("x-trace-id", ctx.trace_id);
   headers.set("x-request-id", ctx.request_id);
 
-  let initResponse: Response;
-  try {
-    initResponse = await stub.fetch(
-      new Request(buildSessionInternalUrl(SessionInternalPaths.init), {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          sessionName: input.sessionId,
-          repoOwner: input.repoOwner,
-          repoName: input.repoName,
-          prNumber: input.prNumber,
-          prUrl: input.prUrl,
-          prState: input.prState,
-          prHeadRef: input.prHeadRef,
-          prBaseRef: input.prBaseRef,
-          repoId: input.repoId,
-          defaultBranch,
-          branch,
-          title: input.title,
-          model: input.model,
-          reasoningEffort: input.reasoningEffort,
-          userId: input.participantUserId,
-          scmLogin: input.scmLogin,
-          scmName: input.scmName,
-          scmEmail: input.scmEmail,
-          scmTokenEncrypted: input.scmTokenEncrypted,
-          scmRefreshTokenEncrypted: input.scmRefreshTokenEncrypted,
-          scmTokenExpiresAt: input.scmTokenExpiresAt,
-          scmUserId: input.scmUserId,
-          codeServerEnabled: input.codeServerEnabled,
-          sandboxSettings: input.sandboxSettings,
-          previewEnabled: input.previewEnabled,
-          parentSessionId: input.parentSessionId,
-          spawnSource: input.spawnSource,
-          spawnDepth: input.spawnDepth,
-          planMode: input.planMode === true,
-          planModel: input.planMode === true ? (input.planModel ?? null) : null,
-          reviewSession: input.reviewSession === true,
-        }),
-      })
-    );
-  } catch (transportError) {
-    await markSessionFailed(sessionStore, input.sessionId, ctx.trace_id);
-    throw transportError;
+  const initUrl = buildSessionInternalUrl(SessionInternalPaths.init);
+  const initBody = JSON.stringify({
+    sessionName: input.sessionId,
+    repoOwner: input.repoOwner,
+    repoName: input.repoName,
+    prNumber: input.prNumber,
+    prUrl: input.prUrl,
+    prState: input.prState,
+    prHeadRef: input.prHeadRef,
+    prBaseRef: input.prBaseRef,
+    repoId: input.repoId,
+    defaultBranch,
+    branch,
+    title: input.title,
+    model: input.model,
+    reasoningEffort: input.reasoningEffort,
+    userId: input.participantUserId,
+    scmLogin: input.scmLogin,
+    scmName: input.scmName,
+    scmEmail: input.scmEmail,
+    scmTokenEncrypted: input.scmTokenEncrypted,
+    scmRefreshTokenEncrypted: input.scmRefreshTokenEncrypted,
+    scmTokenExpiresAt: input.scmTokenExpiresAt,
+    scmUserId: input.scmUserId,
+    codeServerEnabled: input.codeServerEnabled,
+    sandboxSettings: input.sandboxSettings,
+    previewEnabled: input.previewEnabled,
+    parentSessionId: input.parentSessionId,
+    spawnSource: input.spawnSource,
+    spawnDepth: input.spawnDepth,
+    planMode: input.planMode === true,
+    planModel: input.planMode === true ? (input.planModel ?? null) : null,
+    reviewSession: input.reviewSession === true,
+  });
+
+  // Retry transient DO failures (transport errors + 5xx) with backoff. A 4xx is
+  // a deterministic client error (e.g. invalid repo context) — retrying can't
+  // help, so we stop and surface it. `/init` is idempotent so a re-run after a
+  // rolled-back attempt (or a lost success response) does not double-create.
+  let initResponse: Response | null = null;
+  let lastTransportError: unknown = null;
+  for (let attempt = 1; attempt <= SESSION_INIT_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      await delay(SESSION_INIT_RETRY_BASE_DELAY_MS * (attempt - 1));
+    }
+    try {
+      initResponse = await stub.fetch(
+        new Request(initUrl, { method: "POST", headers, body: initBody })
+      );
+    } catch (transportError) {
+      lastTransportError = transportError;
+      initResponse = null;
+      logger.warn("DO init transport error", {
+        session_id: input.sessionId,
+        attempt,
+        max_attempts: SESSION_INIT_MAX_ATTEMPTS,
+        trace_id: ctx.trace_id,
+        error: transportError instanceof Error ? transportError.message : String(transportError),
+      });
+      continue;
+    }
+
+    if (initResponse.ok) {
+      return { sessionId: input.sessionId, status: "created" };
+    }
+
+    if (initResponse.status < 500) {
+      break; // deterministic client error — do not retry
+    }
+
+    logger.warn("DO init returned 5xx", {
+      session_id: input.sessionId,
+      status: initResponse.status,
+      attempt,
+      max_attempts: SESSION_INIT_MAX_ATTEMPTS,
+      trace_id: ctx.trace_id,
+    });
   }
 
-  if (!initResponse.ok) {
-    await markSessionFailed(sessionStore, input.sessionId, ctx.trace_id);
+  await markSessionFailed(sessionStore, input.sessionId, ctx.trace_id);
+
+  if (initResponse) {
     const errorText = await initResponse.text().catch(() => "unknown");
     logger.error("DO init failed", {
       session_id: input.sessionId,
@@ -203,7 +251,13 @@ export async function initializeSession(
     throw new Error(`Failed to initialize session DO: ${initResponse.status}`);
   }
 
-  return { sessionId: input.sessionId, status: "created" };
+  logger.error("DO init failed (transport error, retries exhausted)", {
+    session_id: input.sessionId,
+    trace_id: ctx.trace_id,
+  });
+  throw lastTransportError instanceof Error
+    ? lastTransportError
+    : new Error("Failed to initialize session DO: transport error");
 }
 
 /**

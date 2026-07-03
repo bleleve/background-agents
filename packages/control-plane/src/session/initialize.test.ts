@@ -145,29 +145,64 @@ describe("initializeSession", () => {
     expect(body.branch).toBeNull();
   });
 
-  it("throws when DO init returns a non-ok response", async () => {
+  it("throws after exhausting retries when DO init keeps returning 5xx", async () => {
     stubFetchMock.mockResolvedValue(new Response("Internal error", { status: 500 }));
 
     await expect(initializeSession(createEnv(), baseInput, ctx as never)).rejects.toThrow(
       "Failed to initialize session DO: 500"
     );
     expect(createMock).toHaveBeenCalledOnce();
-    expect(stubFetchMock).toHaveBeenCalledOnce();
+    expect(stubFetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("marks D1 row as failed when DO init returns a non-ok response", async () => {
+  it("marks D1 row as failed when DO init keeps returning 5xx", async () => {
     stubFetchMock.mockResolvedValue(new Response("Internal error", { status: 500 }));
 
     await expect(initializeSession(createEnv(), baseInput, ctx as never)).rejects.toThrow();
     expect(updateStatusMock).toHaveBeenCalledWith("session-123", "failed");
   });
 
-  it("marks D1 row as failed when DO init throws a transport error", async () => {
+  it("marks D1 row as failed when DO init keeps throwing transport errors", async () => {
     stubFetchMock.mockRejectedValue(new Error("network failure"));
 
     await expect(initializeSession(createEnv(), baseInput, ctx as never)).rejects.toThrow(
       "network failure"
     );
+    expect(stubFetchMock).toHaveBeenCalledTimes(3);
+    expect(updateStatusMock).toHaveBeenCalledWith("session-123", "failed");
+  });
+
+  it("retries DO init on a 5xx and succeeds without failing the session", async () => {
+    stubFetchMock
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ status: "created" }));
+
+    const result = await initializeSession(createEnv(), baseInput, ctx as never);
+
+    expect(result).toEqual({ sessionId: "session-123", status: "created" });
+    expect(stubFetchMock).toHaveBeenCalledTimes(2);
+    expect(updateStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("retries DO init on a transport error and succeeds without failing the session", async () => {
+    stubFetchMock
+      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockResolvedValueOnce(Response.json({ status: "created" }));
+
+    const result = await initializeSession(createEnv(), baseInput, ctx as never);
+
+    expect(result).toEqual({ sessionId: "session-123", status: "created" });
+    expect(stubFetchMock).toHaveBeenCalledTimes(2);
+    expect(updateStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("does not retry DO init on a 4xx and marks the session failed", async () => {
+    stubFetchMock.mockResolvedValue(new Response("bad request", { status: 400 }));
+
+    await expect(initializeSession(createEnv(), baseInput, ctx as never)).rejects.toThrow(
+      "Failed to initialize session DO: 400"
+    );
+    expect(stubFetchMock).toHaveBeenCalledOnce();
     expect(updateStatusMock).toHaveBeenCalledWith("session-123", "failed");
   });
 

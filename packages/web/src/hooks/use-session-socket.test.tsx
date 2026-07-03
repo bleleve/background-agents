@@ -855,4 +855,70 @@ describe("useSessionSocket", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(countPings(socket)).toBeGreaterThan(pingsBeforeHidden + 1);
   });
+
+  it("retries the ws-token fetch after a 5xx and connects without an auth error", async () => {
+    let wsTokenCalls = 0;
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url).includes("/ws-token")) {
+        wsTokenCalls += 1;
+        if (wsTokenCalls === 1) return new Response("unavailable", { status: 503 });
+      }
+      return Response.json({ token: "ws-token" });
+    });
+
+    const { result } = renderHook(() => useSessionSocket("session-1"));
+
+    // The DO briefly 5xx'd during a rollout; the retry recovers and the socket
+    // is constructed with a fresh token, with no terminal auth error surfaced.
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1), { timeout: 3000 });
+    expect(countWsTokenFetches()).toBe(2);
+    expect(result.current.authError).toBeNull();
+  });
+
+  it("retries the ws-token fetch after a network error and connects", async () => {
+    let wsTokenCalls = 0;
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url).includes("/ws-token")) {
+        wsTokenCalls += 1;
+        if (wsTokenCalls === 1) throw new TypeError("network error");
+      }
+      return Response.json({ token: "ws-token" });
+    });
+
+    const { result } = renderHook(() => useSessionSocket("session-1"));
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1), { timeout: 3000 });
+    expect(countWsTokenFetches()).toBe(2);
+    expect(result.current.authError).toBeNull();
+  });
+
+  it("surfaces a terminal auth error after ws-token retries are exhausted", async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url).includes("/ws-token")) return new Response("boom", { status: 503 });
+      return Response.json({ token: "ws-token" });
+    });
+
+    const { result } = renderHook(() => useSessionSocket("session-1"));
+
+    await waitFor(() => expect(result.current.authError).toBe("Failed to authenticate"), {
+      timeout: 3000,
+    });
+    // Three attempts (initial + two retries), then no socket is constructed.
+    expect(countWsTokenFetches()).toBe(3);
+    expect(FakeWebSocket.instances).toHaveLength(0);
+  });
+
+  it("does not retry the ws-token fetch on a 401 and asks the user to sign in", async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url).includes("/ws-token")) return new Response("unauthorized", { status: 401 });
+      return Response.json({ token: "ws-token" });
+    });
+
+    const { result } = renderHook(() => useSessionSocket("session-1"));
+
+    await waitFor(() => expect(result.current.authError).toBe("Please sign in to connect"));
+    // 401 is deterministic — no retry, and no socket is constructed.
+    expect(countWsTokenFetches()).toBe(1);
+    expect(FakeWebSocket.instances).toHaveLength(0);
+  });
 });
