@@ -92,8 +92,8 @@ Linear forbids `:` in label names, so we use dash-separated everywhere:
 | `build-<alias>`  | Same as `model-<alias>`, reads more naturally in plan mode |
 | `review-<alias>` | Override the model used to auto-review a PR                |
 
-`<alias>` is the short name: `sonnet`, `sonnet-5`, `opus`, `haiku`, `opus-4-7`, `gpt-5.4`, etc. The alias →
-canonical model map lives in `@open-inspect/shared` so Linear and GitHub stay in sync.
+`<alias>` is the short name: `sonnet`, `sonnet-5`, `opus`, `haiku`, `opus-4-7`, `gpt-5.4`, etc. The
+alias → canonical model map lives in `@open-inspect/shared` so Linear and GitHub stay in sync.
 
 ## Settings → Models
 
