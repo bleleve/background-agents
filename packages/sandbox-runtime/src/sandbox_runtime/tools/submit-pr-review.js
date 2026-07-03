@@ -12,8 +12,10 @@
  * APPROVE is NOT available: approvals are decided entirely by the github-bot from
  * PR labels, not by the agent. The server rejects APPROVE.
  *
- * Inline code comments and the verdict comment are NOT this tool — keep posting
- * those with `gh api .../pulls/N/comments` and `gh api .../issues/N/comments`.
+ * This tool is NOT for inline code comments or the verdict. Post inline
+ * suggestions with `gh api .../pulls/N/comments`; post the verdict with the
+ * `submit-review-verdict` tool (raw `gh api .../issues/N/comments` is blocked in
+ * github-bot sessions).
  */
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";

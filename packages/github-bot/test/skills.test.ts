@@ -69,18 +69,24 @@ describe("reef-verdict skill", () => {
     expect(skill.toLowerCase()).toContain("description:");
   });
 
-  it("carries the delete-then-post + label-sync mechanics lifted out of the prompt", () => {
-    // paginated marker search + delete, heredoc verdict template, fresh POST printing html_url
-    expect(skill).toContain("gh api --paginate");
-    expect(skill).toContain('select(.body | startswith("<!-- reef-verdict -->"))');
-    expect(skill).toContain('gh api -X DELETE "repos/<owner>/<repo>/issues/comments/$id"');
+  it("renders the body, posts via the submit-review-verdict tool, and keeps label sync", () => {
+    // Renders the risk-map template to a temp file (Step C reads the badge back from it).
     expect(skill).toContain("cat >/tmp/pr-verdict.md");
-    expect(skill).toContain('gh api -X POST "repos/<owner>/<repo>/issues/<pr-number>/comments"');
-    expect(skill).toContain("--jq '.html_url'");
-    // label-sync shell (badge parse + create/remove/add)
+    // Posts via the tool — the delete-then-post now happens server-side, not via gh.
+    expect(skill).toContain("submit-review-verdict");
+    // label-sync shell stays in the skill (labels are not blocked by the gh guard).
     expect(skill).toContain("grep -m1 'Reef Review' /tmp/pr-verdict.md");
     expect(skill).toContain('gh label create "reef: low risk"');
     expect(skill).toContain('--add-label "$LABEL"');
+  });
+
+  it("does not post the verdict with raw gh (that path is blocked in review sessions)", () => {
+    // The verdict is the one conversation comment a review posts; it must go through the
+    // tool, so the skill must NOT tell the agent to POST it with raw gh api / gh pr comment.
+    expect(skill).not.toContain(
+      'gh api -X POST "repos/<owner>/<repo>/issues/<pr-number>/comments"'
+    );
+    expect(skill).not.toContain("gh api --paginate");
   });
 
   it("begins the verdict body with the marker the webhook fallback searches for (cross-package contract)", () => {

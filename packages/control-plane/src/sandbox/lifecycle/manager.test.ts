@@ -3017,6 +3017,78 @@ describe("SandboxLifecycleManager", () => {
     });
   });
 
+  describe("github-bot session gate", () => {
+    // `githubBotSession` (derived from spawn_source) becomes the
+    // GITHUB_BOT_SESSION env var, which installs the verdict tool and switches
+    // the gh guard to block raw issue comments. It must flow on BOTH the fresh
+    // spawn and the snapshot-restore paths — a silent regression on restore
+    // would drop the guard after a github-bot session resumes from a snapshot.
+    function buildManager(opts: {
+      spawnSource: SessionRow["spawn_source"];
+      sandbox?: ReturnType<typeof createMockSandbox>;
+    }) {
+      const sandbox =
+        opts.sandbox ?? createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
+      const storage = createMockStorage(
+        createMockSession({ spawn_source: opts.spawnSource }),
+        sandbox
+      );
+      const provider = createMockProvider();
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+      return { manager, provider };
+    }
+
+    function snapshotSandbox() {
+      return createMockSandbox({ status: "stopped", snapshot_image_id: "img-abc123" });
+    }
+
+    it("passes githubBotSession=true on a fresh spawn of a github-bot session", async () => {
+      const { manager, provider } = buildManager({ spawnSource: "github-bot" });
+      await manager.spawnSandbox();
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({ githubBotSession: true })
+      );
+    });
+
+    it("passes githubBotSession=false on a fresh spawn of a non-github-bot session", async () => {
+      const { manager, provider } = buildManager({ spawnSource: "user" });
+      await manager.spawnSandbox();
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({ githubBotSession: false })
+      );
+    });
+
+    it("passes githubBotSession=true on snapshot restore of a github-bot session", async () => {
+      const { manager, provider } = buildManager({
+        spawnSource: "github-bot",
+        sandbox: snapshotSandbox(),
+      });
+      await manager.spawnSandbox();
+      expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ githubBotSession: true })
+      );
+    });
+
+    it("passes githubBotSession=false on snapshot restore of a non-github-bot session", async () => {
+      const { manager, provider } = buildManager({
+        spawnSource: "user",
+        sandbox: snapshotSandbox(),
+      });
+      await manager.spawnSandbox();
+      expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ githubBotSession: false })
+      );
+    });
+  });
+
   describe("onBootProgress", () => {
     function buildManager(sandbox: ReturnType<typeof createMockSandbox> | null) {
       const storage = createMockStorage(createMockSession(), sandbox);

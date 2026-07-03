@@ -1,11 +1,11 @@
 ---
 name: reef-verdict
 description: >-
-  Post the mandatory final Reef review verdict comment on a PR: delete any prior verdict, render the
-  risk-map comment body from the template, POST it and print its html_url, then sync the reef risk
-  label to match the badge. Load this as the final step of every PR review and re-review, once your
-  prompt's rules have told you WHAT the verdict says (the risk badge, the Summary, and which
-  sections apply).
+  Post the mandatory final Reef review verdict comment on a PR with the submit-review-verdict tool:
+  render the risk-map comment body from the template, call the tool (it deletes any prior verdict
+  and posts the fresh one server-side), then sync the reef risk label to match the badge. Load this
+  as the final step of every PR review and re-review, once your prompt's rules have told you WHAT
+  the verdict says (the risk badge, the Summary, and which sections apply).
 ---
 
 # Reef verdict
@@ -19,23 +19,25 @@ Reviewed-no-concerns sections apply. This skill is the _how_ to render and post 
 and the severity are decided in your prompt before you get here. The verdict is mandatory: post it
 even when you found nothing (🔵 Low risk, `No findings.`).
 
+The verdict is posted with the **`submit-review-verdict` tool**, which deletes any prior verdict and
+posts the fresh one server-side under the bot identity. Do **not** post it with raw
+`gh api .../issues/<pr-number>/comments` or `gh pr comment` — those are blocked in a review session
+(the verdict is the only conversation comment a review posts, so it goes through the tool).
+
 Substitute `<owner>`, `<repo>`, and `<pr-number>` with the values from your review prompt, and
 `<footer>` with the exact footer line your prompt gives you. Include only the sections your prompt's
 rules kept — omit Worth a look / Tests coverage / Docs drift entirely when they do not apply.
 
-The comment body MUST begin with this exact hidden marker line (invisible when rendered; it lets you
-find a prior verdict to delete):
+The comment body MUST begin with this exact hidden marker line (invisible when rendered; it lets the
+server find a prior verdict to delete and lets a future re-review replace it):
 
     <!-- reef-verdict -->
 
-## Step A — Delete any prior verdict, then post the new one as a fresh comment.
+## Step A — Render the verdict body.
 
-A new comment notifies subscribers; an in-place edit would be silent. Paginate so it survives PRs
-with more than 30 comments.
+Write the body to a file so Step C can read the badge back. Include only the sections your prompt
+kept:
 
-    for id in $(gh api --paginate "repos/<owner>/<repo>/issues/<pr-number>/comments" --jq '.[] | select(.body | startswith("<!-- reef-verdict -->")) | .id'); do
-      gh api -X DELETE "repos/<owner>/<repo>/issues/comments/$id" >/dev/null 2>&1 || true
-    done
     cat >/tmp/pr-verdict.md <<'EOF'
     <!-- reef-verdict -->
     ## <🔵|🟡|🔴> Reef Review — <Low|Medium|High> risk
@@ -66,13 +68,19 @@ with more than 30 comments.
 
     <footer>
     EOF
-    gh api -X POST "repos/<owner>/<repo>/issues/<pr-number>/comments" -F body=@/tmp/pr-verdict.md --jq '.html_url'
 
-Confirm the POST printed the comment's `html_url`. If it printed nothing or errored, the verdict did
-NOT post — fix the call and retry until a URL comes back. Do not end the review without a posted
-verdict.
+## Step B — Post it with the `submit-review-verdict` tool.
 
-## Step B — Sync the PR risk label to match the badge.
+Call the **`submit-review-verdict`** tool with the contents of `/tmp/pr-verdict.md` as its `body`
+argument. The tool deletes any prior verdict comment (matched by the `<!-- reef-verdict -->` marker)
+and posts your body as a fresh comment (a new comment notifies subscribers; an in-place edit would
+be silent), then returns the posted comment's URL.
+
+Confirm the tool returned a URL. If it reported an error, fix the body and call it again — do not
+end the review without a posted verdict. Never fall back to `gh api .../issues/<pr-number>/comments`
+or `gh pr comment`: those are blocked in a review session and will fail.
+
+## Step C — Sync the PR risk label to match the badge.
 
 Derive the level mechanically from the badge emoji in the header you just wrote — do not re-judge
 the risk here — so the label can never drift from the badge. `--force` creates the label or recolors
