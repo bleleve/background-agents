@@ -166,9 +166,9 @@ The flow is gated by the per-repo **`autoApproveOnOpen`** setting ("Auto-approve
 handler skips unless the PR is open and non-draft, carries `reef: low risk`, passes the
 enabled-repos / private-repo filters, and the toggle is on. `getGitHubConfig` fails closed
 (`autoApproveOnOpen = false`) on any config error, so an outage never auto-approves. The
-`reef: low risk` label is written by the review agent on every verdict; `visual-qa: pass` and
-`visual-qa: skip` are applied by an external visual-QA system. (No extra GitHub App config — the
-`labeled` action ships with the already-subscribed `Pull request` event.)
+`reef: low risk` label is written server-side by the control plane on every verdict;
+`visual-qa: pass` and `visual-qa: skip` are applied by an external visual-QA system. (No extra
+GitHub App config — the `labeled` action ships with the already-subscribed `Pull request` event.)
 
 The resulting approval fires a `pull_request_review` event; the backstop (below) sees
 `autoApproveOnOpen` is on and leaves it in place.
@@ -276,10 +276,11 @@ Three prompt templates in `src/prompts.ts`:
   `reef-verdict` skill (`packages/sandbox-runtime/src/sandbox_runtime/skills/reef-verdict/`). The
   prompt decides the content; the skill renders the body and posts it with the
   `submit-review-verdict` tool, which deletes any prior verdict and posts the fresh one server-side
-  (raw `gh api .../issues/{n}/comments` is blocked in dedicated review sessions (`REEF_REVIEW_SESSION`) — see below). The skill
-  then syncs the matching `reef: low risk`/`reef: medium risk`/`reef: high risk` label on the PR via
-  `gh`; the session link in the footer is built from `sessionUrl`, the only extra param the handler
-  passes beyond webhook metadata
+  (raw `gh api .../issues/{n}/comments` is blocked in dedicated review sessions
+  (`REEF_REVIEW_SESSION`) — see below). The control plane also sets the matching
+  `reef: low risk`/`reef: medium risk`/`reef: high risk` label on the PR server-side, from the same
+  badge as the verdict comment; the session link in the footer is built from `sessionUrl`, the only
+  extra param the handler passes beyond webhook metadata
 
 **`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and asks the
 agent to first classify the request into one of two paths (the model decides from the comment's

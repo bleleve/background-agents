@@ -2,16 +2,15 @@
 name: reef-verdict
 description: >-
   Post the mandatory final Reef review verdict comment on a PR with the submit-review-verdict tool:
-  render the risk-map comment body from the template, call the tool (it deletes any prior verdict
-  and posts the fresh one server-side), then sync the reef risk label to match the badge. Load this
-  as the final step of every PR review and re-review, once your prompt's rules have told you WHAT
-  the verdict says (the risk badge, the Summary, and which sections apply).
+  render the risk-map comment body from the template, then call the tool — it deletes any prior
+  verdict, posts the fresh one, and sets the matching reef risk label, all server-side. Load this as
+  the final step of every PR review and re-review, once your prompt's rules have told you WHAT the
+  verdict says (the risk badge, the Summary, and which sections apply).
 ---
 
 # Reef verdict
 
-The mechanical procedure for posting the single Reef review verdict comment and syncing the risk
-label.
+The mechanical procedure for posting the single Reef review verdict comment.
 
 **Load this as your final step, after your prompt's rules have decided WHAT the verdict says** — the
 risk badge, the Summary count, and which of Worth a look / Tests coverage / Docs drift /
@@ -24,6 +23,10 @@ posts the fresh one server-side under the bot identity. Do **not** post it with 
 `gh api .../issues/<pr-number>/comments` or `gh pr comment` — those are blocked in a review session
 (the verdict is the only conversation comment a review posts, so it goes through the tool).
 
+The control plane also sets the PR's `reef: … risk` label from the badge in the verdict it posts —
+server-side, from the same floor-enforced badge as the comment — so the label can never drift from
+the verdict. **You do not set the risk label yourself**; there is no label step in this skill.
+
 Substitute `<owner>`, `<repo>`, and `<pr-number>` with the values from your review prompt, and
 `<footer>` with the exact footer line your prompt gives you. Include only the sections your prompt's
 rules kept — omit Worth a look / Tests coverage / Docs drift entirely when they do not apply.
@@ -35,8 +38,7 @@ server find a prior verdict to delete and lets a future re-review replace it):
 
 ## Step A — Render the verdict body.
 
-Write the body to a file so Step C can read the badge back. Include only the sections your prompt
-kept:
+Write the body to a file to pass to the tool in Step B. Include only the sections your prompt kept:
 
     cat >/tmp/pr-verdict.md <<'EOF'
     <!-- reef-verdict -->
@@ -80,20 +82,5 @@ Confirm the tool returned a URL. If it reported an error, fix the body and call 
 end the review without a posted verdict. Never fall back to `gh api .../issues/<pr-number>/comments`
 or `gh pr comment`: those are blocked in a review session and will fail.
 
-## Step C — Sync the PR risk label to match the badge.
-
-Derive the level mechanically from the badge emoji in the header you just wrote — do not re-judge
-the risk here — so the label can never drift from the badge. `--force` creates the label or recolors
-an existing one:
-
-    case "$(grep -m1 'Reef Review' /tmp/pr-verdict.md)" in
-      *🔵*) LABEL="reef: low risk" ;;
-      *🟡*) LABEL="reef: medium risk" ;;
-      *🔴*) LABEL="reef: high risk" ;;
-      *) echo "could not parse badge from verdict header — skipping label"; LABEL="" ;;
-    esac
-    gh label create "reef: low risk"    --repo <owner>/<repo> --force --color 1D76DB --description "Reef: low risk"    >/dev/null 2>&1 || true
-    gh label create "reef: medium risk" --repo <owner>/<repo> --force --color FBCA04 --description "Reef: medium risk" >/dev/null 2>&1 || true
-    gh label create "reef: high risk"   --repo <owner>/<repo> --force --color D93F0B --description "Reef: high risk"   >/dev/null 2>&1 || true
-    gh pr edit <pr-number> --repo <owner>/<repo> --remove-label "reef: low risk" --remove-label "reef: medium risk" --remove-label "reef: high risk" 2>/dev/null || true
-    [ -n "$LABEL" ] && gh pr edit <pr-number> --repo <owner>/<repo> --add-label "$LABEL"
+That is the whole procedure — the risk label is set server-side by the control plane (from the
+posted badge), so there is nothing more to do here.

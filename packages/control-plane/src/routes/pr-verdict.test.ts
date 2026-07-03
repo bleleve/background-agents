@@ -83,8 +83,17 @@ function seedSession(opts?: { prNumber?: number | null }): void {
 function seedGitHub(opts?: {
   firstPage?: Array<{ id: number; body: string }>;
   listStatus?: number;
+  /** Labels currently on the PR (names), returned by GET /issues/42/labels. */
+  currentLabels?: string[];
+  /** Force a non-200 status on the label list GET (to exercise best-effort). */
+  labelListStatus?: number;
+  /** Force a status on the ensure-label POST /labels (non-422 → warn branch). */
+  labelCreateStatus?: number;
+  /** Force a status on the PUT /issues/42/labels (non-200 → warn branch). */
+  labelPutStatus?: number;
 }): void {
   const firstPage = opts?.firstPage ?? [];
+  const jsonHeaders = { "content-type": "application/json" };
   fetchMock.mockImplementation(async (url: string | URL, init?: RequestInit) => {
     const u = String(url);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -94,10 +103,7 @@ function seedGitHub(opts?: {
       }
       const page = Number(u.match(/[?&]page=(\d+)/)?.[1] ?? "1");
       const body = page === 1 ? firstPage : [];
-      return new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      return new Response(JSON.stringify(body), { status: 200, headers: jsonHeaders });
     }
     if (method === "DELETE" && /\/issues\/comments\/\d+$/.test(u)) {
       return new Response(null, { status: 204 });
@@ -105,8 +111,29 @@ function seedGitHub(opts?: {
     if (method === "POST" && u.endsWith("/issues/42/comments")) {
       return new Response(
         JSON.stringify({ html_url: "https://github.com/acme/widgets/pull/42#issuecomment-1" }),
-        { status: 201, headers: { "content-type": "application/json" } }
+        { status: 201, headers: jsonHeaders }
       );
+    }
+    // Server-side risk-label sync: ensure-exists (POST /labels), read current
+    // (GET /issues/42/labels), replace (PUT /issues/42/labels).
+    if (method === "POST" && u.endsWith("/labels")) {
+      return new Response(JSON.stringify({}), {
+        status: opts?.labelCreateStatus ?? 201,
+        headers: jsonHeaders,
+      });
+    }
+    if (method === "GET" && u.endsWith("/issues/42/labels")) {
+      if (opts?.labelListStatus && opts.labelListStatus !== 200) {
+        return new Response("boom", { status: opts.labelListStatus });
+      }
+      const labels = (opts?.currentLabels ?? []).map((name) => ({ name }));
+      return new Response(JSON.stringify(labels), { status: 200, headers: jsonHeaders });
+    }
+    if (method === "PUT" && u.endsWith("/issues/42/labels")) {
+      return new Response(JSON.stringify([]), {
+        status: opts?.labelPutStatus ?? 200,
+        headers: jsonHeaders,
+      });
     }
     return new Response("unexpected", { status: 500 });
   });
@@ -118,6 +145,17 @@ function lastPostBody(): string {
       (init?.method ?? "GET").toUpperCase() === "POST" && String(u).endsWith("/issues/42/comments")
   )!;
   return JSON.parse(String(call[1].body)).body;
+}
+
+/** The `labels` array sent to the most recent PUT /issues/42/labels, or null. */
+function lastLabelPut(): string[] | null {
+  const call = [...fetchMock.mock.calls]
+    .reverse()
+    .find(
+      ([u, init]) =>
+        (init?.method ?? "GET").toUpperCase() === "PUT" && String(u).endsWith("/issues/42/labels")
+    );
+  return call ? (JSON.parse(String(call[1].body)).labels as string[]) : null;
 }
 
 beforeEach(() => {
@@ -146,6 +184,7 @@ describe("handleSubmitVerdict", () => {
       status: "posted",
       verdictUrl: "https://github.com/acme/widgets/pull/42#issuecomment-1",
       deletedPrior: 0,
+      riskLevel: "low",
     });
     const post = fetchMock.mock.calls.find(
       ([, init]) => (init?.method ?? "GET").toUpperCase() === "POST"
@@ -201,6 +240,61 @@ describe("handleSubmitVerdict", () => {
     const posted = lastPostBody();
     expect(posted).toContain("## 🟡 Reef Review — Medium risk");
     expect(posted).not.toContain("## 🔵 Reef Review — Low risk");
+  });
+
+  it("syncs the reef risk label from the enforced badge, preserving other labels", async () => {
+    seedGitHub({ currentLabels: ["reef: low risk", "enhancement"] });
+    const body = [
+      MARKER,
+      "## 🔵 Reef Review — Low risk",
+      "",
+      "### Tests coverage",
+      "- 🟡 `x.ts:1` — untested gap",
+    ].join("\n");
+    const res = await callHandler({ body });
+
+    expect(res.status).toBe(200);
+    // The label is driven by the ENFORCED badge (medium), not the model's 🔵.
+    expect(await res.json()).toMatchObject({ riskLevel: "medium" });
+    const put = lastLabelPut();
+    expect(put).toContain("reef: medium risk"); // the enforced label
+    expect(put).toContain("enhancement"); // non-reef labels preserved
+    expect(put).not.toContain("reef: low risk"); // the stale reef label dropped
+  });
+
+  it("skips the label PUT when the correct reef label is already set", async () => {
+    seedGitHub({ currentLabels: ["reef: low risk"] });
+    await callHandler({ body: `${MARKER}\n## 🔵 Reef Review — Low risk` });
+    expect(lastLabelPut()).toBeNull();
+  });
+
+  it("still returns posted when the label list GET fails (best-effort)", async () => {
+    seedGitHub({ labelListStatus: 500 });
+    const res = await callHandler({ body: `${MARKER}\n## 🔵 Reef Review — Low risk` });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { riskLevel: string }).riskLevel).toBe("low");
+  });
+
+  it("proceeds to the PUT when ensuring the label fails with a non-422", async () => {
+    seedGitHub({ currentLabels: [], labelCreateStatus: 500 });
+    const res = await callHandler({ body: `${MARKER}\n## 🔵 Reef Review — Low risk` });
+    // A failed ensure-exists is warn-only — the sync still reads + replaces labels.
+    expect(res.status).toBe(200);
+    expect(lastLabelPut()).toContain("reef: low risk");
+  });
+
+  it("still returns posted when the label PUT fails (best-effort)", async () => {
+    seedGitHub({ currentLabels: [], labelPutStatus: 500 });
+    const res = await callHandler({ body: `${MARKER}\n## 🔵 Reef Review — Low risk` });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { riskLevel: string }).riskLevel).toBe("low");
+  });
+
+  it("does not sync a label when the body has no recognizable verdict header", async () => {
+    seedGitHub({ currentLabels: ["reef: high risk"] });
+    // Header without "Reef Review" is not a recognizable verdict → no level.
+    await callHandler({ body: `${MARKER}\n## 🔵 something else` });
+    expect(lastLabelPut()).toBeNull();
   });
 
   it("rejects a body that only exceeds the cap once the marker is prepended", async () => {

@@ -15,9 +15,9 @@
  * /pr-verdict route 422s when the session has no PR). The gh guard's raw-issue-
  * comment block is what's scoped to review sessions (REEF_REVIEW_SESSION).
  *
- * It handles the comment only. The risk LABEL is synced separately by the
- * `reef-verdict` skill via `gh` (labels are not blocked), so this tool does not
- * take a risk level.
+ * The control plane also sets the matching `reef: … risk` label server-side from
+ * the badge in the posted verdict, so this tool takes no risk level and the
+ * agent never sets the label itself.
  */
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
@@ -31,8 +31,8 @@ export default tool({
     "or `gh pr comment` (those are blocked in review sessions). The control plane deletes any " +
     "prior verdict and posts your body as a fresh comment under the bot identity. Compose the full " +
     "verdict body first (the `reef-verdict` skill has the template); it must begin with the hidden " +
-    "`<!-- reef-verdict -->` marker line. Returns the posted comment URL on success. After it " +
-    "succeeds, sync the risk label with `gh` as the skill describes.",
+    "`<!-- reef-verdict -->` marker line. Returns the posted comment URL on success. The control " +
+    "plane also sets the matching risk label server-side, so you do not sync any label yourself.",
   args: {
     body: z
       .string()

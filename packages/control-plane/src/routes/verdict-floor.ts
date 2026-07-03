@@ -24,10 +24,10 @@
  *   3. A "risk raised to <badge>" summary phrase is corrected to the enforced
  *      badge so the prose cannot contradict the header.
  *
- * Not handled here: the risk LABEL, which the `reef-verdict` skill still derives
- * client-side from the agent's badge (see pr-verdict.ts). Making the label
- * authoritative is a separate change (it would move label-setting server-side
- * and drop the skill step).
+ * The `level` this returns also drives the PR risk LABEL: `syncRiskLabel` in
+ * pr-verdict.ts sets `reef: <level> risk` server-side from this same enforced
+ * badge, so the label can never drift from the comment (the `reef-verdict` skill
+ * no longer touches it).
  */
 
 type Severity = "🔵" | "🟡" | "🔴";
@@ -38,6 +38,10 @@ const BADGE: Record<number, { emoji: Severity; word: string }> = {
   2: { emoji: "🟡", word: "Medium" },
   3: { emoji: "🔴", word: "High" },
 };
+
+/** The risk level a badge maps to — also the suffix of the `reef: <level> risk` PR label. */
+export type RiskLevel = "low" | "medium" | "high";
+const LEVEL_BY_RANK: Record<number, RiskLevel> = { 1: "low", 2: "medium", 3: "high" };
 
 /** The verdict header, e.g. `## 🟡 Reef Review — Medium risk`. */
 const HEADER_RE = /^(#{1,6}\s*)(🔵|🟡|🔴)(\s*Reef Review\s*—\s*)(Low|Medium|High)(\s*risk\b.*)$/;
@@ -61,6 +65,12 @@ export interface FloorResult {
   from?: string;
   /** Header badge after the raise, e.g. `🟡 Medium` (set only when the header moved). */
   to?: string;
+  /**
+   * The final (post-enforcement) risk level, for syncing the `reef: <level> risk`
+   * PR label from the same authoritative badge. Undefined when the body has no
+   * recognizable verdict header.
+   */
+  level?: RiskLevel;
 }
 
 /**
@@ -136,5 +146,5 @@ export function enforceVerdictFloor(body: string): FloorResult {
     );
   }
 
-  return { body: result, changed: result !== body, from, to };
+  return { body: result, changed: result !== body, from, to, level: LEVEL_BY_RANK[headerRank] };
 }
