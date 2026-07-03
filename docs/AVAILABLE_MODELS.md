@@ -11,7 +11,7 @@ be available in the sandbox environment.
 | ----------------------------- | ----------------- | ------------------------------------ | ----------------------------- | -------------- |
 | `anthropic/claude-haiku-4-5`  | Claude Haiku 4.5  | Fast and efficient                   | high, max                     | max            |
 | `anthropic/claude-sonnet-4-5` | Claude Sonnet 4.5 | Balanced performance                 | high, max                     | max            |
-| `anthropic/claude-sonnet-4-6` | Claude Sonnet 4.6 | Balanced, fast coding                | low, medium, high, max        | high           |
+| `anthropic/claude-sonnet-4-6` | Claude Sonnet 4.6 | Balanced, fast coding                | low, medium, high, max        | medium         |
 | `anthropic/claude-sonnet-5`   | Claude Sonnet 5   | Latest generation, adaptive thinking | low, medium, high, xhigh      | medium         |
 | `anthropic/claude-opus-4-5`   | Claude Opus 4.5   | Most capable                         | high, max                     | max            |
 | `anthropic/claude-opus-4-6`   | Claude Opus 4.6   | Most capable, adaptive thinking      | low, medium, high, max        | high           |
