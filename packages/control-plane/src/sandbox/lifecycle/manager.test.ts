@@ -62,6 +62,7 @@ function createMockSession(overrides: Partial<SessionRow> = {}): SessionRow {
     plan_approval_status: null,
     plan_model: null,
     plan_cost_snapshot: null,
+    review_session: 0,
     created_at: Date.now() - 60000,
     updated_at: Date.now(),
     ...overrides,
@@ -3013,6 +3014,80 @@ describe("SandboxLifecycleManager", () => {
 
       expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
         expect.objectContaining({ agentSlackNotifyEnabled: false })
+      );
+    });
+  });
+
+  describe("review session gate", () => {
+    // `reviewSession` (from the persisted review_session column) becomes the
+    // REEF_REVIEW_SESSION env var, which switches the gh guard to block raw
+    // issue comments. It must flow on BOTH the fresh spawn and the snapshot-
+    // restore paths — a silent regression on restore would drop the guard after
+    // a review session resumes from a snapshot. It is derived from the column,
+    // NOT spawn_source, so @mention/command sessions (review_session=0) are not
+    // blocked even though they share spawn_source="github-bot".
+    function buildManager(opts: {
+      reviewSession: number;
+      sandbox?: ReturnType<typeof createMockSandbox>;
+    }) {
+      const sandbox =
+        opts.sandbox ?? createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
+      const storage = createMockStorage(
+        createMockSession({ spawn_source: "github-bot", review_session: opts.reviewSession }),
+        sandbox
+      );
+      const provider = createMockProvider();
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+      return { manager, provider };
+    }
+
+    function snapshotSandbox() {
+      return createMockSandbox({ status: "stopped", snapshot_image_id: "img-abc123" });
+    }
+
+    it("passes reviewSession=true on a fresh spawn of a review session", async () => {
+      const { manager, provider } = buildManager({ reviewSession: 1 });
+      await manager.spawnSandbox();
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({ reviewSession: true })
+      );
+    });
+
+    it("passes reviewSession=false for a github-bot @mention session (review_session=0)", async () => {
+      const { manager, provider } = buildManager({ reviewSession: 0 });
+      await manager.spawnSandbox();
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({ reviewSession: false })
+      );
+    });
+
+    it("passes reviewSession=true on snapshot restore of a review session", async () => {
+      const { manager, provider } = buildManager({
+        reviewSession: 1,
+        sandbox: snapshotSandbox(),
+      });
+      await manager.spawnSandbox();
+      expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ reviewSession: true })
+      );
+    });
+
+    it("passes reviewSession=false on snapshot restore of a non-review session", async () => {
+      const { manager, provider } = buildManager({
+        reviewSession: 0,
+        sandbox: snapshotSandbox(),
+      });
+      await manager.spawnSandbox();
+      expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ reviewSession: false })
       );
     });
   });

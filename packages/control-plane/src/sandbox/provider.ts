@@ -83,6 +83,16 @@ export interface CreateSandboxConfig {
   sandboxSettings?: SandboxSettings;
   /** User-supplied OpenCode config JSON string (deep-merged on top of system config in sandbox) */
   opencodeUserConfig?: string;
+  /**
+   * True for a dedicated PR *review* session (the github-bot's runCodeReview
+   * path; review_session=1). Delivered to the sandbox as the REEF_REVIEW_SESSION
+   * env var, which tells the gh guard to block raw issue comments — in a review
+   * the only legitimate conversation comment is the verdict, which must go
+   * through the `submit-review-verdict` tool. NOT set for @mention/command
+   * sessions, which legitimately post top-level replies. See
+   * git_credential_helper.py `_run_gh_guard`.
+   */
+  reviewSession?: boolean;
 }
 
 /**
@@ -149,6 +159,8 @@ export interface RestoreConfig {
   sandboxSettings?: SandboxSettings;
   /** User-supplied OpenCode config JSON string (deep-merged on top of system config in sandbox) */
   opencodeUserConfig?: string;
+  /** True for a dedicated PR review session — see CreateSandboxConfig. Re-resolved on each restore. */
+  reviewSession?: boolean;
 }
 
 /**

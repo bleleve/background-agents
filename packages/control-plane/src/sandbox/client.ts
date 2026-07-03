@@ -84,6 +84,12 @@ export interface CreateSandboxRequest {
   mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
   opencodeUserConfig?: string;
+  /**
+   * True for a dedicated PR review session. Sent as `review_session`; modal-infra
+   * turns it into the REEF_REVIEW_SESSION env var (see manager.py), which the gh
+   * guard reads to block raw issue comments (verdict-only via the tool).
+   */
+  reviewSession?: boolean;
 }
 
 export interface CreateSandboxResponse {
@@ -116,6 +122,8 @@ export interface RestoreSandboxRequest {
   mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
   opencodeUserConfig?: string;
+  /** True for a dedicated PR review session — see CreateSandboxRequest.reviewSession. */
+  reviewSession?: boolean;
 }
 
 export interface RestoreSandboxResponse {
@@ -290,6 +298,7 @@ export class ModalClient {
           code_server_enabled: request.codeServerEnabled ?? false,
           agent_slack_notify_enabled: request.agentSlackNotifyEnabled ?? false,
           agent_tool_flags: request.agentToolFlags ?? null,
+          review_session: request.reviewSession ?? false,
           mcp_servers: request.mcpServers || null,
           sandbox_settings: request.sandboxSettings ?? null,
           opencode_user_config: request.opencodeUserConfig ?? null,
@@ -386,6 +395,7 @@ export class ModalClient {
           code_server_enabled: request.codeServerEnabled ?? false,
           agent_slack_notify_enabled: request.agentSlackNotifyEnabled ?? false,
           agent_tool_flags: request.agentToolFlags ?? null,
+          review_session: request.reviewSession ?? false,
           sandbox_settings: request.sandboxSettings ?? null,
           opencode_user_config: request.opencodeUserConfig ?? null,
         }),

@@ -60,12 +60,17 @@ A confidently-wrong inline comment costs reviewer time and erodes trust over man
 - **Out of scope — do not post (unless a comment explicitly asks about it):** theoretical risks that need unlikely preconditions (but do flag silent data corruption or loss even when the trigger is rare); defense-in-depth suggestions when the primary defense is already adequate; issues in code this PR does not touch; "consider using library X" style preferences.
 - **When uncertain whether the issue is real, do not post.** A missed real issue is recoverable on the next review pass; a confidently-wrong one creates noise on every review.`;
 
-// Bumped whenever buildInlineSuggestionWorkflow, SUGGESTION_QUALITY_BAR, or
-// SUGGESTION_APPLICABILITY_GATE change. Used to A/B-attribute suggestion-apply-
-// quality changes to specific prompt versions via the review_suggestions D1 table.
-// The control-plane stamps this value against each recorded suggestion by looking
-// up the most recent github-bot session for the PR at record time.
-export const INLINE_SUGGESTION_PROMPT_VERSION = "v4";
+// Bumped whenever the inline-suggestion behavior changes: SUGGESTION_QUALITY_BAR,
+// SUGGESTION_APPLICABILITY_GATE, the skill pointer in buildInlineSuggestionWorkflow,
+// OR the mechanical steps now housed in the `reef-inline-suggestion` skill
+// (packages/sandbox-runtime/src/sandbox_runtime/skills/reef-inline-suggestion/SKILL.md).
+// That skill is baked into the sandbox image (a different package + deploy cadence), so
+// a change there must ALSO bump this version by hand — the marker-sync test guards the
+// wiring contract, not the version. Used to A/B-attribute suggestion-apply-quality
+// changes via the review_suggestions D1 table; the control-plane stamps this value
+// against each recorded suggestion by looking up the most recent github-bot session for
+// the PR at record time.
+export const INLINE_SUGGESTION_PROMPT_VERSION = "v5";
 
 // Gate that every finding must pass BEFORE emitting an applyable ```suggestion block.
 // Evaluated step-by-step; a single failure → prose (or illustrative fence) instead.
@@ -93,6 +98,12 @@ const NO_FORMAL_REVIEW_GUARD =
   "REQUEST_CHANGES (neither is permitted here, and the sandbox will block them). Leave feedback " +
   "only as inline suggestion comments (`.../pulls/<n>/comments`) and the single verdict issue comment.";
 
+// Emits the inline-suggestion section: the eligibility gate (judgment — stays inline,
+// the agent needs it before forming any finding) plus a pointer to the
+// `reef-inline-suggestion` skill, which carries the ~60-line mechanical posting
+// procedure (anchor derivation, gh api POST, read-back). The skill is loaded on demand
+// only when the agent actually posts, so its bulk no longer sits in every review prompt.
+// The skill lives at packages/sandbox-runtime/src/sandbox_runtime/skills/reef-inline-suggestion/.
 function buildInlineSuggestionWorkflow(params: {
   owner: string;
   repo: string;
@@ -101,68 +112,7 @@ function buildInlineSuggestionWorkflow(params: {
   const { owner, repo, number } = params;
   return `${SUGGESTION_APPLICABILITY_GATE}
 
-**If eligible — follow these steps exactly:**
-
-**Step 1 — Derive the anchor (do NOT hand-count from diff hunk headers alone).**
-If the \`ast-anchor\` tool is available in your toolset, call it with the owner, repo, head SHA, file path, and a short description of the target node. It returns the exact \`start_line\`, \`line\`, and leading indentation — use those values directly in Step 4.
-
-Otherwise derive the anchor manually:
-- Get the PR head SHA: \`SHA="$(gh pr view ${number} --repo ${owner}/${repo} --json headRefOid --jq .headRefOid)"\`
-- In the diff (the **## Full Diff** section above when inlined, otherwise \`gh pr diff ${number}\` output), find the hunk header \`@@ -a,b +c,d @@\` containing the target lines. Start counting from line \`c\`, incrementing only for context lines (space prefix) and added lines (\`+\` prefix), skipping deleted lines (\`-\` prefix). The result is the 1-based RIGHT-side file line number.
-- Read the exact leading whitespace from the target line in the diff output — do not retype or guess it. GitHub applies the block verbatim.
-
-**Step 2 — Get the PR head SHA (if not already fetched).**
-
-   SHA="$(gh pr view ${number} --repo ${owner}/${repo} --json headRefOid --jq .headRefOid)"
-
-**Step 3 — Write the comment body to a temp file.**
-The first line MUST be a hidden risk marker — \`<!-- reef-risk: low -->\`, \`<!-- reef-risk: medium -->\`, or \`<!-- reef-risk: high -->\` — set to this finding's severity. Invisible when rendered; used only for risk analytics. Do not omit it.
-
-   cat >/tmp/pr-suggestion.md <<'EOF'
-   <!-- reef-risk: <low|medium|high> -->
-   <what is wrong and why — one concise sentence>
-
-   \`\`\`suggestion
-   <full replacement for the selected range, exact leading whitespace preserved>
-   \`\`\`
-
-   *If new commits have landed since this comment was posted, re-run the review before applying.*
-   EOF
-
-**Step 4 — Post the inline review comment and capture the response.**
-
-   # Single-line replacement
-   gh api -X POST "repos/${owner}/${repo}/pulls/${number}/comments" \\
-     -f commit_id="$SHA" \\
-     -f path="<file path from PR diff>" \\
-     -F line="<RIGHT-side line number>" \\
-     -f side="RIGHT" \\
-     -F body=@/tmp/pr-suggestion.md > /tmp/pr-suggestion-response.json
-
-   # Multi-line replacement (including removals — include obsolete lines in the range)
-   gh api -X POST "repos/${owner}/${repo}/pulls/${number}/comments" \\
-     -f commit_id="$SHA" \\
-     -f path="<file path from PR diff>" \\
-     -F start_line="<first RIGHT-side line>" \\
-     -f start_side="RIGHT" \\
-     -F line="<last RIGHT-side line>" \\
-     -f side="RIGHT" \\
-     -F body=@/tmp/pr-suggestion.md > /tmp/pr-suggestion-response.json
-
-   COMMENT_ID="$(jq .id /tmp/pr-suggestion-response.json)"
-
-In the suggestion block, provide the full replacement for the selected range. When lines should be removed, omit them from the replacement. Do not suggest code that calls a function, method, or variable that does not already exist at that location; if a fix requires changes in multiple places, skip the block and explain in prose instead.
-
-**Step 4b — Record the suggestion (if the \`record-suggestion\` tool is available).**
-If \`record-suggestion\` is in your toolset, call it immediately with the comment ID, file, line, and risk score. This records the suggestion directly without waiting for the GitHub webhook, giving more reliable analytics. Best-effort: a failure here does not affect the posted comment.
-
-**Step 5 — Verify the anchor (post-hoc read-back, mandatory).**
-   gh api "repos/${owner}/${repo}/pulls/comments/$COMMENT_ID" \\
-     --jq '{path: .path, line: .line, start_line: .start_line, side: .side}'
-
-Confirm that \`path\`, \`line\`, and \`side\` match what you intended and that the comment has an **Apply suggestion** button. If \`line\` is null or \`side\` is not RIGHT, the comment is outdated or mis-anchored — delete it and either re-anchor correctly or downgrade to prose:
-
-   gh api -X DELETE "repos/${owner}/${repo}/pulls/comments/$COMMENT_ID"`;
+**If eligible — post the suggestion with the \`reef-inline-suggestion\` skill.** It carries the exact mechanical steps: derive the RIGHT-side anchor (with the \`ast-anchor\` tool when available), fetch the PR head SHA, write the comment body whose first line is the hidden \`<!-- reef-risk: low|medium|high -->\` severity marker, POST it to \`repos/${owner}/${repo}/pulls/${number}/comments\` via \`gh api\`, record it with \`record-suggestion\` when that tool is available, and read back the anchor to confirm the **Apply suggestion** button. Use owner \`${owner}\`, repo \`${repo}\`, and PR number \`${number}\` in its commands. If a fix requires changes in multiple places, or any eligibility gate above failed, do not open an inline comment — explain the fix in prose instead.`;
 }
 
 // Hidden HTML marker that prefixes the review-verdict comment body. Invisible when
@@ -173,8 +123,9 @@ export const REEF_VERDICT_MARKER = "<!-- reef-verdict -->";
 // Hidden per-suggestion risk marker the agent prepends to each inline comment body.
 // Invisible when rendered, it carries the finding's risk so the webhook handler can
 // record it for the "by risk" suggestion analytics (which would otherwise be all
-// `unknown`). The capture group is the risk level. Keep in sync with the heredoc in
-// buildInlineSuggestionWorkflow.
+// `unknown`). The capture group is the risk level. Keep in sync with the hidden marker
+// written in Step 3 of the `reef-inline-suggestion` skill
+// (packages/sandbox-runtime/src/sandbox_runtime/skills/reef-inline-suggestion/SKILL.md).
 export const REEF_RISK_MARKER_RE = /<!--\s*reef-risk:\s*(low|medium|high)\s*-->/i;
 
 function buildVerdictWorkflow(params: {
@@ -187,7 +138,7 @@ function buildVerdictWorkflow(params: {
   const footer = sessionUrl
     ? `<sub>🤖 Reef automated review — not exhaustive, may miss issues · [session](${sessionUrl})</sub>`
     : `<sub>🤖 Reef automated review — not exhaustive, may miss issues</sub>`;
-  return `7. Post a single **review verdict** comment. **This is your final action and it is mandatory — post it regardless of your conclusion.** Even when you found nothing to flag and posted no inline suggestions, you MUST still post the verdict (🔵 Low risk with \`No findings.\`). "Nothing to flag" is itself a verdict, not a reason to skip this step. On a re-review, delete the prior verdict comment and post a fresh one (a new comment notifies subscribers; an in-place edit would be silent).
+  return `7. Post a single **review verdict** comment. **This is your final action and it is mandatory — post it regardless of your conclusion.** Even when you found nothing to flag and posted no inline suggestions, you MUST still post the verdict (🔵 Low risk with \`No findings.\`). "Nothing to flag" is itself a verdict, not a reason to skip this step. On a re-review, the \`submit-review-verdict\` tool replaces the prior verdict with a fresh comment (a new comment notifies subscribers; an in-place edit would be silent).
 - The body MUST begin with this exact marker line (invisible when rendered; it lets you find a prior verdict to delete):
 
    ${REEF_VERDICT_MARKER}
@@ -202,56 +153,9 @@ function buildVerdictWorkflow(params: {
    - **Reviewed, no concerns** — collapsed by default so it doesn't bury the summary. Unlike the sections above, this one has **no \`###\` heading**: the \`<summary>\` line is its title, so do NOT also write a \`### Reviewed, no concerns\` line before the block — that renders the title twice. Use a \`<details>\` block (keep the blank line after \`</summary>\` so the body renders): \`<summary>Reviewed, no concerns</summary>\` followed by a **bullet list, one bullet per area** you checked: \`- **<area>** — <what you verified>\`. Keep each note to a **single short clause** — no nested parentheticals, no chained sub-points; if a note needs more than one clause it probably belongs in "Worth a look" instead. Do NOT collapse the areas into one comma-joined paragraph.
    - Footer line, exactly: \`${footer}\`.
    - Do not invent findings to justify a verdict. A PR with nothing to flag is still 🔵 Low risk: just the header + the \`### Summary\` (with \`**No findings.**\`) + the collapsed "Reviewed, no concerns" \`<details>\` + the footer (no "Worth a look" section). The coverage floor is the one exception — an uncovered must-test change raises the badge and adds a \`### Tests coverage\` section even when nothing else was flagged. Never emit a "no risk" / "clean" verdict.
-- Delete any prior verdict comment(s), then post the new verdict as a fresh comment, printing the comment URL so you can confirm it landed:
-
-   for id in $(gh api --paginate "repos/${owner}/${repo}/issues/${number}/comments" --jq '.[] | select(.body | startswith("${REEF_VERDICT_MARKER}")) | .id'); do
-     gh api -X DELETE "repos/${owner}/${repo}/issues/comments/$id" >/dev/null 2>&1 || true
-   done
-   cat >/tmp/pr-verdict.md <<'EOF'
-   ${REEF_VERDICT_MARKER}
-   ## <🔵|🟡|🔴> Reef Review — <Low|Medium|High> risk
-
-   ### Summary
-   > <one-sentence verdict>
-
-   **<N> finding(s)** (<X low, Y medium, Z high>) · <M> areas reviewed, no concerns.
-
-   ### Worth a look
-   - <🔵|🟡|🔴> \`<path:line>\` — <concrete risk> → [inline](<inline comment html_url>)
-
-   ### Tests coverage
-   🧪 <U> test-worthy change(s) without a test
-   - <🟡|🔴> \`<path:line>\` — <behavior shipping untested>
-
-   ### Docs drift
-   - 📝 \`<path>\` — <what diverged>
-
-   *To apply doc fixes: mention Reef with \`fix the doc drift above\`*
-
-   <details>
-   <summary>Reviewed, no concerns</summary>
-
-   - **<area>** — <single short clause on what you verified>
-   - **<area>** — <…>
-   </details>
-
-   ${footer}
-   EOF
-   gh api -X POST "repos/${owner}/${repo}/issues/${number}/comments" -F body=@/tmp/pr-verdict.md --jq '.html_url'
-- Confirm the command printed the comment's \`html_url\`. If it printed nothing or errored, the verdict did NOT post — fix the call and retry until a URL comes back. Do not end the review without a posted verdict.
-- Set the PR's risk label to match the verdict, replacing any prior risk label so only the current one remains. **Derive the level mechanically from the badge emoji in the header you just wrote — do not re-judge the risk here**, so the label can never drift from the badge in the verdict you posted. \`--force\` creates the label or recolors an existing one:
-
-   case "$(grep -m1 'Reef Review' /tmp/pr-verdict.md)" in
-     *🔵*) LABEL="reef: low risk" ;;
-     *🟡*) LABEL="reef: medium risk" ;;
-     *🔴*) LABEL="reef: high risk" ;;
-     *) echo "could not parse badge from verdict header — skipping label"; LABEL="" ;;
-   esac
-   gh label create "reef: low risk"    --repo ${owner}/${repo} --force --color 1D76DB --description "Reef: low risk"    >/dev/null 2>&1 || true
-   gh label create "reef: medium risk" --repo ${owner}/${repo} --force --color FBCA04 --description "Reef: medium risk" >/dev/null 2>&1 || true
-   gh label create "reef: high risk"   --repo ${owner}/${repo} --force --color D93F0B --description "Reef: high risk"   >/dev/null 2>&1 || true
-   gh pr edit ${number} --repo ${owner}/${repo} --remove-label "reef: low risk" --remove-label "reef: medium risk" --remove-label "reef: high risk" 2>/dev/null || true
-   [ -n "$LABEL" ] && gh pr edit ${number} --repo ${owner}/${repo} --add-label "$LABEL"
+- Once you have decided the content above, render and post it with the \`reef-verdict\` skill — it carries the exact comment template (beginning with the marker line above), posts it via the \`submit-review-verdict\` tool (which deletes any prior verdict, posts the fresh one, and sets the matching \`reef: … risk\` label — all server-side). Do NOT post the verdict with raw \`gh api ... issues/${number}/comments\` or \`gh pr comment\` — those are blocked in this session; the tool is the only path. Use owner \`${owner}\`, repo \`${repo}\`, PR number \`${number}\`, and the exact footer line above. Include only the sections you kept.
+- Confirm the \`submit-review-verdict\` tool returned the comment's URL. If it errored, the verdict did NOT post — fix the body and retry until a URL comes back. Do not end the review without a posted verdict.
+- The control plane sets the PR's \`reef: … risk\` label server-side to match the badge in the verdict it posts (including any coverage-floor correction it applies), so the label can never drift from the comment. You do not set the label yourself.
 - The verdict prioritizes; it does not reopen the door to speculative findings. Do not list anything here that did not survive the quality bar above.
 - **Final reply (mandatory, exact format).** Your last message this turn is what the user sees in the Reef UI, so it must be consistent every run — no preamble, no recap of steps, no restating the verdict body. Emit EXACTLY one line, nothing else:
 

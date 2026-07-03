@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS session (
   plan_mode INTEGER NOT NULL DEFAULT 0,             -- 0 = normal session, 1 = plan-first HITL session
   plan_approval_status TEXT,                        -- NULL | 'awaiting_approval' | 'approved' | 'rejected'
   plan_model TEXT,                                  -- Model used for planning turns (NULL when plan_mode=0)
+  review_session INTEGER NOT NULL DEFAULT 0,        -- 0 = normal, 1 = dedicated PR review session (gh guard blocks raw issue comments)
   plan_cost_snapshot REAL,                          -- total_cost captured at plan approval; NULL until then. Build cost = total_cost - this.
   preview_enabled INTEGER NOT NULL DEFAULT 0,
   preview_dispatched_sha TEXT,
@@ -519,6 +520,14 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
            SELECT rowid FROM sandbox ORDER BY created_at DESC, rowid DESC LIMIT 1
          )`
       );
+    },
+  },
+  {
+    id: 40,
+    description:
+      "Add review_session to session (dedicated PR review → gh guard blocks raw issue comments)",
+    run: (sql) => {
+      runMigration(sql, `ALTER TABLE session ADD COLUMN review_session INTEGER NOT NULL DEFAULT 0`);
     },
   },
 ];

@@ -43,6 +43,7 @@ export interface SessionRow {
   plan_mode: number; // 0 = normal, 1 = plan-first HITL session (immuable post-creation)
   plan_approval_status: PlanApprovalStatus | null;
   plan_model: string | null; // Model used for planning turns (NULL when plan_mode=0)
+  review_session: number; // 0 = normal, 1 = dedicated PR review session (gh guard blocks raw issue comments)
   plan_cost_snapshot: number | null; // total_cost captured at plan approval; NULL until then
   preview_enabled?: number;
   preview_dispatched_sha?: string | null;

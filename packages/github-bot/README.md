@@ -141,9 +141,9 @@ action posts after a PR is merged.
 A completed review can be re-run two ways, both reusing the same review machinery. A re-trigger
 **re-runs in the PR's existing review session** (a fresh turn) rather than spawning a new one, so
 the thread stays in one place; the resumed prompt tells the agent to sync the worktree to the latest
-PR head first. On a re-review the agent finds the prior verdict by its `<!-- reef-verdict -->`
-marker, **deletes it, and posts a fresh verdict comment** — a new comment notifies subscribers,
-whereas an in-place edit would be silent.
+PR head first. On a re-review the `submit-review-verdict` tool finds the prior verdict by its
+`<!-- reef-verdict -->` marker, **deletes it, and posts a fresh verdict comment** — a new comment
+notifies subscribers, whereas an in-place edit would be silent.
 
 - **`reef: ask for review` label** — add the label to a PR to re-run the full review. The bot reuses
   the PR's existing review session (looked up in KV, `review-session:<repo>:<pr>`) when there is
@@ -166,9 +166,9 @@ The flow is gated by the per-repo **`autoApproveOnOpen`** setting ("Auto-approve
 handler skips unless the PR is open and non-draft, carries `reef: low risk`, passes the
 enabled-repos / private-repo filters, and the toggle is on. `getGitHubConfig` fails closed
 (`autoApproveOnOpen = false`) on any config error, so an outage never auto-approves. The
-`reef: low risk` label is written by the review agent on every verdict; `visual-qa: pass` and
-`visual-qa: skip` are applied by an external visual-QA system. (No extra GitHub App config — the
-`labeled` action ships with the already-subscribed `Pull request` event.)
+`reef: low risk` label is written server-side by the control plane on every verdict;
+`visual-qa: pass` and `visual-qa: skip` are applied by an external visual-QA system. (No extra
+GitHub App config — the `labeled` action ships with the already-subscribed `Pull request` event.)
 
 The resulting approval fires a `pull_request_review` event; the backstop (below) sees
 `autoApproveOnOpen` is on and leaves it in place.
@@ -259,13 +259,28 @@ Three prompt templates in `src/prompts.ts`:
   lookup), resolves the repo's `autoApproveOnOpen` live to gate `REQUEST_CHANGES`, and posts the
   review with the App token. As a backstop, the `pull_request_review` webhook handler dismisses any
   off-policy formal review the bot lands when `autoApproveOnOpen` is off.
-- Post inline `suggestion` comments via `gh api .../pulls/{n}/comments`
-- Use `gh pr view ... --json headRefOid` for `commit_id`, temp markdown files for body, and
-  `side=RIGHT`
-- Post a single editable risk-map **verdict** comment (anchored by a hidden marker), set the
-  matching `reef: low risk`/`reef: medium risk`/`reef: high risk` label on the PR, and link the
-  originating session in the footer (built from `sessionUrl`, the only extra param the handler
-  passes beyond webhook metadata)
+- Post the review **verdict** only through the `submit-review-verdict` tool, never raw
+  `gh api .../issues/{n}/comments` or `gh pr comment`. In a dedicated **review** session (signalled
+  by the `REEF_REVIEW_SESSION` env var, set only for the `runCodeReview` path) the verdict is the
+  only conversation comment, so the `gh` wrapper's `gh-guard` blocks raw issue comments there; the
+  tool routes to the control plane (`POST /sessions/:id/pr-verdict`), which deletes any prior
+  verdict by its marker and posts the fresh one with the App token. The block is scoped to reviews:
+  **@mention/command sessions are not blocked**, since they legitimately post a top-level issue
+  comment to answer the user. Inline suggestions (`pulls/{n}/comments`) and review-thread replies
+  (`pulls/{n}/comments/{id}/replies`) are always unaffected.
+- Post inline `suggestion` comments via `gh api .../pulls/{n}/comments`; the mechanical posting
+  steps (head SHA fetch, temp markdown files, `side=RIGHT` anchor derivation, read-back) are
+  delegated to the bundled `reef-inline-suggestion` OpenCode skill
+  (`packages/sandbox-runtime/src/sandbox_runtime/skills/reef-inline-suggestion/`) loaded on demand
+- Post a single risk-map **verdict** comment (anchored by a hidden marker) via the bundled
+  `reef-verdict` skill (`packages/sandbox-runtime/src/sandbox_runtime/skills/reef-verdict/`). The
+  prompt decides the content; the skill renders the body and posts it with the
+  `submit-review-verdict` tool, which deletes any prior verdict and posts the fresh one server-side
+  (raw `gh api .../issues/{n}/comments` is blocked in dedicated review sessions
+  (`REEF_REVIEW_SESSION`) — see below). The control plane also sets the matching
+  `reef: low risk`/`reef: medium risk`/`reef: high risk` label on the PR server-side, from the same
+  badge as the verdict comment; the session link in the footer is built from `sessionUrl`, the only
+  extra param the handler passes beyond webhook metadata
 
 **`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and asks the
 agent to first classify the request into one of two paths (the model decides from the comment's

@@ -78,6 +78,11 @@ AGENT_TOOLS_GATED_ON_ENV: dict[str, str] = {
     "validate-suggestion.js": "AGENT_TOOL_VALIDATE_SUGGESTION_JS",
     "record-suggestion.js": "AGENT_TOOL_RECORD_SUGGESTION_JS",
 }
+# Note: submit-review-verdict.js is NOT gated — it is always installed, like
+# submit-pr-review.js. Both review sessions and @mention "full review" sessions
+# post a verdict through it, and it is inert elsewhere (the /pr-verdict route
+# 422s when the session has no PR). The gh guard's raw-issue-comment block is
+# what's scoped to review sessions (REEF_REVIEW_SESSION), not the tool.
 
 AGENT_TOOLS_REQUIRING_REPOSITORY: set[str] = set()
 

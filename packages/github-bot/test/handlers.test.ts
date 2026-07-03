@@ -310,6 +310,9 @@ describe("handlePullRequestOpened", () => {
     expect(sessionBody.scmUserId).toBe("1001");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1001");
     expect(sessionBody.spawnSource).toBe("github-bot");
+    // Review sessions carry reviewSession so the sandbox gh guard blocks raw
+    // issue comments (verdict-only). @mention/command sessions must NOT set it.
+    expect(sessionBody.reviewSession).toBe(true);
 
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.source).toBe("github");
@@ -964,6 +967,9 @@ describe("handleIssueComment", () => {
     expect(sessionBody.scmUserId).toBe("1002");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1002");
     expect(sessionBody.spawnSource).toBe("github-bot");
+    // @mention/command session: NOT a review, so the gh guard must not block its
+    // top-level issue-comment replies. reviewSession is left unset.
+    expect(sessionBody.reviewSession).toBeUndefined();
 
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.content).toContain("please fix the error handling");

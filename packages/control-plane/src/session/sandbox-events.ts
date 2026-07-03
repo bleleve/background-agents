@@ -552,8 +552,7 @@ export class SessionSandboxEventProcessor {
   private normalizePushSpec(pushSpec: GitPushSpec, normalizedBranch: string): GitPushSpec {
     const rawRefspec = pushSpec.refspec.trim();
     const separatorIndex = rawRefspec.indexOf(":");
-    const sourceRef =
-      separatorIndex >= 0 ? rawRefspec.slice(0, separatorIndex).trim() : rawRefspec;
+    const sourceRef = separatorIndex >= 0 ? rawRefspec.slice(0, separatorIndex).trim() : rawRefspec;
 
     if (!sourceRef) {
       return {

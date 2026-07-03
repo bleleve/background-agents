@@ -216,6 +216,12 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       envVars.AGENT_SLACK_NOTIFY_ENABLED = "true";
     }
 
+    if (config.reviewSession) {
+      // Dedicated PR review session: switches the gh guard to block raw issue
+      // comments (verdict-only via the tool). See git_credential_helper.py.
+      envVars.REEF_REVIEW_SESSION = "true";
+    }
+
     if (config.agentToolFlags) {
       for (const [toolFile, enabled] of Object.entries(config.agentToolFlags)) {
         if (enabled) {

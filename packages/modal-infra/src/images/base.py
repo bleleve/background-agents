@@ -70,7 +70,16 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 #      helper backed by control plane remains the sole credential path.
 # v96: add ripgrep to apt packages
 # v97: bump OpenCode to 1.17.13
-CACHE_BUSTER = "v97-opencode-1-17-13"
+# v98: bundle reef-inline-suggestion + reef-verdict skills (PR-review prompt mechanics
+#      moved out of github-bot into on-demand OpenCode skills)
+# v99: submit-review-verdict tool + gh guard blocks raw issue comments in github-bot
+#      sessions (verdict posts server-side); reef-verdict skill calls the tool
+# v100: add claude-sonnet-5 to the Anthropic adaptive-thinking set in bridge.py
+# v101: scope the gh raw-issue-comment guard to REEF_REVIEW_SESSION (dedicated PR
+#       reviews) instead of all github-bot sessions; verdict tool always installed
+# v102: reef-verdict skill drops its client-side risk-label sync (Step C) — the
+#       control plane now sets the label server-side from the enforced badge
+CACHE_BUSTER = "v102-server-verdict-label"
 
 # Base image with all development tools
 base_image = (

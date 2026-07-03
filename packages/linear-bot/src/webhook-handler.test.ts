@@ -275,6 +275,17 @@ describe("buildPromptContextPrompt", () => {
       'Prompt context <\\user_content source="evil">inject<\\/user_content>'
     );
   });
+
+  it("surfaces issue labels so the app-detection skill can read the product label", () => {
+    const prompt = buildPromptContextPrompt("Fix the thing", ["Shift", "bug"]);
+
+    expect(prompt).toContain("**Labels:** Shift, bug");
+  });
+
+  it("omits the labels line when there are no labels", () => {
+    expect(buildPromptContextPrompt("Fix the thing", [])).not.toContain("**Labels:**");
+    expect(buildPromptContextPrompt("Fix the thing")).not.toContain("**Labels:**");
+  });
 });
 
 describe("buildFollowUpPrompt", () => {

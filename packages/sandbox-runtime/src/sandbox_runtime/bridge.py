@@ -395,6 +395,34 @@ class AgentBridge:
             return None
         return repo_dirs[0].parent
 
+    # Relative path of the app-detection skill a monorepo may ship (Claude-format,
+    # also discovered by OpenCode). Its presence is the sole, repo-driven signal
+    # that this checkout wants sub-app targeting — no server-side catalog involved.
+    _DETECT_APP_SKILL_REL = Path(".claude/skills/detect-app/SKILL.md")
+
+    def _build_app_targeting_context(self) -> str | None:
+        """Nudge the agent to run the repo's `detect-app` skill before editing.
+
+        Returns a short instruction block only when the cloned repo actually ships
+        the skill; otherwise ``None`` (no behavior change for non-monorepo repos).
+        The skill owns the app catalog and the ask-if-unsure logic — this block just
+        makes the agent invoke it up front. Never raises."""
+        try:
+            repo_dir = self._resolve_repo_dir()
+            if repo_dir is None or not (repo_dir / self._DETECT_APP_SKILL_REL).is_file():
+                return None
+        except Exception as e:
+            self.log.debug("bridge.app_targeting_skip", exc=e)
+            return None
+        return (
+            "<app_targeting>\n"
+            "This repository is a monorepo and ships a `detect-app` skill. Before editing "
+            "any files, use that skill to determine which app/folder this task targets. If "
+            "the target app is not unambiguous, ask the user to confirm before proceeding, "
+            "then scope your work to that app's directory.\n"
+            "</app_targeting>"
+        )
+
     async def _get_head_sha(self) -> str | None:
         """Return the checked-out repository HEAD without blocking the event loop."""
         repo_dir = self._resolve_repo_dir()
@@ -825,6 +853,7 @@ class AgentBridge:
         outcome = "success"
 
         url_context = build_fountain_url_context(content)
+        app_context = self._build_app_targeting_context()
 
         if plan_mode:
             # Planning turn: instruct the agent to output a markdown plan and stop.
@@ -849,9 +878,14 @@ class AgentBridge:
 
         if url_context:
             content = f"{url_context}\n\n{content}"
+        # App-targeting goes outermost so the agent scopes to the right sub-app
+        # before acting on the (already-prepended) Fountain URL context.
+        if app_context:
+            content = f"{app_context}\n\n{content}"
 
         self.log.info(
             "prompt.start",
+            app_targeting=bool(app_context),
             message_id=message_id,
             model=model,
             reasoning_effort=reasoning_effort,
@@ -1214,6 +1248,7 @@ class AgentBridge:
         "claude-opus-4-7",
         "claude-opus-4-8",
         "claude-sonnet-4-6",
+        "claude-sonnet-5",
     }
     ANTHROPIC_ADAPTIVE_EFFORTS: ClassVar[set[str]] = {"low", "medium", "high", "xhigh", "max"}
 
