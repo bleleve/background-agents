@@ -45,6 +45,8 @@ const HEADER_RE = /^(#{1,6}\s*)(🔵|🟡|🔴)(\s*Reef Review\s*—\s*)(Low|Med
 const FINDING_BULLET_RE = /^\s*[-*]\s*(🔵|🟡|🔴)/;
 /** The `### Tests coverage` heading. */
 const TESTS_COVERAGE_HEADING_RE = /^#{1,6}\s*Tests coverage\b/i;
+/** The headings whose bullets are findings that floor the badge. */
+const FINDING_SECTION_HEADING_RE = /^#{1,6}\s*(Worth a look|Tests coverage)\b/i;
 /** Any heading — marks the end of a section. */
 const HEADING_RE = /^#{1,6}\s/;
 /** A `risk raised to <emoji> <Level>` phrase in the summary. */
@@ -87,9 +89,22 @@ export function enforceVerdictFloor(body: string): FloorResult {
     }
   }
 
-  // Pass 2 — highest-severity finding bullet anywhere (after the lift above).
+  // Pass 2 — highest-severity finding bullet within the finding sections only
+  // (Worth a look / Tests coverage), after the lift above. Docs drift, the
+  // Reviewed <details>, and any prose emoji must not floor the badge — a
+  // model-authored 🟡/🔴 outside a findings section is not a finding.
   let maxBulletRank = 0;
+  let inFindingSection = false;
   for (const line of lines) {
+    if (HEADING_RE.test(line)) {
+      inFindingSection = FINDING_SECTION_HEADING_RE.test(line);
+      continue;
+    }
+    if (/^\s*<details/i.test(line)) {
+      inFindingSection = false;
+      continue;
+    }
+    if (!inFindingSection) continue;
     const m = line.match(FINDING_BULLET_RE);
     if (m) maxBulletRank = Math.max(maxBulletRank, RANK[m[1] as Severity]);
   }

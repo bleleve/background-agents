@@ -175,6 +175,40 @@ describe("enforceVerdictFloor", () => {
     expect(res.body).toBe(body);
   });
 
+  it("does not let a severity emoji in the Reviewed <details> raise the badge", () => {
+    const body = [
+      "<!-- reef-verdict -->",
+      "## 🔵 Reef Review — Low risk",
+      "",
+      "### Worth a look",
+      "- 🔵 `a.ts:1` — minor nit → [inline](https://e/1)",
+      "",
+      "<details>",
+      "<summary>Reviewed, no concerns</summary>",
+      "",
+      "- 🔴 **Correctness** — the 🔴 error path is handled",
+      "</details>",
+    ].join("\n");
+
+    const res = enforceVerdictFloor(body);
+    expect(res.changed).toBe(false);
+    expect(res.body).toBe(body);
+  });
+
+  it("does not let a Docs drift bullet raise the badge", () => {
+    const body = [
+      "<!-- reef-verdict -->",
+      "## 🔵 Reef Review — Low risk",
+      "",
+      "### Docs drift",
+      "- 🔴 `README.md` — contrived severity emoji, not a finding",
+    ].join("\n");
+
+    const res = enforceVerdictFloor(body);
+    expect(res.changed).toBe(false);
+    expect(res.body).toBe(body);
+  });
+
   it("returns a body with no recognizable verdict header untouched", () => {
     const body = "just some text\n- 🔴 not a verdict bullet";
     const res = enforceVerdictFloor(body);
