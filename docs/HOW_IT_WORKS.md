@@ -400,6 +400,11 @@ Fountain application URLs (`*.fountain.com`, `*.ftn.app`, `*.tryfountain.com`), 
 `<fountain_context>` block classifying each URL by service (Hire, Hire Go, WX) and environment
 before dispatching to OpenCode, so the agent knows which codebase the request targets.
 
+For monorepos that ship a `.claude/skills/detect-app/SKILL.md` file, the bridge additionally
+prepends an `<app_targeting>` block instructing the agent to run that skill before editing any
+files. The skill owns the app catalog and the ask-if-unsure logic; the bridge block simply ensures
+the agent invokes it up front. Repos without the skill are unaffected.
+
 ---
 
 ## The Agent
