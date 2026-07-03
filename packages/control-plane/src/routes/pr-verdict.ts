@@ -36,6 +36,18 @@ const logger = createLogger("pr-verdict");
  */
 const REEF_VERDICT_MARKER = "<!-- reef-verdict -->";
 
+/**
+ * Matches a verdict marker anchored at the start of the body, in either raw
+ * (`<!-- reef-verdict -->`) or HTML-escaped (`&lt;!-- reef-verdict --&gt;`)
+ * form, plus any single trailing newline. The agent is told to prepend the raw
+ * marker but sometimes emits an escaped copy of it as body content, which
+ * `startsWith(REEF_VERDICT_MARKER)` does not recognize — so the canonical marker
+ * gets prepended in front of it and the escaped copy renders as a visible
+ * `<!-- reef-verdict -->` line. We strip any leading marker (raw or escaped)
+ * before prepending, leaving exactly one hidden marker and no visible duplicate.
+ */
+const LEADING_VERDICT_MARKER_RE = /^\s*(?:<|&lt;)!--\s*reef-verdict\s*--(?:>|&gt;)[ \t]*\r?\n?/i;
+
 /** Defensive cap on the verdict body we forward to GitHub. */
 const VERDICT_BODY_MAX_LENGTH = 60_000;
 /** Safety cap on comment pages scanned when deleting prior verdicts. */
@@ -319,11 +331,16 @@ async function parseBody(request: Request): Promise<ParsedBody | Response> {
     return error("body is required", 422);
   }
   // The marker MUST be the first line so a later re-review can find and delete
-  // this verdict. Normalize defensively: the agent is told to include it, but a
-  // missing marker would silently orphan the comment.
-  if (!text.startsWith(REEF_VERDICT_MARKER)) {
-    text = `${REEF_VERDICT_MARKER}\n${text}`;
+  // this verdict. Normalize defensively: strip any leading marker the agent
+  // included — raw OR HTML-escaped (`&lt;!-- … --&gt;`), possibly repeated — then
+  // prepend exactly one canonical raw marker. A plain `startsWith` check would
+  // miss the escaped form and leave it prepended in front of the canonical one,
+  // rendering as a visible `<!-- reef-verdict -->` line; a missing marker would
+  // silently orphan the comment.
+  while (LEADING_VERDICT_MARKER_RE.test(text)) {
+    text = text.replace(LEADING_VERDICT_MARKER_RE, "");
   }
+  text = `${REEF_VERDICT_MARKER}\n${text}`;
   // Cap the FINAL body (marker included) so the length we enforce is the length
   // we post — checking before the prepend would let the marker push it over.
   if (text.length > VERDICT_BODY_MAX_LENGTH) {
