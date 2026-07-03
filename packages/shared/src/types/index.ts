@@ -822,6 +822,15 @@ const createSessionRequestBaseSchema = z.object({
    * DEFAULT_PLAN_MODEL.
    */
   planModel: z.string().optional(),
+  /**
+   * True for a dedicated PR *review* session (the github-bot's runCodeReview
+   * path). Persisted on the session and delivered to the sandbox as the
+   * REEF_REVIEW_SESSION env var, which switches the gh guard to block raw issue
+   * comments — in a review the verdict is the only conversation comment, posted
+   * via the submit-review-verdict tool. NOT set for @mention/command sessions,
+   * which legitimately post top-level issue-comment replies.
+   */
+  reviewSession: z.boolean().optional(),
   previewEnabled: z.boolean().optional(),
 });
 

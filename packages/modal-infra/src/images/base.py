@@ -75,7 +75,9 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v99: submit-review-verdict tool + gh guard blocks raw issue comments in github-bot
 #      sessions (verdict posts server-side); reef-verdict skill calls the tool
 # v100: add claude-sonnet-5 to the Anthropic adaptive-thinking set in bridge.py
-CACHE_BUSTER = "v100-sonnet-5"
+# v101: scope the gh raw-issue-comment guard to REEF_REVIEW_SESSION (dedicated PR
+#       reviews) instead of all github-bot sessions; verdict tool always installed
+CACHE_BUSTER = "v101-review-guard-scope"
 
 # Base image with all development tools
 base_image = (

@@ -73,6 +73,8 @@ export interface SessionInitInput {
    * unspecified and planMode is true, the DO falls back to DEFAULT_PLAN_MODEL.
    */
   planModel?: string;
+  /** True for a dedicated PR review session (github-bot runCodeReview path). */
+  reviewSession?: boolean;
   previewEnabled?: boolean;
   automationId?: string | null;
   automationRunId?: string | null;
@@ -180,6 +182,7 @@ export async function initializeSession(
           spawnDepth: input.spawnDepth,
           planMode: input.planMode === true,
           planModel: input.planMode === true ? (input.planModel ?? null) : null,
+          reviewSession: input.reviewSession === true,
         }),
       })
     );

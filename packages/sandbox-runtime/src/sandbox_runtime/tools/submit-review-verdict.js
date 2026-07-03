@@ -10,8 +10,10 @@
  * legitimately posts). The PR is derived from the session on the server; the
  * tool does not take a PR number.
  *
- * This tool is installed only in github-bot sessions (gated on the
- * GITHUB_BOT_SESSION env var — see entrypoint.py AGENT_TOOLS_GATED_ON_ENV).
+ * This tool is always installed (like submit-pr-review). It is used by review
+ * sessions and @mention "full review" sessions, and is inert elsewhere (the
+ * /pr-verdict route 422s when the session has no PR). The gh guard's raw-issue-
+ * comment block is what's scoped to review sessions (REEF_REVIEW_SESSION).
  *
  * It handles the comment only. The risk LABEL is synced separately by the
  * `reef-verdict` skill via `gh` (labels are not blocked), so this tool does not

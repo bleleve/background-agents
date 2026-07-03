@@ -3,10 +3,10 @@
  * behalf of the bot. This is the server-side path for the agent's
  * `submit-review-verdict` tool.
  *
- * Why server-side: in a github-bot session the ONLY legitimate issue comment is
- * the review verdict, so the gh guard blocks raw `gh api .../issues/N/comments`
- * (see git_credential_helper.py). Routing the verdict through this endpoint
- * makes the single sanctioned path server-side — the agent authors the body,
+ * Why server-side: in a dedicated PR review session (`REEF_REVIEW_SESSION` set)
+ * the verdict is the only legitimate conversation comment, so the gh guard blocks
+ * raw `gh api .../issues/N/comments` (see git_credential_helper.py). This
+ * endpoint is the single sanctioned path — the agent authors the body,
  * the control plane deletes any prior verdict and posts the fresh one under the
  * bot identity. The PR is derived from the session index, never from caller
  * input, so the agent can't target another PR.

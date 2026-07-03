@@ -199,6 +199,9 @@ async function handleCreateSession(
     // the router-module refactor #692, which lost these two lines).
     planMode: body.planMode === true,
     planModel: body.planMode === true ? body.planModel : undefined,
+    // Marks a dedicated PR review session so the sandbox gh guard blocks raw
+    // issue comments (verdict-only). Set only by the github-bot review path.
+    reviewSession: body.reviewSession === true,
   };
 
   try {

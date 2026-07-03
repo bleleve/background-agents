@@ -152,10 +152,10 @@ class SandboxConfig:
     agent_slack_notify_enabled: bool = (
         False  # Whether to install the agent-initiated slack-notify tool
     )
-    github_bot_session: bool = (
-        # True for github-bot sessions: installs submit-review-verdict and makes
-        # the gh guard block raw issue comments (verdict-only). See entrypoint.py
-        # AGENT_TOOLS_GATED_ON_ENV and git_credential_helper._run_gh_guard.
+    review_session: bool = (
+        # True for a dedicated PR review session: makes the gh guard block raw
+        # issue comments (verdict-only via the submit-review-verdict tool). See
+        # git_credential_helper._run_gh_guard.
         False
     )
     settings: dict[str, Any] | None = (
@@ -605,8 +605,8 @@ class SandboxManager:
         if config.agent_slack_notify_enabled:
             env_vars["AGENT_SLACK_NOTIFY_ENABLED"] = "true"
 
-        if config.github_bot_session:
-            env_vars["GITHUB_BOT_SESSION"] = "true"
+        if config.review_session:
+            env_vars["REEF_REVIEW_SESSION"] = "true"
 
         if config.session_config:
             env_vars["SESSION_CONFIG"] = config.session_config.model_dump_json()
@@ -918,7 +918,7 @@ class SandboxManager:
         timeout_seconds: int = DEFAULT_SANDBOX_TIMEOUT_SECONDS,
         code_server_enabled: bool = False,
         agent_slack_notify_enabled: bool = False,
-        github_bot_session: bool = False,
+        review_session: bool = False,
         settings: dict[str, Any] | None = None,
         opencode_user_config: str | None = None,
         aws_role_configs: list[AwsRoleConfig] | None = None,
@@ -1009,8 +1009,8 @@ class SandboxManager:
         if agent_slack_notify_enabled:
             env_vars["AGENT_SLACK_NOTIFY_ENABLED"] = "true"
 
-        if github_bot_session:
-            env_vars["GITHUB_BOT_SESSION"] = "true"
+        if review_session:
+            env_vars["REEF_REVIEW_SESSION"] = "true"
 
         code_server_port, ttyd_proxy_port = self._resolve_service_ports(settings)
         if code_server_enabled:

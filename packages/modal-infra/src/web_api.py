@@ -207,7 +207,7 @@ async def api_create(
             repo_image_sha=request.get("repo_image_sha") or None,
             code_server_enabled=bool(request.get("code_server_enabled", False)),
             agent_slack_notify_enabled=bool(request.get("agent_slack_notify_enabled", False)),
-            github_bot_session=bool(request.get("github_bot_session", False)),
+            review_session=bool(request.get("review_session", False)),
             settings=sandbox_settings,
             opencode_user_config=request.get("opencode_user_config") or None,
             aws_role_configs=_parse_aws_role_configs(sandbox_settings),
@@ -509,7 +509,7 @@ async def api_restore(
 
         code_server_enabled = bool(request.get("code_server_enabled", False))
         agent_slack_notify_enabled = bool(request.get("agent_slack_notify_enabled", False))
-        github_bot_session = bool(request.get("github_bot_session", False))
+        review_session = bool(request.get("review_session", False))
         sandbox_settings = request.get("sandbox_settings") or None
         opencode_user_config = request.get("opencode_user_config") or None
 
@@ -525,7 +525,7 @@ async def api_restore(
             timeout_seconds=timeout_seconds,
             code_server_enabled=code_server_enabled,
             agent_slack_notify_enabled=agent_slack_notify_enabled,
-            github_bot_session=github_bot_session,
+            review_session=review_session,
             settings=sandbox_settings,
             opencode_user_config=opencode_user_config,
             aws_role_configs=_parse_aws_role_configs(sandbox_settings),

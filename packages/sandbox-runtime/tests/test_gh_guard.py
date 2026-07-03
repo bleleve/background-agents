@@ -91,12 +91,13 @@ def test_event_from_file_is_out_of_scope() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Raw issue-comment block (github-bot sessions only).
+# Raw issue-comment block (dedicated review sessions only).
 #
-# In a github-bot session the verdict is the sole conversation comment, posted
-# through the `submit-review-verdict` tool — so raw issue-comment creation is
-# blocked. `_gh_command_posts_issue_comment` is the session-agnostic detector;
-# `_run_gh_guard` applies it only when GITHUB_BOT_SESSION is set.
+# In a review the verdict is the sole conversation comment, posted through the
+# `submit-review-verdict` tool — so raw issue-comment creation is blocked.
+# `_gh_command_posts_issue_comment` is the session-agnostic detector;
+# `_run_gh_guard` applies it only when REEF_REVIEW_SESSION is set (NOT for
+# @mention/command sessions, which legitimately post top-level replies).
 # ---------------------------------------------------------------------------
 
 # Commands that CREATE an issue/PR conversation comment (detector → True).
@@ -150,28 +151,28 @@ def test_non_issue_comment_posts_not_detected(args: list[str]) -> None:
 
 
 @pytest.mark.parametrize("args", ISSUE_COMMENT_POSTS)
-def test_issue_comments_blocked_only_in_github_bot_session(
+def test_issue_comments_blocked_only_in_review_session(
     args: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # github-bot session → blocked.
-    monkeypatch.setenv("GITHUB_BOT_SESSION", "true")
+    # Dedicated review session → blocked.
+    monkeypatch.setenv("REEF_REVIEW_SESSION", "true")
     assert _run_gh_guard(args) == GH_GUARD_BLOCK_RC
-    # Ordinary session (env unset) → allowed.
-    monkeypatch.delenv("GITHUB_BOT_SESSION", raising=False)
+    # Non-review session (env unset: @mention/command, user, slack…) → allowed.
+    monkeypatch.delenv("REEF_REVIEW_SESSION", raising=False)
     assert _run_gh_guard(args) == 0
 
 
 @pytest.mark.parametrize("args", NOT_ISSUE_COMMENT_POSTS)
-def test_allowed_comments_pass_even_in_github_bot_session(
+def test_allowed_comments_pass_even_in_review_session(
     args: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("GITHUB_BOT_SESSION", "true")
+    monkeypatch.setenv("REEF_REVIEW_SESSION", "true")
     assert _run_gh_guard(args) == 0
 
 
 def test_formal_review_blocked_regardless_of_session(monkeypatch: pytest.MonkeyPatch) -> None:
     args = ["api", "repos/o/r/pulls/5/reviews", "-f", "event=APPROVE"]
-    monkeypatch.delenv("GITHUB_BOT_SESSION", raising=False)
+    monkeypatch.delenv("REEF_REVIEW_SESSION", raising=False)
     assert _run_gh_guard(args) == GH_GUARD_BLOCK_RC
-    monkeypatch.setenv("GITHUB_BOT_SESSION", "true")
+    monkeypatch.setenv("REEF_REVIEW_SESSION", "true")
     assert _run_gh_guard(args) == GH_GUARD_BLOCK_RC
