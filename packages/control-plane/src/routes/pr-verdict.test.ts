@@ -224,6 +224,27 @@ describe("handleSubmitVerdict", () => {
     expect(lastPostBody()).toBe(body);
   });
 
+  it("strips a leading HTML-escaped marker so it does not render as a visible line", async () => {
+    seedGitHub();
+    // The agent emitted the marker HTML-escaped as body content. Without
+    // stripping it, the canonical marker gets prepended in front and the escaped
+    // copy renders as a visible `<!-- reef-verdict -->` line.
+    await callHandler({ body: `&lt;!-- reef-verdict --&gt;\n## 🔵 Reef Review — Low risk` });
+    const posted = lastPostBody();
+    expect(posted).toBe(`${MARKER}\n## 🔵 Reef Review — Low risk`);
+    expect(posted).not.toContain("&lt;!-- reef-verdict --&gt;");
+    // Exactly one marker occurrence remains (the hidden canonical one).
+    expect(posted.split("reef-verdict").length - 1).toBe(1);
+  });
+
+  it("collapses a duplicated raw + escaped marker down to one canonical marker", async () => {
+    seedGitHub();
+    await callHandler({ body: `${MARKER}\n&lt;!-- reef-verdict --&gt;\n## 🔵 fresh` });
+    const posted = lastPostBody();
+    expect(posted).toBe(`${MARKER}\n## 🔵 fresh`);
+    expect(posted.split("reef-verdict").length - 1).toBe(1);
+  });
+
   it("posts the coverage-floored body when the badge undercuts its findings", async () => {
     seedGitHub();
     const body = [
