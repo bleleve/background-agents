@@ -185,6 +185,24 @@ describe("handleSubmitVerdict", () => {
     expect(lastPostBody()).toBe(body);
   });
 
+  it("posts the coverage-floored body when the badge undercuts its findings", async () => {
+    seedGitHub();
+    const body = [
+      MARKER,
+      "## 🔵 Reef Review — Low risk",
+      "",
+      "### Tests coverage",
+      "🧪 1 test-worthy change(s) without a test",
+      "- 🟡 `x.ts:1` — untested gap",
+    ].join("\n");
+    await callHandler({ body });
+
+    // The corrected body (not the model's), is what reaches GitHub.
+    const posted = lastPostBody();
+    expect(posted).toContain("## 🟡 Reef Review — Medium risk");
+    expect(posted).not.toContain("## 🔵 Reef Review — Low risk");
+  });
+
   it("rejects a body that only exceeds the cap once the marker is prepended", async () => {
     seedGitHub();
     // Just under the 60_000 cap on its own, but the prepended marker line pushes
