@@ -87,6 +87,10 @@ function seedGitHub(opts?: {
   currentLabels?: string[];
   /** Force a non-200 status on the label list GET (to exercise best-effort). */
   labelListStatus?: number;
+  /** Force a status on the ensure-label POST /labels (non-422 → warn branch). */
+  labelCreateStatus?: number;
+  /** Force a status on the PUT /issues/42/labels (non-200 → warn branch). */
+  labelPutStatus?: number;
 }): void {
   const firstPage = opts?.firstPage ?? [];
   const jsonHeaders = { "content-type": "application/json" };
@@ -113,7 +117,10 @@ function seedGitHub(opts?: {
     // Server-side risk-label sync: ensure-exists (POST /labels), read current
     // (GET /issues/42/labels), replace (PUT /issues/42/labels).
     if (method === "POST" && u.endsWith("/labels")) {
-      return new Response(JSON.stringify({}), { status: 201, headers: jsonHeaders });
+      return new Response(JSON.stringify({}), {
+        status: opts?.labelCreateStatus ?? 201,
+        headers: jsonHeaders,
+      });
     }
     if (method === "GET" && u.endsWith("/issues/42/labels")) {
       if (opts?.labelListStatus && opts.labelListStatus !== 200) {
@@ -123,7 +130,10 @@ function seedGitHub(opts?: {
       return new Response(JSON.stringify(labels), { status: 200, headers: jsonHeaders });
     }
     if (method === "PUT" && u.endsWith("/issues/42/labels")) {
-      return new Response(JSON.stringify([]), { status: 200, headers: jsonHeaders });
+      return new Response(JSON.stringify([]), {
+        status: opts?.labelPutStatus ?? 200,
+        headers: jsonHeaders,
+      });
     }
     return new Response("unexpected", { status: 500 });
   });
@@ -258,8 +268,23 @@ describe("handleSubmitVerdict", () => {
     expect(lastLabelPut()).toBeNull();
   });
 
-  it("still returns posted when the label sync fails (best-effort)", async () => {
+  it("still returns posted when the label list GET fails (best-effort)", async () => {
     seedGitHub({ labelListStatus: 500 });
+    const res = await callHandler({ body: `${MARKER}\n## 🔵 Reef Review — Low risk` });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { riskLevel: string }).riskLevel).toBe("low");
+  });
+
+  it("proceeds to the PUT when ensuring the label fails with a non-422", async () => {
+    seedGitHub({ currentLabels: [], labelCreateStatus: 500 });
+    const res = await callHandler({ body: `${MARKER}\n## 🔵 Reef Review — Low risk` });
+    // A failed ensure-exists is warn-only — the sync still reads + replaces labels.
+    expect(res.status).toBe(200);
+    expect(lastLabelPut()).toContain("reef: low risk");
+  });
+
+  it("still returns posted when the label PUT fails (best-effort)", async () => {
+    seedGitHub({ currentLabels: [], labelPutStatus: 500 });
     const res = await callHandler({ body: `${MARKER}\n## 🔵 Reef Review — Low risk` });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { riskLevel: string }).riskLevel).toBe("low");

@@ -24,10 +24,10 @@
  *   3. A "risk raised to <badge>" summary phrase is corrected to the enforced
  *      badge so the prose cannot contradict the header.
  *
- * Not handled here: the risk LABEL, which the `reef-verdict` skill still derives
- * client-side from the agent's badge (see pr-verdict.ts). Making the label
- * authoritative is a separate change (it would move label-setting server-side
- * and drop the skill step).
+ * The `level` this returns also drives the PR risk LABEL: `syncRiskLabel` in
+ * pr-verdict.ts sets `reef: <level> risk` server-side from this same enforced
+ * badge, so the label can never drift from the comment (the `reef-verdict` skill
+ * no longer touches it).
  */
 
 type Severity = "🔵" | "🟡" | "🔴";
