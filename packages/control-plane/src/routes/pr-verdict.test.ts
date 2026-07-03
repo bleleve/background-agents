@@ -185,6 +185,15 @@ describe("handleSubmitVerdict", () => {
     expect(lastPostBody()).toBe(body);
   });
 
+  it("rejects a body that only exceeds the cap once the marker is prepended", async () => {
+    seedGitHub();
+    // Just under the 60_000 cap on its own, but the prepended marker line pushes
+    // the final posted body over it — the check must run after normalization.
+    const res = await callHandler({ body: "x".repeat(60_000) });
+    expect(res.status).toBe(422);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("still posts when listing prior comments fails (delete is best-effort)", async () => {
     seedGitHub({ listStatus: 500 });
     const res = await callHandler({ body: `${MARKER}\nx` });

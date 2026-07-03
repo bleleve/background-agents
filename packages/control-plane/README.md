@@ -52,30 +52,31 @@ The control plane provides:
 
 ### Sessions
 
-| Endpoint                          | Method    | Description                                                             |
-| --------------------------------- | --------- | ----------------------------------------------------------------------- |
-| `/sessions`                       | GET       | List user's sessions                                                    |
-| `/sessions`                       | POST      | Create new session                                                      |
-| `/sessions/:id`                   | GET       | Get session state                                                       |
-| `/sessions/:id`                   | DELETE    | Delete session                                                          |
-| `/sessions/:id/prompt`            | POST      | Enqueue prompt                                                          |
-| `/sessions/:id/stop`              | POST      | Stop execution                                                          |
-| `/sessions/:id/sandbox/relaunch`  | POST      | Resume an interrupted turn (respawn if down, else re-dispatch in place) |
-| `/sessions/:id/ws`                | WebSocket | Real-time connection                                                    |
-| `/sessions/:id/events`            | GET       | Paginated events                                                        |
-| `/sessions/:id/artifacts`         | GET       | List artifacts                                                          |
-| `/sessions/:id/participants`      | GET/POST  | Manage participants                                                     |
-| `/sessions/:id/messages`          | GET       | List messages                                                           |
-| `/sessions/:id/pr`                | POST      | Create pull request                                                     |
-| `/sessions/:id/pr-state`          | POST      | Sync PR artifact state (e.g. on PR close/reopen)                        |
-| `/sessions/:id/pr-review`         | POST      | Submit a formal PR review (policy-checked, sandbox-authenticated)       |
-| `/sessions/:id/record-suggestion` | POST      | Record a posted inline review suggestion (sandbox-authenticated)        |
-| `/sessions/:id/scm-credentials`   | POST      | Broker sandbox git credentials                                          |
-| `/sessions/:id/slack-notify`      | POST      | Post a Slack notification from the agent (sandbox-authenticated)        |
-| `/sessions/:id/ws-token`          | POST      | Generate WebSocket token                                                |
-| `/sessions/:id/preview`           | POST      | Enable or disable preview mode (dispatches RWX run when enabled)        |
-| `/sessions/:id/archive`           | POST      | Archive session                                                         |
-| `/sessions/:id/unarchive`         | POST      | Unarchive session                                                       |
+| Endpoint                          | Method    | Description                                                                     |
+| --------------------------------- | --------- | ------------------------------------------------------------------------------- |
+| `/sessions`                       | GET       | List user's sessions                                                            |
+| `/sessions`                       | POST      | Create new session                                                              |
+| `/sessions/:id`                   | GET       | Get session state                                                               |
+| `/sessions/:id`                   | DELETE    | Delete session                                                                  |
+| `/sessions/:id/prompt`            | POST      | Enqueue prompt                                                                  |
+| `/sessions/:id/stop`              | POST      | Stop execution                                                                  |
+| `/sessions/:id/sandbox/relaunch`  | POST      | Resume an interrupted turn (respawn if down, else re-dispatch in place)         |
+| `/sessions/:id/ws`                | WebSocket | Real-time connection                                                            |
+| `/sessions/:id/events`            | GET       | Paginated events                                                                |
+| `/sessions/:id/artifacts`         | GET       | List artifacts                                                                  |
+| `/sessions/:id/participants`      | GET/POST  | Manage participants                                                             |
+| `/sessions/:id/messages`          | GET       | List messages                                                                   |
+| `/sessions/:id/pr`                | POST      | Create pull request                                                             |
+| `/sessions/:id/pr-state`          | POST      | Sync PR artifact state (e.g. on PR close/reopen)                                |
+| `/sessions/:id/pr-review`         | POST      | Submit a formal PR review (policy-checked, sandbox-authenticated)               |
+| `/sessions/:id/pr-verdict`        | POST      | Post the review verdict comment (delete-prior-by-marker, sandbox-authenticated) |
+| `/sessions/:id/record-suggestion` | POST      | Record a posted inline review suggestion (sandbox-authenticated)                |
+| `/sessions/:id/scm-credentials`   | POST      | Broker sandbox git credentials                                                  |
+| `/sessions/:id/slack-notify`      | POST      | Post a Slack notification from the agent (sandbox-authenticated)                |
+| `/sessions/:id/ws-token`          | POST      | Generate WebSocket token                                                        |
+| `/sessions/:id/preview`           | POST      | Enable or disable preview mode (dispatches RWX run when enabled)                |
+| `/sessions/:id/archive`           | POST      | Archive session                                                                 |
+| `/sessions/:id/unarchive`         | POST      | Unarchive session                                                               |
 
 ### Plan Mode
 

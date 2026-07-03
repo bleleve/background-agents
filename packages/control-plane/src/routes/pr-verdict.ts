@@ -213,14 +213,16 @@ async function parseBody(request: Request): Promise<ParsedBody | Response> {
   if (text.trim().length === 0) {
     return error("body is required", 422);
   }
-  if (text.length > VERDICT_BODY_MAX_LENGTH) {
-    return error(`body must be at most ${VERDICT_BODY_MAX_LENGTH} characters`, 422);
-  }
   // The marker MUST be the first line so a later re-review can find and delete
   // this verdict. Normalize defensively: the agent is told to include it, but a
   // missing marker would silently orphan the comment.
   if (!text.startsWith(REEF_VERDICT_MARKER)) {
     text = `${REEF_VERDICT_MARKER}\n${text}`;
+  }
+  // Cap the FINAL body (marker included) so the length we enforce is the length
+  // we post — checking before the prepend would let the marker push it over.
+  if (text.length > VERDICT_BODY_MAX_LENGTH) {
+    return error(`body must be at most ${VERDICT_BODY_MAX_LENGTH} characters`, 422);
   }
   return { body: text };
 }

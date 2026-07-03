@@ -105,6 +105,8 @@ ISSUE_COMMENT_POSTS = [
     ["api", "repos/o/r/issues/5/comments", "-f", "body=x"],
     ["api", "-X", "POST", "repos/o/r/issues/5/comments", "-f", "body=x"],
     ["api", "repos/o/r/issues/5/comments", "-XPOST", "-fbody=x"],
+    # --method=POST glued equals form.
+    ["api", "--method=POST", "repos/o/r/issues/5/comments", "-f", "body=x"],
     # Body read from a file (`-F body=@file`) — the verdict's old form; still caught.
     ["api", "repos/o/r/issues/5/comments", "-F", "body=@/tmp/pr-verdict.md"],
     # --input JSON body.
