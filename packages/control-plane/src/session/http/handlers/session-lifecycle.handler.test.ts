@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ParticipantRow, SandboxRow, SessionRow } from "../../types";
+import type { ArtifactRow, ParticipantRow, SandboxRow, SessionRow } from "../../types";
 import { createSessionLifecycleHandler } from "./session-lifecycle.handler";
 import { getValidModelOrDefault } from "@open-inspect/shared";
 
@@ -90,6 +90,7 @@ function createHandler() {
     createParticipant: vi.fn(),
     createArtifact: vi.fn(),
     createMessage: vi.fn(),
+    listArtifacts: vi.fn(() => [] as ArtifactRow[]),
     updatePreviewEnabled: vi.fn(),
     updateSessionCurrentSha: vi.fn(),
     updatePreviewDispatchedSha: vi.fn(),
@@ -414,6 +415,69 @@ describe("createSessionLifecycleHandler", () => {
       metadata: JSON.stringify({ number: 42, state: "open", head: "feature/cache", base: "main" }),
       createdAt: 1234,
     });
+  });
+
+  it("does not re-create the owner participant when init is retried", async () => {
+    const { handler, repository, getParticipantByUserId, validateReasoningEffort, generateId } =
+      createHandler();
+    validateReasoningEffort.mockReturnValue(null);
+    generateId.mockReturnValue("sandbox-1");
+    // Simulate a prior successful init: the owner participant already exists, so
+    // a retried init (after a transient DO failure) must not duplicate it.
+    getParticipantByUserId.mockReturnValue(createParticipant());
+
+    const response = await handler.init(
+      new Request("http://internal/internal/init", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionName: "session-public-id",
+          repoOwner: "acme",
+          repoName: "repo",
+          repoId: 123,
+          userId: "user-1",
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(repository.createParticipant).not.toHaveBeenCalled();
+  });
+
+  it("does not re-create the pr artifact when init is retried", async () => {
+    const { handler, repository, validateReasoningEffort, generateId } = createHandler();
+    validateReasoningEffort.mockReturnValue(null);
+    generateId.mockReturnValueOnce("sandbox-1").mockReturnValueOnce("participant-1");
+    // Simulate a prior successful init: a pr artifact already exists.
+    repository.listArtifacts.mockReturnValue([
+      {
+        id: "artifact-existing",
+        type: "pr",
+        url: "https://github.com/acme/repo/pull/42",
+        metadata: null,
+        created_at: 1,
+      },
+    ] as ArtifactRow[]);
+
+    const response = await handler.init(
+      new Request("http://internal/internal/init", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionName: "session-public-id",
+          repoOwner: "acme",
+          repoName: "repo",
+          repoId: 123,
+          userId: "user-1",
+          prNumber: 42,
+          prUrl: "https://github.com/acme/repo/pull/42",
+          prState: "open",
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(repository.createArtifact).not.toHaveBeenCalled();
   });
 
   it("does not seed a pr artifact when prNumber is present but prUrl is missing", async () => {
