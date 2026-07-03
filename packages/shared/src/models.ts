@@ -13,6 +13,7 @@ export const VALID_MODELS = [
   "anthropic/claude-haiku-4-5",
   "anthropic/claude-sonnet-4-5",
   "anthropic/claude-sonnet-4-6",
+  "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-4-5",
   "anthropic/claude-opus-4-6",
   "anthropic/claude-opus-4-7",
@@ -64,6 +65,7 @@ export const DEFAULT_PLAN_MODEL: ValidModel = "anthropic/claude-opus-4-6";
 export const MODEL_ALIAS_MAP: Record<string, ValidModel> = {
   haiku: "anthropic/claude-haiku-4-5",
   sonnet: "anthropic/claude-sonnet-4-5",
+  "sonnet-5": "anthropic/claude-sonnet-5",
   opus: "anthropic/claude-opus-4-5",
   "opus-4-6": "anthropic/claude-opus-4-6",
   "opus-4-7": "anthropic/claude-opus-4-7",
@@ -171,6 +173,10 @@ export const MODEL_REASONING_CONFIG: Partial<Record<ValidModel, ModelReasoningCo
   "anthropic/claude-haiku-4-5": { efforts: ["high", "max"], default: "max" },
   "anthropic/claude-sonnet-4-5": { efforts: ["high", "max"], default: "max" },
   "anthropic/claude-sonnet-4-6": { efforts: ["low", "medium", "high", "max"], default: "medium" },
+  "anthropic/claude-sonnet-5": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "medium",
+  },
   "anthropic/claude-opus-4-5": { efforts: ["high", "max"], default: "max" },
   "anthropic/claude-opus-4-6": { efforts: ["low", "medium", "high", "max"], default: "medium" },
   "anthropic/claude-opus-4-7": {
@@ -224,7 +230,12 @@ export const MODEL_OPTIONS: ModelCategory[] = [
       {
         id: "anthropic/claude-sonnet-4-6",
         name: "Claude Sonnet 4.6",
-        description: "Latest balanced, fast coding",
+        description: "Balanced, fast coding",
+      },
+      {
+        id: "anthropic/claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        description: "Latest generation, adaptive thinking",
       },
       {
         id: "anthropic/claude-opus-4-5",
@@ -311,6 +322,7 @@ export const DEFAULT_ENABLED_MODELS: ValidModel[] = [
   "anthropic/claude-haiku-4-5",
   "anthropic/claude-sonnet-4-5",
   "anthropic/claude-sonnet-4-6",
+  "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-4-5",
   "anthropic/claude-opus-4-6",
   "anthropic/claude-opus-4-7",

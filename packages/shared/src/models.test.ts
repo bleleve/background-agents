@@ -53,6 +53,7 @@ const ANTHROPIC_MODELS = [
   "anthropic/claude-haiku-4-5",
   "anthropic/claude-sonnet-4-5",
   "anthropic/claude-sonnet-4-6",
+  "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-4-5",
   "anthropic/claude-opus-4-6",
   "anthropic/claude-opus-4-7",
@@ -169,6 +170,10 @@ describe("model utilities", () => {
     });
     expect(getReasoningConfig("anthropic/claude-sonnet-4-6")).toEqual({
       efforts: ["low", "medium", "high", "max"],
+      default: "medium",
+    });
+    expect(getReasoningConfig("anthropic/claude-sonnet-5")).toEqual({
+      efforts: ["low", "medium", "high", "xhigh"],
       default: "medium",
     });
     expect(getReasoningConfig("anthropic/claude-opus-4-8")).toEqual({
