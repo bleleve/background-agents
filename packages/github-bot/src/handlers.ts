@@ -4,6 +4,7 @@ import {
   resolveAppName,
   parsePlanCommand,
   reviewSessionTitle,
+  requestSessionTitle,
   type PlanCommand,
   type GitHubCallbackContext,
 } from "@open-inspect/shared";
@@ -356,6 +357,132 @@ async function lookupReviewSession(
   prNumber: number
 ): Promise<string | null> {
   return env.GITHUB_KV.get(getReviewSessionKey(repoFullName, prNumber));
+}
+
+// ─── Active "request" session per PR (coalescing) ────────────────────────────
+// A single session handles every @mention change request on a PR — top-level PR
+// comments and inline review comments alike — so concurrent requests queue on
+// one working tree instead of racing to push the same branch (the failure mode
+// where a second request silently dies because the first pushed first). We
+// remember the request session per PR here, then confirm it is still live via
+// the control plane before folding a new request into it. Review sessions are
+// never tracked (they are read-only and never contend for the branch), and
+// plan-mode sessions opt out (a plan is a distinct approve/reject interaction).
+
+const REQUEST_SESSION_TTL_SECONDS = 6 * 60 * 60;
+
+function getRequestSessionKey(repoFullName: string, prNumber: number): string {
+  return `request-session:${repoFullName}:${prNumber}`;
+}
+
+async function rememberRequestSession(
+  env: Env,
+  repoFullName: string,
+  prNumber: number,
+  sessionId: string
+): Promise<void> {
+  await env.GITHUB_KV.put(getRequestSessionKey(repoFullName, prNumber), sessionId, {
+    expirationTtl: REQUEST_SESSION_TTL_SECONDS,
+  });
+}
+
+/**
+ * The id of a still-live request session for this PR, or null. Reads the
+ * remembered pointer, then asks the control plane whether that session is still
+ * active (non-terminal and recently updated) — a terminal session must not be
+ * coalesced into, or the queued prompt would never run. Any failure resolves to
+ * null so the caller falls back to creating a fresh session (the pre-fix
+ * behavior — a separate session, never a dropped request).
+ */
+async function lookupLiveRequestSession(
+  env: Env,
+  controlPlane: Fetcher,
+  headers: Record<string, string>,
+  repoFullName: string,
+  prNumber: number,
+  log: Logger,
+  meta: Record<string, unknown>
+): Promise<string | null> {
+  const sessionId = await env.GITHUB_KV.get(getRequestSessionKey(repoFullName, prNumber));
+  if (!sessionId) return null;
+  try {
+    const res = await controlPlane.fetch(`https://internal/sessions/${sessionId}/liveness`, {
+      method: "GET",
+      headers,
+    });
+    if (!res.ok) {
+      log.debug("request_session.liveness_unavailable", {
+        ...meta,
+        session_id: sessionId,
+        status: res.status,
+      });
+      return null;
+    }
+    const { active } = (await res.json()) as { active: boolean };
+    return active ? sessionId : null;
+  } catch (err) {
+    log.warn("request_session.liveness_error", {
+      ...meta,
+      session_id: sessionId,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+    return null;
+  }
+}
+
+/**
+ * Resolve the session that should handle a @mention change request on a PR:
+ * fold into the live request session if one exists (coalesce), else create a
+ * fresh one via `createFresh` and remember it as the PR's request session.
+ */
+async function resolveRequestSession(
+  env: Env,
+  controlPlane: Fetcher,
+  headers: Record<string, string>,
+  repoFullName: string,
+  prNumber: number,
+  log: Logger,
+  meta: Record<string, unknown>,
+  createFresh: () => Promise<string>
+): Promise<{ sessionId: string; coalesced: boolean }> {
+  const live = await lookupLiveRequestSession(
+    env,
+    controlPlane,
+    headers,
+    repoFullName,
+    prNumber,
+    log,
+    meta
+  );
+  if (live) return { sessionId: live, coalesced: true };
+  const sessionId = await createFresh();
+  await rememberRequestSession(env, repoFullName, prNumber, sessionId);
+  return { sessionId, coalesced: false };
+}
+
+/**
+ * Best-effort reply telling the human their request was folded into the
+ * already-running session for this PR (rather than silently starting nothing new
+ * or racing a second session). Posts a top-level PR comment — works for both
+ * top-level and inline triggers.
+ */
+async function postRequestCoalescedReply(
+  log: Logger,
+  ghToken: string,
+  owner: string,
+  repoName: string,
+  prNumber: number,
+  sessionUrl: string,
+  userAgent: string,
+  meta: Record<string, unknown>
+): Promise<void> {
+  const body =
+    `Reef is already working on a request for this PR. I've queued this one into that ` +
+    `session so it runs in order on the same branch instead of racing it — follow along: ${sessionUrl}`;
+  const id = await createIssueComment(ghToken, owner, repoName, prNumber, body, userAgent);
+  if (id === null) {
+    log.warn("request_session.coalesced_reply_failed", { ...meta });
+  }
 }
 
 // ─── Plan approve/reject parsing ─────────────────────────────────────────────
@@ -1867,44 +1994,65 @@ export async function handleIssueComment(
     meta
   );
 
-  const sessionId = await createSession(env.CONTROL_PLANE, headers, {
-    repoOwner: owner,
-    repoName,
-    title: `GitHub: PR #${issue.number} comment`,
-    model: implModel,
-    reasoningEffort: config.reasoningEffort,
-    scmLogin: sender.login,
-    scmUserId: String(sender.id),
-    scmAvatarUrl: sender.avatar_url,
-    prNumber: issue.number,
-    prUrl: issue.html_url,
-    prState: issue.state,
-    // Branch refs come from the PR fetch above (issue_comment payloads omit them).
-    prHeadRef: prDetails?.head?.ref,
-    prBaseRef: prDetails?.base?.ref,
-    cloneBranch: prDetails
-      ? prCloneBranch(prDetails.head.ref, prDetails.head.repo?.full_name, repoFullName)
-      : undefined,
-    planMode,
-    planModel,
-  });
-  log.info("session.created", {
+  // Build the fresh-session params once; used only when we actually create a
+  // new session (a coalesced request reuses the live one and ignores these).
+  const createFresh = () =>
+    createSession(env.CONTROL_PLANE, headers, {
+      repoOwner: owner,
+      repoName,
+      title: requestSessionTitle(issue.number),
+      model: implModel,
+      reasoningEffort: config.reasoningEffort,
+      scmLogin: sender.login,
+      scmUserId: String(sender.id),
+      scmAvatarUrl: sender.avatar_url,
+      prNumber: issue.number,
+      prUrl: issue.html_url,
+      prState: issue.state,
+      // Branch refs come from the PR fetch above (issue_comment payloads omit them).
+      prHeadRef: prDetails?.head?.ref,
+      prBaseRef: prDetails?.base?.ref,
+      cloneBranch: prDetails
+        ? prCloneBranch(prDetails.head.ref, prDetails.head.repo?.full_name, repoFullName)
+        : undefined,
+      planMode,
+      planModel,
+    });
+
+  let sessionId: string;
+  let coalesced = false;
+  if (planMode) {
+    // Plan-mode is a distinct produce-a-plan-then-approve/reject interaction;
+    // never fold it into an in-flight request session.
+    sessionId = await createFresh();
+    // Plan-mode sessions need a PR→session mapping so subsequent approve/reject
+    // comments resolve to this session.
+    await rememberPrSession(env, repoFullName, issue.number, sessionId);
+  } else {
+    ({ sessionId, coalesced } = await resolveRequestSession(
+      env,
+      env.CONTROL_PLANE,
+      headers,
+      repoFullName,
+      issue.number,
+      log,
+      meta,
+      createFresh
+    ));
+  }
+  log.info(coalesced ? "session.coalesced" : "session.created", {
     ...meta,
     session_id: sessionId,
     action: "comment",
+    coalesced,
     plan_mode: planMode,
     plan_model: planModel ?? null,
     impl_model: implModel,
   });
 
-  // Plan-mode sessions need a PR→session mapping so subsequent approve/reject
-  // comments resolve to this session.
-  if (planMode) {
-    await rememberPrSession(env, repoFullName, issue.number, sessionId);
-  }
-
   const { prDiff } = await resolveDiffContext(ghToken, owner, repoName, issue.number, prDetails);
 
+  const sessionUrl = `${env.WEB_APP_URL}/session/${sessionId}`;
   const prompt = buildCommentActionPrompt({
     owner,
     repo: repoName,
@@ -1914,9 +2062,22 @@ export async function handleIssueComment(
     commenter: sender.login,
     isPublic: !repo.private,
     commentActionInstructions: config.commentActionInstructions,
-    sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
+    sessionUrl,
     prDiff,
   });
+
+  if (coalesced) {
+    await postRequestCoalescedReply(
+      log,
+      ghToken,
+      owner,
+      repoName,
+      issue.number,
+      sessionUrl,
+      resolveAppName(env),
+      meta
+    );
+  }
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
     content: prompt,
@@ -1934,7 +2095,7 @@ export async function handleIssueComment(
     outcome: "processed",
     session_id: sessionId,
     message_id: messageId,
-    handler_action: "comment",
+    handler_action: coalesced ? "comment_coalesced" : "comment",
   };
 }
 
@@ -2027,26 +2188,42 @@ export async function handleReviewComment(
     meta
   );
 
-  const sessionId = await createSession(env.CONTROL_PLANE, headers, {
-    repoOwner: owner,
-    repoName,
-    title: `GitHub: PR #${pr.number} review comment`,
-    model: config.model,
-    reasoningEffort: config.reasoningEffort,
-    scmLogin: sender.login,
-    scmUserId: String(sender.id),
-    scmAvatarUrl: sender.avatar_url,
-    prNumber: pr.number,
-    prUrl: pr.html_url,
-    prState: pr.state,
-    prHeadRef: pr.head.ref,
-    prBaseRef: pr.base.ref,
-    cloneBranch: prCloneBranch(pr.head.ref, pr.head.repo?.full_name, repoFullName),
+  const { sessionId, coalesced } = await resolveRequestSession(
+    env,
+    env.CONTROL_PLANE,
+    headers,
+    repoFullName,
+    pr.number,
+    log,
+    meta,
+    () =>
+      createSession(env.CONTROL_PLANE, headers, {
+        repoOwner: owner,
+        repoName,
+        title: requestSessionTitle(pr.number),
+        model: config.model,
+        reasoningEffort: config.reasoningEffort,
+        scmLogin: sender.login,
+        scmUserId: String(sender.id),
+        scmAvatarUrl: sender.avatar_url,
+        prNumber: pr.number,
+        prUrl: pr.html_url,
+        prState: pr.state,
+        prHeadRef: pr.head.ref,
+        prBaseRef: pr.base.ref,
+        cloneBranch: prCloneBranch(pr.head.ref, pr.head.repo?.full_name, repoFullName),
+      })
+  );
+  log.info(coalesced ? "session.coalesced" : "session.created", {
+    ...meta,
+    session_id: sessionId,
+    action: "review_comment",
+    coalesced,
   });
-  log.info("session.created", { ...meta, session_id: sessionId, action: "review_comment" });
 
   const { prDiff } = await resolveDiffContext(ghToken, owner, repoName, pr.number);
 
+  const sessionUrl = `${env.WEB_APP_URL}/session/${sessionId}`;
   const prompt = buildCommentActionPrompt({
     owner,
     repo: repoName,
@@ -2061,9 +2238,22 @@ export async function handleReviewComment(
     diffHunk: comment.diff_hunk,
     commentId: comment.id,
     commentActionInstructions: config.commentActionInstructions,
-    sessionUrl: `${env.WEB_APP_URL}/session/${sessionId}`,
+    sessionUrl,
     prDiff,
   });
+
+  if (coalesced) {
+    await postRequestCoalescedReply(
+      log,
+      ghToken,
+      owner,
+      repoName,
+      pr.number,
+      sessionUrl,
+      resolveAppName(env),
+      meta
+    );
+  }
 
   const messageId = await sendPrompt(env.CONTROL_PLANE, headers, sessionId, {
     content: prompt,
@@ -2081,7 +2271,7 @@ export async function handleReviewComment(
     outcome: "processed",
     session_id: sessionId,
     message_id: messageId,
-    handler_action: "review_comment",
+    handler_action: coalesced ? "review_comment_coalesced" : "review_comment",
   };
 }
 

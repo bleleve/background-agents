@@ -73,6 +73,56 @@ async function handleListSessions(
   });
 }
 
+// A session that can still absorb a coalesced prompt: non-terminal and recently
+// updated. Terminal sessions would enqueue a prompt that never runs; a stale
+// non-terminal session (e.g. wedged) is treated as dead so callers start fresh.
+const REQUEST_SESSION_ACTIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
+const TERMINAL_STATUSES: ReadonlySet<SessionStatus> = new Set<SessionStatus>([
+  "completed",
+  "failed",
+  "archived",
+  "cancelled",
+]);
+
+/**
+ * Whether a session can still absorb a coalesced prompt: it exists, is
+ * non-terminal, and was updated within the window. Pure so it can be unit-tested
+ * without D1.
+ */
+export function isSessionActiveForCoalescing(
+  session: { status: SessionStatus; updatedAt: number } | null,
+  nowMs: number
+): boolean {
+  if (!session) return false;
+  return (
+    !TERMINAL_STATUSES.has(session.status) &&
+    nowMs - session.updatedAt <= REQUEST_SESSION_ACTIVE_WINDOW_MS
+  );
+}
+
+/**
+ * Liveness of a single session, for the github-bot's per-PR request coalescing:
+ * `active` is true when it is safe to fold another prompt into the session.
+ * Internal-auth only.
+ */
+async function handleSessionLiveness(
+  _request: Request,
+  env: Env,
+  match: RegExpMatchArray,
+  _ctx: RequestContext
+): Promise<Response> {
+  const sessionId = match.groups?.id;
+  if (!sessionId) return error("Session ID required");
+
+  const store = new SessionIndexStore(env.DB);
+  const session = await store.get(sessionId);
+  return json({
+    active: isSessionActiveForCoalescing(session, Date.now()),
+    status: session?.status ?? null,
+    isProcessing: session?.isProcessing ?? false,
+  });
+}
+
 async function handleDeleteSession(
   _request: Request,
   env: Env,
@@ -90,5 +140,10 @@ async function handleDeleteSession(
 
 export const sessionIndexRoutes: Route[] = [
   { method: "GET", pattern: parsePattern("/sessions"), handler: handleListSessions },
+  {
+    method: "GET",
+    pattern: parsePattern("/sessions/:id/liveness"),
+    handler: handleSessionLiveness,
+  },
   { method: "DELETE", pattern: parsePattern("/sessions/:id"), handler: handleDeleteSession },
 ];

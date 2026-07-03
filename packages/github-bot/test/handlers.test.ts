@@ -108,6 +108,10 @@ function createMockEnv(): Env {
         new Response(JSON.stringify({ status: "ok", resolved: 1 }), { status: 200 })
       );
     }
+    if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+      // Default: no live request session for the PR. Coalesce tests override this.
+      return Promise.resolve(new Response(JSON.stringify({ active: false }), { status: 200 }));
+    }
     return Promise.resolve(new Response("Not found", { status: 404 }));
   });
 
@@ -305,7 +309,7 @@ describe("handlePullRequestOpened", () => {
     const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
     expect(sessionBody.repoOwner).toBe("acme");
     expect(sessionBody.repoName).toBe("widgets");
-    expect(sessionBody.title).toContain("Review PR #42");
+    expect(sessionBody.title).toContain("PR #42 · review");
     expect(sessionBody.scmLogin).toBe("alice");
     expect(sessionBody.scmUserId).toBe("1001");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1001");
@@ -494,7 +498,7 @@ describe("handlePullRequestOpened (ready_for_review action)", () => {
     const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
     expect(sessionBody.repoOwner).toBe("acme");
     expect(sessionBody.repoName).toBe("widgets");
-    expect(sessionBody.title).toContain("Review PR #42");
+    expect(sessionBody.title).toContain("PR #42 · review");
     expect(sessionBody.scmLogin).toBe("alice");
     expect(sessionBody.scmUserId).toBe("1001");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1001");
@@ -842,7 +846,7 @@ describe("handleReviewRequested", () => {
     const sessionBody = JSON.parse(sessionCall[1].body);
     expect(sessionBody.repoOwner).toBe("acme");
     expect(sessionBody.repoName).toBe("widgets");
-    expect(sessionBody.title).toContain("Review PR #42");
+    expect(sessionBody.title).toContain("PR #42 · review");
     expect(sessionBody.scmLogin).toBe("alice");
     expect(sessionBody.scmUserId).toBe("1001");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1001");
@@ -967,14 +971,72 @@ describe("handleIssueComment", () => {
     expect(sessionBody.scmUserId).toBe("1002");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1002");
     expect(sessionBody.spawnSource).toBe("github-bot");
+    // Unified request-session title (issue comment + inline comment share one).
+    expect(sessionBody.title).toMatch(/^GitHub: PR #\d+ · request$/);
     // @mention/command session: NOT a review, so the gh guard must not block its
     // top-level issue-comment replies. reviewSession is left unset.
     expect(sessionBody.reviewSession).toBeUndefined();
+    // The fresh request session is remembered so later comments coalesce into it.
+    const kvPut = env.GITHUB_KV.put as unknown as ReturnType<typeof vi.fn>;
+    expect(kvPut).toHaveBeenCalledWith(
+      expect.stringMatching(/^request-session:/),
+      "session-123",
+      expect.objectContaining({ expirationTtl: expect.any(Number) })
+    );
 
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.content).toContain("please fix the error handling");
     expect(promptBody.content).not.toContain("@test-bot[bot]");
     expect(promptBody.authorId).toBe("github:1002");
+  });
+
+  it("coalesces a second request into the live request session for the PR", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const cpFetch = getControlPlaneFetch(env);
+    // A request session already exists for this PR and is still live.
+    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-live");
+    cpFetch.mockImplementation((url: string) => {
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        return Promise.resolve(new Response(JSON.stringify({ active: true }), { status: 200 }));
+      }
+      if (/\/sessions\/.+\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-coalesced" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-coalesce");
+
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "sess-live",
+      message_id: "msg-coalesced",
+      handler_action: "comment_coalesced",
+    });
+    // No new session is created — the request folds into the existing one and its
+    // prompt is queued on that session.
+    const urls = cpFetch.mock.calls.map((c) => c[0] as string);
+    expect(urls).not.toContain("https://internal/sessions");
+    expect(urls.some((u) => /\/sessions\/sess-live\/prompt$/.test(u))).toBe(true);
+    // The human is told their request was folded in, not silently dropped.
+    expect(createIssueComment).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates a fresh request session when the remembered one is no longer live", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    // A stale pointer exists, but liveness (default mock) reports it inactive, so
+    // coalescing must be skipped (a terminal session would swallow the prompt).
+    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-dead");
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-stale");
+
+    expect(result).toMatchObject({ session_id: "session-123", handler_action: "comment" });
+    const urls = getControlPlaneFetch(env).mock.calls.map((c) => c[0] as string);
+    expect(urls).toContain("https://internal/sessions");
   });
 
   it("treats @mention of app slug without [bot] as a bot mention", async () => {
@@ -1148,12 +1210,42 @@ describe("handleReviewComment", () => {
     expect(sessionBody.scmUserId).toBe("1003");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1003");
     expect(sessionBody.spawnSource).toBe("github-bot");
+    expect(sessionBody.title).toMatch(/^GitHub: PR #\d+ · request$/);
 
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.content).toContain("src/cache.ts");
     expect(promptBody.content).toContain("const cache = new Map()");
     expect(promptBody.content).toContain("comments/200/replies");
     expect(promptBody.authorId).toBe("github:1003");
+  });
+
+  it("coalesces an inline comment into the live request session for the PR", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const cpFetch = getControlPlaneFetch(env);
+    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-live");
+    cpFetch.mockImplementation((url: string) => {
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        return Promise.resolve(new Response(JSON.stringify({ active: true }), { status: 200 }));
+      }
+      if (/\/sessions\/.+\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-coalesced" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleReviewComment(env, log, reviewCommentPayload, "trace-coalesce");
+
+    expect(result).toMatchObject({
+      outcome: "processed",
+      session_id: "sess-live",
+      handler_action: "review_comment_coalesced",
+    });
+    const urls = cpFetch.mock.calls.map((c) => c[0] as string);
+    expect(urls).not.toContain("https://internal/sessions");
+    expect(createIssueComment).toHaveBeenCalledTimes(1);
   });
 
   it("treats @mention of app slug without [bot] as a bot mention on review comments", async () => {
@@ -2055,7 +2147,7 @@ describe("handlePullRequestLabeled", () => {
     expect(cpFetch).toHaveBeenCalledTimes(2);
 
     const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
-    expect(sessionBody.title).toContain("Review PR #42");
+    expect(sessionBody.title).toContain("PR #42 · review");
     expect(sessionBody.scmLogin).toBe("bob");
 
     // It sends the full review prompt (not a comment action) with the pr_review
