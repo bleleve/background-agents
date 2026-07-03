@@ -70,7 +70,9 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 #      helper backed by control plane remains the sole credential path.
 # v96: add ripgrep to apt packages
 # v97: bump OpenCode to 1.17.13
-CACHE_BUSTER = "v97-opencode-1-17-13"
+# v98: bundle reef-inline-suggestion + reef-verdict skills (PR-review prompt mechanics
+#      moved out of github-bot into on-demand OpenCode skills)
+CACHE_BUSTER = "v98-reef-review-skills"
 
 # Base image with all development tools
 base_image = (
