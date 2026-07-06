@@ -100,7 +100,7 @@ on:
 
 base:
   image: ubuntu:24.04
-  config: rwx/base 1.0.2
+  config: rwx/base 1.1.1
 
 tasks:
   # ── Source ────────────────────────────────────────────────────────────────
@@ -116,7 +116,6 @@ tasks:
       git checkout ${{ init.commit-sha }}
 
   # ── System packages ───────────────────────────────────────────────────────
-
   - key: system-packages
     run: |
       sudo apt-get update
@@ -131,7 +130,6 @@ tasks:
 
   # ── Node.js 22 ───────────────────────────────────────────────────────────
   # Matches the Node.js major version in the Modal base image (base.py).
-
   - key: node
     use: system-packages
     run: |
@@ -145,7 +143,6 @@ tasks:
   # migration broke SSE event publishing on the legacy /event endpoint.
   # Newer versions connect and process prompts but stream zero events back
   # (see OPENCODE_VERSION in packages/modal-infra/src/images/base.py).
-
   - key: opencode
     use: node
     run: |
@@ -159,7 +156,6 @@ tasks:
   # At boot, entrypoint._install_tools() copies these into .opencode/ so
   # OpenCode's Npm.install() finds a pre-built package-lock.json and skips
   # the slow arborist reify() that would otherwise block the first prompt.
-
   - key: opencode-deps
     use: opencode
     run: |
@@ -172,7 +168,6 @@ tasks:
   # VS Code in the browser on :8080, served at the {slug} app endpoint.
   # The supervisor starts code-server only when CODE_SERVER_PASSWORD is set.
   # Version matches CODE_SERVER_VERSION in packages/modal-infra/src/images/base.py.
-
   - key: code-server
     use: system-packages
     run: |
@@ -187,7 +182,6 @@ tasks:
   # Install uv then install the sandbox-runtime package from the cloned repo.
   # The entrypoint, bridge, git credential helper, and custom tools all live
   # in this package (packages/sandbox-runtime/).
-
   - key: python-tools
     use: system-packages
     run: |
@@ -224,7 +218,6 @@ tasks:
   #
   # Session-specific env vars are excluded from the cache key so ephemeral
   # values (tokens, session IDs) don't bust the cached dependency layers.
-
   - key: sandbox
     use: [opencode-deps, sandbox-runtime, code-server]
     agent:
