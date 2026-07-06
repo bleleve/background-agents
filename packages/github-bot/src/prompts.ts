@@ -51,6 +51,11 @@ const SUGGESTION_QUALITY_BAR = `
 **Quality bar — verify before posting an inline suggestion.**
 A confidently-wrong inline comment costs reviewer time and erodes trust over many PRs.
 - **Disprove it before posting (most important).** For each finding, write one sentence on how an experienced engineer would refute it — a guard you overlooked, a caller that already handles the case, or intended behavior. If that refutation holds up, drop the finding. Post only what survives this step. Exception: "this rarely happens in practice" does **not** clear a finding whose consequence is silent data corruption or loss — judge those by severity, not just likelihood.
+- **Rate each surviving finding by its worst realistic consequence, not its likelihood.** This severity is the finding's \`<!-- reef-risk: … -->\` marker AND its **Worth a look** badge, and it floors the verdict header — so under-rating one finding quietly under-rates the whole PR.
+  - 🔴 **High** — a guaranteed crash / uncaught exception, data corruption or loss, or a security / auth / money-math defect on a path this PR actually exercises. If the change is *meant* to handle a case and instead throws or misbehaves on that exact case (e.g. the fallback or recovery branch the PR adds is itself the branch that breaks), it is **High, not Medium** — the trigger is not rare, it *is* the feature.
+  - 🟡 **Medium** — a real bug with a bounded blast radius: wrong output, a broken edge case, or a missing guard that fails on an uncommon input.
+  - 🔵 **Low** — a minor correctness nit that seldom bites and degrades gracefully.
+  When torn between two levels, pick the higher one — the badge is a floor, not an average.
 - **Before claiming something is missing or not updated, search the full diff.** If your finding is "X changed but Y was not updated to match" (a stale test stub, a missing rename, a paired constant that didn't follow), search the full diff — the **## Full Diff** section above when it is inlined, otherwise via \`gh pr diff <n> | grep -n "Y"\` — to confirm Y is absent from this PR's changes. The most common false positive is spotting one side of a paired change and missing the matching update in a different file of the same PR.
 - **Don't flag what the repo's own tooling already catches.** If lint, type-check, or the formatter would report it, skip it (run the repo's own checks when in doubt). Focus on behavioral risk, not style the build already enforces.
 - **Verify shell/regex/pattern claims empirically.** Test against representative input in the sandbox (e.g. \`printf 'pod/sidekiq-x\\npod/sourcery-sidekiq-y\\n' | grep -E '/sidekiq-'\`) rather than reasoning from analogous code you've seen elsewhere.
@@ -70,7 +75,7 @@ A confidently-wrong inline comment costs reviewer time and erodes trust over man
 // changes via the review_suggestions D1 table; the control-plane stamps this value
 // against each recorded suggestion by looking up the most recent github-bot session for
 // the PR at record time.
-export const INLINE_SUGGESTION_PROMPT_VERSION = "v5";
+export const INLINE_SUGGESTION_PROMPT_VERSION = "v6";
 
 // Gate that every finding must pass BEFORE emitting an applyable ```suggestion block.
 // Evaluated step-by-step; a single failure → prose (or illustrative fence) instead.
