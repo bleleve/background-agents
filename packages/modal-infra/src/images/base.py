@@ -80,7 +80,9 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v102: reef-verdict skill drops its client-side risk-label sync (Step C) — the
 #       control plane now sets the label server-side from the enforced badge
 # v103: include the download_file sandbox-runtime tool in rebuilt base images.
-CACHE_BUSTER = "v103-include-download-file-tool"
+# v104: reef-verdict skill passes the body inline (no /tmp round-trip) so the agent
+#       stops sending `$(cat …)` as the tool arg (megalith#1314).
+CACHE_BUSTER = "v104-verdict-inline-body"
 
 # Base image with all development tools
 base_image = (

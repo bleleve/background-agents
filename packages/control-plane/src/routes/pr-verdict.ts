@@ -48,6 +48,17 @@ const REEF_VERDICT_MARKER = "<!-- reef-verdict -->";
  */
 const LEADING_VERDICT_MARKER_RE = /^\s*(?:<|&lt;)!--\s*reef-verdict\s*--(?:>|&gt;)[ \t]*\r?\n?/i;
 
+/**
+ * Matches a body whose entire meaningful content (after the marker is stripped)
+ * is a lone, unexpanded shell command substitution — e.g. `$(cat /tmp/pr-verdict.md)`
+ * or `` `cat file` ``. This happens when the agent passes a shell idiom as the
+ * `body` tool argument expecting expansion, but a tool argument is never run
+ * through a shell, so the literal substitution string would post as the verdict
+ * (megalith#1314). A real verdict is markdown starting with a `## … Reef Review`
+ * header, never a bare substitution, so rejecting it can't drop a legitimate body.
+ */
+const UNEXPANDED_SHELL_SUBSTITUTION_RE = /^(?:\$\([^\n)]*\)|`[^\n`]*`)$/;
+
 /** Defensive cap on the verdict body we forward to GitHub. */
 const VERDICT_BODY_MAX_LENGTH = 60_000;
 /** Safety cap on comment pages scanned when deleting prior verdicts. */
@@ -339,6 +350,19 @@ async function parseBody(request: Request): Promise<ParsedBody | Response> {
   // silently orphan the comment.
   while (LEADING_VERDICT_MARKER_RE.test(text)) {
     text = text.replace(LEADING_VERDICT_MARKER_RE, "");
+  }
+  // Reject an unexpanded shell substitution passed as the body (e.g.
+  // `$(cat /tmp/pr-verdict.md)`) — the agent expected shell expansion, but a tool
+  // argument is never run through a shell, so this would post verbatim as the
+  // verdict (megalith#1314). 422 so the tool surfaces an error and the agent
+  // regenerates the body with the actual rendered markdown, per the prompt's
+  // fix-and-retry rule. Checked after marker-stripping so a marker-prefixed
+  // substitution is caught too.
+  if (UNEXPANDED_SHELL_SUBSTITUTION_RE.test(text.trim())) {
+    return error(
+      "body looks like an unexpanded shell substitution — pass the rendered verdict markdown directly, not a $(...) or `...` command",
+      422
+    );
   }
   text = `${REEF_VERDICT_MARKER}\n${text}`;
   // Cap the FINAL body (marker included) so the length we enforce is the length

@@ -70,14 +70,23 @@ describe("reef-verdict skill", () => {
   });
 
   it("renders the body and posts via the submit-review-verdict tool (no client label sync)", () => {
-    // Renders the risk-map template to a temp file, passed to the tool.
-    expect(skill).toContain("cat >/tmp/pr-verdict.md");
     // Posts via the tool — delete-then-post AND the label sync now happen server-side.
     expect(skill).toContain("submit-review-verdict");
     // The old client-side gh label shell moved to the control plane (pr-verdict.ts)
     // and must NOT remain in the skill.
     expect(skill).not.toContain("gh label create");
     expect(skill).not.toContain("--add-label");
+  });
+
+  it("passes the body inline, not through a temp-file shell round-trip (megalith#1314)", () => {
+    // The old `cat >/tmp/pr-verdict.md` + "pass the contents of the file" pattern led the
+    // agent to send `$(cat /tmp/pr-verdict.md)` as the body arg — never shell-expanded, so
+    // it posted verbatim. The skill must NOT reintroduce the temp-file round-trip, and must
+    // warn that the body is a tool argument that never expands a shell substitution.
+    expect(skill).not.toContain("cat >/tmp/pr-verdict.md");
+    expect(skill).not.toContain("contents of `/tmp/pr-verdict.md`");
+    expect(skill).toContain("$(cat /tmp/pr-verdict.md)");
+    expect(skill).toMatch(/never\s+expanded|not\s+a\s+shell\s+command/i);
   });
 
   it("does not post the verdict with raw gh (that path is blocked in review sessions)", () => {

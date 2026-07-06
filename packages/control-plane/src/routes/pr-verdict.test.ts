@@ -318,6 +318,33 @@ describe("handleSubmitVerdict", () => {
     expect(lastLabelPut()).toBeNull();
   });
 
+  it("rejects an unexpanded shell substitution body (megalith#1314) without posting", async () => {
+    seedGitHub();
+    // The agent passed `$(cat /tmp/pr-verdict.md)` as the body expecting shell
+    // expansion; a tool argument is never shell-expanded, so this must be rejected
+    // rather than posted verbatim as the verdict.
+    const res = await callHandler({ body: `${MARKER}\n$(cat /tmp/pr-verdict.md)` });
+    expect(res.status).toBe(422);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a backtick command-substitution body without posting", async () => {
+    seedGitHub();
+    const res = await callHandler({ body: "`cat /tmp/pr-verdict.md`" });
+    expect(res.status).toBe(422);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still posts a real verdict that merely contains a $(...) snippet in its body", async () => {
+    seedGitHub();
+    // The guard only rejects a body that is ENTIRELY a lone substitution — a
+    // legitimate verdict that quotes `$(...)` inside its markdown still posts.
+    const body = `${MARKER}\n## 🔵 Reef Review — Low risk\n\nBeware \`$(rm -rf /)\` in the diff.`;
+    const res = await callHandler({ body });
+    expect(res.status).toBe(200);
+    expect(lastPostBody()).toContain("$(rm -rf /)");
+  });
+
   it("rejects a body that only exceeds the cap once the marker is prepended", async () => {
     seedGitHub();
     // Just under the 60_000 cap on its own, but the prepended marker line pushes
