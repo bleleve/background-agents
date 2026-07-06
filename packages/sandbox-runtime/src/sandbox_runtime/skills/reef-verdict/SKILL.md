@@ -38,9 +38,9 @@ server find a prior verdict to delete and lets a future re-review replace it):
 
 ## Step A — Render the verdict body.
 
-Write the body to a file to pass to the tool in Step B. Include only the sections your prompt kept:
+Assemble the comment body as markdown. It MUST begin with the hidden `<!-- reef-verdict -->` marker
+line. Include only the sections your prompt kept:
 
-    cat >/tmp/pr-verdict.md <<'EOF'
     <!-- reef-verdict -->
     ## <🔵|🟡|🔴> Reef Review — <Low|Medium|High> risk
 
@@ -69,14 +69,20 @@ Write the body to a file to pass to the tool in Step B. Include only the section
     </details>
 
     <footer>
-    EOF
 
 ## Step B — Post it with the `submit-review-verdict` tool.
 
-Call the **`submit-review-verdict`** tool with the contents of `/tmp/pr-verdict.md` as its `body`
-argument. The tool deletes any prior verdict comment (matched by the `<!-- reef-verdict -->` marker)
-and posts your body as a fresh comment (a new comment notifies subscribers; an in-place edit would
-be silent), then returns the posted comment's URL.
+Call the **`submit-review-verdict`** tool and pass the rendered markdown **directly** as its `body`
+argument — the actual comment text itself, inline in the tool call.
+
+> ⚠️ **`body` is a tool argument, not a shell command.** A value like `$(cat /tmp/pr-verdict.md)`,
+> `` `cat file` ``, or a bare file path is **never expanded** — it posts verbatim as the verdict. Do
+> not route the body through a temp file or any shell substitution; put the fully-rendered markdown
+> straight into the `body` argument.
+
+The tool deletes any prior verdict comment (matched by the `<!-- reef-verdict -->` marker) and posts
+your body as a fresh comment (a new comment notifies subscribers; an in-place edit would be silent),
+then returns the posted comment's URL.
 
 Confirm the tool returned a URL. If it reported an error, fix the body and call it again — do not
 end the review without a posted verdict. Never fall back to `gh api .../issues/<pr-number>/comments`
