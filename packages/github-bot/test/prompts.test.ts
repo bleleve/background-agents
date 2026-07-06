@@ -160,6 +160,10 @@ describe("buildCodeReviewPrompt", () => {
     expect(prompt).toContain("issues in code this PR does not touch");
     // "rare in practice" must not drop data-corruption findings (severity, not just likelihood)
     expect(prompt).toContain("silent data corruption or loss");
+    // Severity rubric: a guaranteed runtime crash on an exercised path is High, not Medium.
+    expect(prompt).toContain("Rate each surviving finding by its worst realistic consequence");
+    expect(prompt).toContain("guaranteed crash / uncaught exception");
+    expect(prompt).toContain("High, not Medium");
   });
 
   it("focuses the review on blind-spot axes beyond the diff", () => {
