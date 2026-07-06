@@ -318,4 +318,49 @@ describe("sessions API route (POST)", () => {
     expect(sent.scmLogin).toBeUndefined();
     expect(sent.scmEmail).toBeUndefined();
   });
+
+  it("forwards planModel when planMode is on so planning uses the picked model", async () => {
+    vi.mocked(getServerSession).mockResolvedValue({
+      user: { id: "12345", provider: "github" },
+    } as never);
+    vi.mocked(getToken).mockResolvedValue({} as never);
+    vi.mocked(controlPlaneFetch).mockResolvedValue(Response.json({ id: "sess3" }, { status: 201 }));
+
+    await POST(
+      postRequest({
+        repoOwner: "o",
+        repoName: "r",
+        model: "anthropic/claude-opus-4-8",
+        planMode: true,
+        planModel: "anthropic/claude-opus-4-8",
+      })
+    );
+
+    expect(controlPlaneBody()).toMatchObject({
+      planMode: true,
+      planModel: "anthropic/claude-opus-4-8",
+    });
+  });
+
+  it("omits planModel when planMode is off", async () => {
+    vi.mocked(getServerSession).mockResolvedValue({
+      user: { id: "12345", provider: "github" },
+    } as never);
+    vi.mocked(getToken).mockResolvedValue({} as never);
+    vi.mocked(controlPlaneFetch).mockResolvedValue(Response.json({ id: "sess4" }, { status: 201 }));
+
+    await POST(
+      postRequest({
+        repoOwner: "o",
+        repoName: "r",
+        model: "anthropic/claude-opus-4-8",
+        planMode: false,
+        planModel: "anthropic/claude-opus-4-8",
+      })
+    );
+
+    const sent = controlPlaneBody();
+    expect(sent.planMode).toBe(false);
+    expect(sent.planModel).toBeUndefined();
+  });
 });
