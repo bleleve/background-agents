@@ -68,6 +68,7 @@ import {
   handleCheckSuiteCompleted,
   handlePullRequestReview,
   handleReviewRequestInternal,
+  quoteForReply,
 } from "../src/handlers";
 import {
   generateInstallationToken,
@@ -2974,5 +2975,34 @@ describe("handlePullRequestReview", () => {
     );
 
     expect(result).toEqual({ outcome: "skipped", skip_reason: "dismiss_failed" });
+  });
+});
+
+describe("quoteForReply", () => {
+  it("blockquotes each line of a short request", () => {
+    expect(quoteForReply("please fix this")).toBe("> please fix this");
+    expect(quoteForReply("line one\nline two")).toBe("> line one\n> line two");
+  });
+
+  it("returns an empty string for blank input", () => {
+    expect(quoteForReply("   ")).toBe("");
+    expect(quoteForReply("")).toBe("");
+  });
+
+  it("truncates long requests with an ellipsis", () => {
+    expect(quoteForReply("a".repeat(400))).toBe(`> ${"a".repeat(280)}…`);
+  });
+
+  it("truncates by code point, never splitting a surrogate pair", () => {
+    // slice(0, 280) by UTF-16 unit would cut the first emoji in half here (279
+    // ASCII chars put a surrogate pair astride index 280); code-point slicing
+    // keeps it whole.
+    const out = quoteForReply("a".repeat(279) + "😀😀😀");
+    expect(out.endsWith("…")).toBe(true);
+    // No lone high surrogate left dangling (no mojibake).
+    expect(out).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    // 280 code points kept: 279 "a" + one whole emoji.
+    const inner = out.slice(2, out.length - 1); // strip "> " and the trailing "…"
+    expect(Array.from(inner)).toHaveLength(280);
   });
 });

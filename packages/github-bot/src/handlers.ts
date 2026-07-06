@@ -467,10 +467,13 @@ async function resolveRequestSession(
  * re-trigger the bot (the mention gate strips blockquotes, and the bot ignores
  * its own comments). Returns "" for an empty request.
  */
-function quoteForReply(text: string): string {
+export function quoteForReply(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return "";
-  const clipped = trimmed.length > 280 ? `${trimmed.slice(0, 280)}…` : trimmed;
+  // Slice by code point, not UTF-16 code unit, so truncation never splits a
+  // surrogate pair (emoji, astral chars) into a broken character.
+  const codePoints = Array.from(trimmed);
+  const clipped = codePoints.length > 280 ? `${codePoints.slice(0, 280).join("")}…` : trimmed;
   return clipped
     .split("\n")
     .map((line) => `> ${line}`)
