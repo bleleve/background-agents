@@ -333,3 +333,41 @@ export async function createIssueComment(
     return null;
   }
 }
+
+/**
+ * Reply inside an existing PR review-comment thread, anchored to `commentId`
+ * (any comment in the thread). Returns the reply's id, or null on failure
+ * (best-effort — the caller logs but does not throw). Mirrors createIssueComment,
+ * but hits the review-thread replies endpoint so the reply lands on the finding
+ * rather than at the PR root.
+ */
+export async function createReviewCommentReply(
+  token: string,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  commentId: number,
+  body: string,
+  userAgent: string = DEFAULT_APP_NAME
+): Promise<number | null> {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${pullNumber}/comments/${commentId}/replies`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": userAgent,
+        },
+        body: JSON.stringify({ body }),
+      }
+    );
+    if (!response.ok) return null;
+    const created = (await response.json()) as { id: number };
+    return created.id;
+  } catch {
+    return null;
+  }
+}
