@@ -194,6 +194,10 @@ export default function Home() {
             reasoningEffort,
             branch: selectedBranch || undefined,
             planMode,
+            // In plan mode the picker controls the planning model, so send it as
+            // planModel too. Otherwise the control plane defaults plan_model to
+            // DEFAULT_PLAN_MODEL and the "Plan" line shows the wrong model.
+            planModel: planMode ? selectedModel : undefined,
           }),
           signal: abortController.signal,
         });

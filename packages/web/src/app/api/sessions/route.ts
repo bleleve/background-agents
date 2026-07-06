@@ -88,6 +88,10 @@ export async function POST(request: NextRequest) {
       branch: body.branch,
       title: body.title,
       planMode: body.planMode === true,
+      // Carry the plan-model selection so planning turns (and the sidebar "Plan"
+      // line) use the model the user actually picked. Without this the control
+      // plane falls back to DEFAULT_PLAN_MODEL regardless of the pick.
+      planModel: body.planMode === true ? body.planModel : undefined,
       spawnSource: "user" as const,
       userId,
       // Provider-agnostic auth identity (GitHub or Google) resolves the
