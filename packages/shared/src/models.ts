@@ -131,24 +131,40 @@ export function parseRetryCommand(body: string): RetryCommand | null {
 }
 
 /**
- * Canonical title for a github-bot PR-review session. Shared so the bot (which
- * sets it) and the web UI (which detects review sessions from it, to show the
- * "Re-run review" action) can't drift. A build/coding session or a comment
- * action uses a different title, so this doubles as the review-session marker.
+ * Canonical titles for github-bot PR sessions. Shared so the bot (which sets
+ * them) and the web UI (which detects review sessions from the title — to show
+ * the "Re-run review" action and hide the read-only prompt composer) can't
+ * drift. Two kinds, distinguished by the trailing token:
+ *   - `· review`  — a dedicated, read-only PR review session (posts a verdict).
+ *   - `· request` — a change request from a PR comment or inline review comment.
+ *                   Every such request for one PR coalesces into a single
+ *                   session, so the title names the work, not the trigger.
  */
 export function reviewSessionTitle(prNumber: number): string {
-  return `GitHub: Review PR #${prNumber}`;
+  return `GitHub: PR #${prNumber} · review`;
 }
 
-const REVIEW_SESSION_TITLE_RE = /^GitHub: Review PR #(\d+)$/;
+export function requestSessionTitle(prNumber: number): string {
+  return `GitHub: PR #${prNumber} · request`;
+}
+
+// The current review title, plus the legacy `GitHub: Review PR #N` form kept so
+// the "Re-run review" action still resolves on review sessions created before
+// the title realignment. A `· request` title matches neither.
+const REVIEW_SESSION_TITLE_RES = [/^GitHub: PR #(\d+) · review$/, /^GitHub: Review PR #(\d+)$/];
 
 /**
- * If `title` is a review-session title, return the reviewed PR number; else
- * null. Used to gate the "Re-run review" action to review sessions only.
+ * If `title` is a review-session title (current or legacy form), return the
+ * reviewed PR number; else null. Used to gate the "Re-run review" action and the
+ * read-only UI to review sessions only.
  */
 export function parseReviewSessionPrNumber(title: string | null | undefined): number | null {
-  const match = title?.match(REVIEW_SESSION_TITLE_RE);
-  return match ? Number.parseInt(match[1], 10) : null;
+  if (!title) return null;
+  for (const re of REVIEW_SESSION_TITLE_RES) {
+    const match = title.match(re);
+    if (match) return Number.parseInt(match[1], 10);
+  }
+  return null;
 }
 
 /**

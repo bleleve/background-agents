@@ -12,6 +12,7 @@ import {
   normalizeModelId,
   parseRetryCommand,
   parseReviewSessionPrNumber,
+  requestSessionTitle,
   reviewSessionTitle,
   supportsReasoning,
 } from "./models";
@@ -34,15 +35,25 @@ describe("parseRetryCommand", () => {
   });
 });
 
-describe("reviewSessionTitle / parseReviewSessionPrNumber", () => {
-  it("round-trips a PR number through the review-session title", () => {
-    expect(reviewSessionTitle(42)).toBe("GitHub: Review PR #42");
-    expect(parseReviewSessionPrNumber(reviewSessionTitle(42))).toBe(42);
+describe("session titles / parseReviewSessionPrNumber", () => {
+  it("builds the canonical review and request titles with the · separator", () => {
+    expect(reviewSessionTitle(42)).toBe("GitHub: PR #42 · review");
+    expect(requestSessionTitle(42)).toBe("GitHub: PR #42 · request");
   });
 
-  it("returns null for non-review titles, comment-action titles, and empty input", () => {
-    expect(parseReviewSessionPrNumber("Fix the cache bug")).toBeNull();
+  it("round-trips a PR number through the review-session title (current and legacy)", () => {
+    expect(parseReviewSessionPrNumber(reviewSessionTitle(42))).toBe(42);
+    // Legacy title kept parsing so historical review sessions keep "Re-run review".
+    expect(parseReviewSessionPrNumber("GitHub: Review PR #7")).toBe(7);
+  });
+
+  it("returns null for request titles, comment-action titles, and empty input", () => {
+    // Invariant: a request session must never be read as a review session — that
+    // would wrongly expose the read-only UI and the "Re-run review" action.
+    expect(parseReviewSessionPrNumber(requestSessionTitle(42))).toBeNull();
     expect(parseReviewSessionPrNumber("GitHub: PR #42 comment")).toBeNull();
+    expect(parseReviewSessionPrNumber("GitHub: PR #42 review comment")).toBeNull();
+    expect(parseReviewSessionPrNumber("Fix the cache bug")).toBeNull();
     expect(parseReviewSessionPrNumber(null)).toBeNull();
     expect(parseReviewSessionPrNumber(undefined)).toBeNull();
     expect(parseReviewSessionPrNumber("")).toBeNull();

@@ -743,6 +743,12 @@ function SessionContent({
     sessionState?.planApprovalStatus !== "approved" &&
     sessionState?.planApprovalStatus !== "rejected";
 
+  // A github-bot review session is read-only — it posts a verdict and takes no
+  // follow-up prompts — so hide the composer. Same title-derived signal that
+  // gates the "Re-run review" action.
+  const reviewPrNumber = parseReviewSessionPrNumber(sessionState?.title);
+  const isReviewSession = reviewPrNumber !== null;
+
   // Fetch the full plan history so old versions render collapsed inline
   // alongside the latest. Skipped for non-plan sessions.
   const plansKey = sessionState?.planMode ? `/api/sessions/${sessionId}/plans` : null;
@@ -1031,7 +1037,7 @@ function SessionContent({
               sessionId={sessionState?.id || ""}
               sessionStatus={sessionState?.status || ""}
               artifacts={artifacts}
-              reviewPrNumber={parseReviewSessionPrNumber(sessionState?.title)}
+              reviewPrNumber={reviewPrNumber}
               isProcessing={isProcessing}
               onArchive={handleArchive}
               onUnarchive={handleUnarchive}
@@ -1052,8 +1058,8 @@ function SessionContent({
             />
           )}
 
-          {/* Input container */}
-          <div className="border border-border bg-input">
+          {/* Input container — hidden for read-only review sessions. */}
+          <div className={`border border-border bg-input${isReviewSession ? " hidden" : ""}`}>
             {/* Queued files list */}
             {queuedFiles.length > 0 && (
               <div className="px-4 pt-3 flex flex-wrap gap-2">

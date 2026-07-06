@@ -150,13 +150,13 @@ need the PR branch checked out.
 
 ### Current Branch Behavior
 
-Comment-triggered sessions currently start from the repository default branch, not the PR head
-branch. Use them for responses and review-thread discussion rather than asking the agent to push
-commits to the existing PR branch.
-
-Each accepted GitHub webhook starts a new Open-Inspect session. GitHub comments do not continue an
-existing session the way Slack thread replies do. The agent still reads the current PR conversation
-when it needs context.
+`@mention` change requests on a PR — top-level comments and inline review comments alike — coalesce
+into a single per-PR "request" session. Because these requests commit and push to the PR, running
+them concurrently would race on the branch; folding them into one session queues their prompts on a
+single working tree instead. A later request while the first is still working continues that session
+rather than starting a separate one; if none is live, a fresh session is created. Reviews are a
+separate, read-only kind of session, and the agent still reads the current PR conversation when it
+needs context.
 
 Comment-triggered actions only run on pull requests. Mentions on ordinary GitHub issues are ignored.
 Comments from the bot itself are also ignored so the bot does not respond to its own output.
