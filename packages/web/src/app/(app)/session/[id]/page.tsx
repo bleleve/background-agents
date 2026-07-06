@@ -418,7 +418,8 @@ function SessionPageContent() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prompt.trim() || isProcessing) return;
+    const hasPrompt = prompt.trim().length > 0;
+    if ((!hasPrompt && queuedFiles.length === 0) || isProcessing) return;
 
     const uploadedFiles: { artifactId: string; fileName: string }[] = [];
 
@@ -448,13 +449,16 @@ function SessionPageContent() {
       setQueuedFiles([]);
     }
 
+    if (!hasPrompt && uploadedFiles.length === 0) return;
+
     // Append uploaded file context to the prompt so the agent can use download_file
     let finalPrompt = prompt;
     if (uploadedFiles.length > 0) {
       const fileList = uploadedFiles
         .map((f) => `- ${f.fileName} (artifact_id: ${f.artifactId})`)
         .join("\n");
-      finalPrompt = `${prompt}\n\nUploaded files (use the download_file tool with the artifact_id to access them):\n${fileList}`;
+      const fileContext = `Uploaded files (use the download_file tool with the artifact_id to access them):\n${fileList}`;
+      finalPrompt = hasPrompt ? `${prompt}\n\n${fileContext}` : fileContext;
     }
 
     sendPrompt(finalPrompt, selectedModel, reasoningEffort, planToggle || undefined);

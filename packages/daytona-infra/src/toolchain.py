@@ -15,8 +15,8 @@ PLAYWRIGHT_VERSION = "1.61.0"
 # git system-wide so per-request token brokerage matches the Modal base image.
 # daytona-v4: remove RTK
 # daytona-v5: install Playwright 1.61.0 and download Chromium browser + deps
-# daytona-v6: add ripgrep
-SANDBOX_VERSION = "daytona-v6-add-ripgrep"
+# daytona-v6: include the download_file sandbox-runtime tool in rebuilt snapshots
+SANDBOX_VERSION = "daytona-v6-include-download-file-tool"
 
 
 def build_base_image(repo_root: Path) -> Image:

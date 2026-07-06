@@ -79,7 +79,8 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 #       reviews) instead of all github-bot sessions; verdict tool always installed
 # v102: reef-verdict skill drops its client-side risk-label sync (Step C) — the
 #       control plane now sets the label server-side from the enforced badge
-CACHE_BUSTER = "v102-server-verdict-label"
+# v103: include the download_file sandbox-runtime tool in rebuilt base images.
+CACHE_BUSTER = "v103-include-download-file-tool"
 
 # Base image with all development tools
 base_image = (
