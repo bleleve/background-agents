@@ -61,7 +61,12 @@ interface InitRequest {
 export interface SessionLifecycleHandlerDeps {
   repository: Pick<
     SessionRepository,
-    "upsertSession" | "createSandbox" | "createParticipant" | "createArtifact" | "createMessage"
+    | "upsertSession"
+    | "createSandbox"
+    | "createParticipant"
+    | "createArtifact"
+    | "createMessage"
+    | "listArtifacts"
   > &
     Pick<SessionRepository, "updatePreviewEnabled" | "updatePreviewDispatchedSha">;
   getDurableObjectId: () => string;
@@ -229,27 +234,33 @@ export function createSessionLifecycleHandler(
         createdAt: 0,
       });
 
-      const participantId = deps.generateId();
-      deps.repository.createParticipant({
-        id: participantId,
-        userId: body.userId,
-        scmUserId: body.scmUserId ?? null,
-        scmLogin: body.scmLogin ?? null,
-        scmName: body.scmName ?? null,
-        scmEmail: body.scmEmail ?? null,
-        scmAccessTokenEncrypted: encryptedToken,
-        scmRefreshTokenEncrypted: body.scmRefreshTokenEncrypted ?? null,
-        scmTokenExpiresAt: body.scmTokenExpiresAt ?? null,
-        role: "owner",
-        joinedAt: now,
-      });
+      // Idempotent: `/init` may be retried after a transient DO failure, so only
+      // create the owner participant when this user isn't already recorded.
+      if (!deps.getParticipantByUserId(body.userId)) {
+        const participantId = deps.generateId();
+        deps.repository.createParticipant({
+          id: participantId,
+          userId: body.userId,
+          scmUserId: body.scmUserId ?? null,
+          scmLogin: body.scmLogin ?? null,
+          scmName: body.scmName ?? null,
+          scmEmail: body.scmEmail ?? null,
+          scmAccessTokenEncrypted: encryptedToken,
+          scmRefreshTokenEncrypted: body.scmRefreshTokenEncrypted ?? null,
+          scmTokenExpiresAt: body.scmTokenExpiresAt ?? null,
+          role: "owner",
+          joinedAt: now,
+        });
+      }
 
       // Seed a `pr` artifact for sessions that act on an existing PR (github-bot
       // review/comment sessions). Build sessions create this artifact when they
       // open a PR; review sessions never open one, so without this they'd have no
       // artifact and the web UI couldn't link the session to its PR. Same shape as
       // SessionPullRequestService so the client maps it identically.
-      if (typeof body.prNumber === "number" && body.prUrl) {
+      // Idempotent: skip when a `pr` artifact already exists (retried `/init`).
+      const hasPrArtifact = deps.repository.listArtifacts().some((a) => a.type === "pr");
+      if (typeof body.prNumber === "number" && body.prUrl && !hasPrArtifact) {
         deps.repository.createArtifact({
           id: deps.generateId(),
           type: "pr",
