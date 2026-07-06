@@ -15,13 +15,13 @@ from sandbox_runtime.constants import (
 from src.sandbox.manager import CODE_SERVER_PORT, SandboxConfig, SandboxManager
 
 
-def _mock_sandbox_with_open() -> tuple[MagicMock, AsyncMock]:
-    """Return (sandbox, file_handle) with sandbox.open.aio returning the handle."""
-    f = AsyncMock()
+def _mock_sandbox_with_write_text() -> tuple[MagicMock, AsyncMock]:
+    """Return (sandbox, write_text_mock) with sandbox.filesystem.write_text.aio mocked."""
     sandbox = MagicMock()
-    sandbox.open = MagicMock()
-    sandbox.open.aio = AsyncMock(return_value=f)
-    return sandbox, f
+    sandbox.filesystem = MagicMock()
+    sandbox.filesystem.write_text = MagicMock()
+    sandbox.filesystem.write_text.aio = AsyncMock()
+    return sandbox, sandbox.filesystem.write_text.aio
 
 
 async def _drain_writes() -> None:
@@ -126,7 +126,7 @@ class TestResolveAndSetupTunnels:
     async def test_resolves_extra_ports(self):
         tunnel_urls = {3000: "https://tunnel-3000.example.com"}
 
-        sandbox, _f = _mock_sandbox_with_open()
+        sandbox, _f = _mock_sandbox_with_write_text()
         with patch.object(
             SandboxManager,
             "_resolve_tunnels",
@@ -154,7 +154,7 @@ class TestResolveAndSetupTunnels:
             3000: "https://tunnel-3000.example.com",
         }
 
-        sandbox, _f = _mock_sandbox_with_open()
+        sandbox, _f = _mock_sandbox_with_write_text()
 
         with patch.object(
             SandboxManager,
@@ -180,7 +180,7 @@ class TestResolveAndSetupTunnels:
     async def test_keeps_code_server_port_tunnel_when_code_server_disabled(self):
         """Regression: a user's own 8080 tunnel is kept, not misrouted to code_server_url."""
         resolved = {CODE_SERVER_PORT: "https://my-app.example.com"}
-        sandbox, _f = _mock_sandbox_with_open()
+        sandbox, _f = _mock_sandbox_with_write_text()
 
         with patch.object(
             SandboxManager,
@@ -209,7 +209,7 @@ class TestResolveAndSetupTunnels:
             8081: "https://cs.example.com",
             CODE_SERVER_PORT: "https://my-app.example.com",
         }
-        sandbox, _f = _mock_sandbox_with_open()
+        sandbox, _f = _mock_sandbox_with_write_text()
 
         with patch.object(
             SandboxManager,
@@ -236,7 +236,7 @@ class TestWriteTunnelEnvFile:
 
     @pytest.mark.asyncio
     async def test_writes_dotenv_format_to_expected_path(self):
-        sandbox, f = _mock_sandbox_with_open()
+        sandbox, write_text = _mock_sandbox_with_write_text()
 
         with patch("src.sandbox.manager.asyncio.sleep", new_callable=AsyncMock):
             await SandboxManager._write_tunnel_env_file(
@@ -250,21 +250,19 @@ class TestWriteTunnelEnvFile:
             await _drain_writes()
 
         # Initial write plus one retry (see _write_tunnel_env_file docstring).
-        assert sandbox.open.aio.await_count == 2
-        sandbox.open.aio.assert_awaited_with(TUNNEL_ENV_FILE_PATH, "w")
-        assert f.write.aio.await_count == 2
-        written = f.write.aio.call_args[0][0]
+        assert write_text.await_count == 2
+        written = write_text.call_args[0][0]
         # Sorted by port, dotenv format, trailing newline.
         assert written == (
             "TUNNEL_3000=https://tunnel-3000.example.com\n"
             "TUNNEL_3001=https://tunnel-3001.example.com\n"
         )
-        assert f.close.aio.await_count == 2
+        write_text.assert_awaited_with(written, TUNNEL_ENV_FILE_PATH)
 
     @pytest.mark.asyncio
-    async def test_closes_file_when_write_raises(self):
-        sandbox, f = _mock_sandbox_with_open()
-        f.write.aio = AsyncMock(side_effect=Exception("write failed"))
+    async def test_write_failure_does_not_raise(self):
+        sandbox, write_text = _mock_sandbox_with_write_text()
+        write_text.side_effect = Exception("write failed")
 
         with (
             patch("src.sandbox.manager.log") as mock_log,
@@ -275,50 +273,8 @@ class TestWriteTunnelEnvFile:
             )
             await _drain_writes()
 
-        # Both attempts open then fail to write, so the handle is closed twice.
-        assert f.close.aio.await_count == 2
-        assert mock_log.warn.call_count == 2
-        assert mock_log.warn.call_args[0][0] == "tunnel.urls_write_failed"
-
-    @pytest.mark.asyncio
-    async def test_open_failure_does_not_raise(self):
-        sandbox = MagicMock()
-        sandbox.open = MagicMock()
-        sandbox.open.aio = AsyncMock(side_effect=Exception("open failed"))
-
-        with (
-            patch("src.sandbox.manager.log") as mock_log,
-            patch("src.sandbox.manager.asyncio.sleep", new_callable=AsyncMock),
-        ):
-            await SandboxManager._write_tunnel_env_file(
-                sandbox, "sb-1", {3000: "https://tunnel-3000.example.com"}
-            )
-            await _drain_writes()
-
-        # Both attempts fail to open the file.
-        assert mock_log.warn.call_count == 2
-        assert mock_log.warn.call_args[0][0] == "tunnel.urls_write_failed"
-
-    @pytest.mark.asyncio
-    async def test_close_error_is_suppressed_and_does_not_mask_write_error(self):
-        """close() raising RuntimeError (e.g. at interpreter shutdown) is swallowed."""
-        sandbox, f = _mock_sandbox_with_open()
-        f.write.aio = AsyncMock(side_effect=Exception("write failed"))
-        f.close.aio = AsyncMock(
-            side_effect=RuntimeError("can't create new thread at interpreter shutdown")
-        )
-
-        with (
-            patch("src.sandbox.manager.log") as mock_log,
-            patch("src.sandbox.manager.asyncio.sleep", new_callable=AsyncMock),
-        ):
-            # Should not raise despite both write and close failing.
-            await SandboxManager._write_tunnel_env_file(
-                sandbox, "sb-1", {3000: "https://tunnel-3000.example.com"}
-            )
-            await _drain_writes()
-
-        # The write failure is logged; the close RuntimeError is swallowed.
+        # Both attempts fail to write; failures are logged, not raised.
+        assert write_text.await_count == 2
         assert mock_log.warn.call_count == 2
         assert mock_log.warn.call_args[0][0] == "tunnel.urls_write_failed"
 
@@ -328,7 +284,7 @@ class TestResolveAndSetupTunnelsWritesFile:
 
     @pytest.mark.asyncio
     async def test_writes_file_when_extra_urls_present(self):
-        sandbox, f = _mock_sandbox_with_open()
+        sandbox, write_text = _mock_sandbox_with_write_text()
         tunnel_urls = {3000: "https://tunnel-3000.example.com"}
 
         with (
@@ -351,13 +307,13 @@ class TestResolveAndSetupTunnelsWritesFile:
             )
             await _drain_writes()
 
-        sandbox.open.aio.assert_awaited_with(TUNNEL_ENV_FILE_PATH, "w")
-        written = f.write.aio.call_args[0][0]
+        written = write_text.call_args[0][0]
         assert "TUNNEL_3000=https://tunnel-3000.example.com" in written
+        write_text.assert_awaited_with(written, TUNNEL_ENV_FILE_PATH)
 
     @pytest.mark.asyncio
     async def test_does_not_write_file_when_no_extra_urls(self):
-        sandbox, _f = _mock_sandbox_with_open()
+        sandbox, write_text = _mock_sandbox_with_write_text()
 
         with patch.object(
             SandboxManager,
@@ -376,12 +332,12 @@ class TestResolveAndSetupTunnelsWritesFile:
             )
 
         assert extra is None
-        sandbox.open.aio.assert_not_called()
+        write_text.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_does_not_write_file_for_only_reserved_ports(self):
         """code-server / ttyd URLs aren't extras; no file is written when those are the only ones."""
-        sandbox, _f = _mock_sandbox_with_open()
+        sandbox, write_text = _mock_sandbox_with_write_text()
 
         with patch.object(
             SandboxManager,
@@ -399,13 +355,12 @@ class TestResolveAndSetupTunnelsWritesFile:
                 ttyd_proxy_port=TTYD_PROXY_PORT,
             )
 
-        sandbox.open.aio.assert_not_called()
+        write_text.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_write_failure_does_not_block_return(self):
-        sandbox = MagicMock()
-        sandbox.open = MagicMock()
-        sandbox.open.aio = AsyncMock(side_effect=Exception("boom"))
+        sandbox, write_text = _mock_sandbox_with_write_text()
+        write_text.side_effect = Exception("boom")
 
         with (
             patch.object(

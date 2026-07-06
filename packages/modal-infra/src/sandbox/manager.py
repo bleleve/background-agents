@@ -11,7 +11,6 @@ Updated: 2026-01-15 to fix Sandbox.create API
 """
 
 import asyncio
-import contextlib
 import json
 import os
 import secrets
@@ -459,10 +458,14 @@ class SandboxManager:
         content = "\n".join(lines) + "\n"
 
         async def _write_once(attempt: int) -> None:
-            f = None
             try:
-                f = await sandbox.open.aio(TUNNEL_ENV_FILE_PATH, "w")
-                await f.write.aio(content)
+                # `Sandbox.filesystem.write_text()` replaces the deprecated
+                # `Sandbox.open()` + `FileIO.write()`/`close()` sequence: it
+                # writes the whole file in a single call, so there is no
+                # handle left dangling to close (and no "can't create new
+                # thread at interpreter shutdown" risk from a close() racing
+                # event-loop shutdown).
+                await sandbox.filesystem.write_text.aio(content, TUNNEL_ENV_FILE_PATH)
                 log.info(
                     "tunnel.urls_written",
                     sandbox_id=sandbox_id,
@@ -478,13 +481,6 @@ class SandboxManager:
                     exc=e,
                     attempt=attempt,
                 )
-            finally:
-                if f is not None:
-                    with contextlib.suppress(Exception):
-                        # Suppress close errors (e.g. RuntimeError: can't create
-                        # new thread at interpreter shutdown) so they don't mask
-                        # the original write failure or crash the event loop.
-                        await f.close.aio()
 
         await _write_once(1)
         await asyncio.sleep(5)
