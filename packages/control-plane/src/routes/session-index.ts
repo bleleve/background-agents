@@ -1,4 +1,4 @@
-import { type SessionStatus } from "@open-inspect/shared";
+import { TERMINAL_SESSION_STATUSES, type SessionStatus } from "@open-inspect/shared";
 import { SessionIndexStore } from "../db/session-index";
 import {
   error,
@@ -77,12 +77,6 @@ async function handleListSessions(
 // updated. Terminal sessions would enqueue a prompt that never runs; a stale
 // non-terminal session (e.g. wedged) is treated as dead so callers start fresh.
 const REQUEST_SESSION_ACTIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
-const TERMINAL_STATUSES: ReadonlySet<SessionStatus> = new Set<SessionStatus>([
-  "completed",
-  "failed",
-  "archived",
-  "cancelled",
-]);
 
 /**
  * Whether a session can still absorb a coalesced prompt: it exists, is
@@ -95,7 +89,7 @@ export function isSessionActiveForCoalescing(
 ): boolean {
   if (!session) return false;
   return (
-    !TERMINAL_STATUSES.has(session.status) &&
+    !TERMINAL_SESSION_STATUSES.includes(session.status) &&
     nowMs - session.updatedAt <= REQUEST_SESSION_ACTIVE_WINDOW_MS
   );
 }

@@ -1039,6 +1039,90 @@ describe("handleIssueComment", () => {
     expect(urls).toContain("https://internal/sessions");
   });
 
+  it("creates a fresh session when the liveness check returns a non-200 (fails safe)", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-x");
+    const cpFetch = getControlPlaneFetch(env);
+    cpFetch.mockImplementation((url: string) => {
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        return Promise.resolve(new Response("upstream error", { status: 500 }));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-live-500");
+
+    // Liveness unavailable → we can't confirm the session is safe, so create fresh.
+    expect(result).toMatchObject({ session_id: "session-123", handler_action: "comment" });
+    expect(cpFetch.mock.calls.map((c) => c[0] as string)).toContain("https://internal/sessions");
+  });
+
+  it("creates a fresh session when the liveness fetch throws (fails safe)", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-x");
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        return Promise.reject(new Error("network down"));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-live-throw");
+
+    expect(result).toMatchObject({ session_id: "session-123", handler_action: "comment" });
+    expect(log.warn).toHaveBeenCalledWith("request_session.liveness_error", expect.anything());
+  });
+
+  it("still coalesces (and warns) when the coalesced-reply comment fails to post", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-live");
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        return Promise.resolve(new Response(JSON.stringify({ active: true }), { status: 200 }));
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-coalesced" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+    // Best-effort reply fails to post — must not break the (successful) coalesce.
+    vi.mocked(createIssueComment).mockResolvedValue(null);
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-reply-fail");
+
+    expect(result).toMatchObject({ session_id: "sess-live", handler_action: "comment_coalesced" });
+    expect(createIssueComment).toHaveBeenCalledTimes(1);
+    expect(log.warn).toHaveBeenCalledWith(
+      "request_session.coalesced_reply_failed",
+      expect.anything()
+    );
+  });
+
   it("treats @mention of app slug without [bot] as a bot mention", async () => {
     const env = createMockEnv();
     const log = createMockLogger();

@@ -51,10 +51,14 @@ Key design decisions:
 - **Unidirectional service binding**: The bot calls the control plane to create sessions and send
   prompts. There is no reverse binding — the agent posts results to GitHub directly from the
   sandbox.
-- **Fresh session by default, reuse on re-trigger**: A non-duplicate webhook normally creates a new
-  session (delivery dedupe via KV `X-GitHub-Delivery`). The exception is re-triggering a review —
-  the `reef: ask for review` label and the web "Re-run review" button re-run in the PR's existing
-  review session (mapped in KV `review-session:<repo>:<pr>`).
+- **One request session per PR, reuse on re-trigger**: `@mention` change requests on a PR —
+  top-level comments and inline review comments alike — coalesce into a single "request" session so
+  concurrent requests queue on one working tree instead of racing to push the branch. The bot
+  remembers it in KV (`request-session:<repo>:<pr>`) and confirms it is still live via the control
+  plane (`GET /sessions/:id/liveness`) before folding a new request in, else creates a fresh
+  session. Reviews are separate: the `reef: ask for review` label and the web "Re-run review" button
+  re-run in the PR's existing review session (KV `review-session:<repo>:<pr>`). Delivery dedupe uses
+  KV `X-GitHub-Delivery`.
 - **Minimal PR context fetching**: The bot pre-fetches the PR diff and inlines it into the prompt
   for diffs below the large-diff threshold, so the agent reviews it directly without running
   `gh pr diff` (larger diffs fall back to the agent fetching them itself). Beyond the diff, the
@@ -209,7 +213,8 @@ people to request the GitHub App bot through the PR reviewer picker.
 1. Check `issue.pull_request` exists — ignore non-PR comments
 2. Check comment body contains `@{GITHUB_BOT_USERNAME}` — ignore if no mention
 3. Check `sender.login !== GITHUB_BOT_USERNAME` — prevent loops
-4. Strip @mention, post eyes reaction, create session, send comment action prompt
+4. Strip @mention, post eyes reaction; coalesce into the PR's live request session if one exists
+   (else create a fresh one and remember it in KV), send the comment-action prompt
 
 **Review Comment:** Same as issue comment, but the prompt additionally includes `filePath`,
 `diffHunk`, and `commentId` for thread-specific context and reply threading.
