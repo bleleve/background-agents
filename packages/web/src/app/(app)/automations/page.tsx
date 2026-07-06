@@ -21,26 +21,33 @@ import {
 } from "@/components/ui/select";
 import { SidebarIcon, PlusIcon } from "@/components/ui/icons";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
+import { type AutomationStatusFilter, filterAutomationsList } from "@/lib/automation-status";
 
 export default function AutomationsPage() {
   const { isOpen, toggle, creatorFilter } = useSidebarContext();
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<AutomationStatusFilter>("all");
   const [sortBy, setSortBy] = useState<AutomationListSortBy>("created_at");
   const [sortOrder, setSortOrder] = useState<AutomationListSortOrder>("desc");
   const { automations, loading, mutate } = useAutomations({ sortBy, sortOrder });
 
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const filteredAutomations = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return automations;
-    return automations.filter((automation) => automation.name.toLowerCase().includes(query));
-  }, [automations, searchQuery]);
+  const filteredAutomations = useMemo(
+    () => filterAutomationsList(automations, { searchQuery, statusFilter }),
+    [automations, searchQuery, statusFilter]
+  );
 
   const { emptyMessage, emptyDescription } = useMemo(() => {
     if (searchQuery.trim()) {
       return {
         emptyMessage: "No automations match your search.",
+        emptyDescription: "",
+      };
+    }
+    if (statusFilter !== "all") {
+      return {
+        emptyMessage: "No automations match this status filter.",
         emptyDescription: "",
       };
     }
@@ -54,7 +61,7 @@ export default function AutomationsPage() {
       emptyMessage: undefined,
       emptyDescription: "Create one to run tasks on a schedule or in response to events.",
     };
-  }, [searchQuery, creatorFilter]);
+  }, [searchQuery, statusFilter, creatorFilter]);
 
   const handleAction = async (id: string, action: "pause" | "resume" | "trigger" | "delete") => {
     setActionError(null);
@@ -129,6 +136,24 @@ export default function AutomationsPage() {
               className="flex-1"
             />
             <div className="flex gap-2">
+              <Select
+                value={statusFilter}
+                onValueChange={(value) => setStatusFilter(value as AutomationStatusFilter)}
+              >
+                <SelectTrigger
+                  density="compact"
+                  className="w-[140px]"
+                  aria-label="Filter by status"
+                >
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="enabled">Enabled</SelectItem>
+                  <SelectItem value="paused">Paused</SelectItem>
+                  <SelectItem value="degraded">Degraded</SelectItem>
+                </SelectContent>
+              </Select>
               <Select
                 value={sortBy}
                 onValueChange={(value) => setSortBy(value as AutomationListSortBy)}
