@@ -1089,11 +1089,16 @@ function SessionContent({
                     <span className="truncate">{file.name}</span>
                     <button
                       type="button"
+                      // Disabled mid-upload: the upload loop iterates a snapshot
+                      // of queuedFiles, so a removal here wouldn't stop the
+                      // upload and a later failure would re-queue the file,
+                      // silently undoing the user's removal.
+                      disabled={uploadingFiles}
                       onClick={() => {
                         setUploadError(null);
                         setQueuedFiles((prev) => prev.filter((_, i) => i !== idx));
                       }}
-                      className="text-secondary-foreground hover:text-destructive flex-shrink-0 transition"
+                      className="text-secondary-foreground hover:text-destructive flex-shrink-0 transition disabled:opacity-30 disabled:cursor-not-allowed"
                       aria-label={`Remove ${file.name}`}
                     >
                       <XIcon className="w-3 h-3" />
