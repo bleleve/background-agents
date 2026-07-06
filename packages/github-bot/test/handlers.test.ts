@@ -21,6 +21,7 @@ vi.mock("../src/github-auth", () => ({
   dismissPullRequestReview: vi.fn().mockResolvedValue(true),
   approvePullRequest: vi.fn().mockResolvedValue(true),
   createIssueComment: vi.fn().mockResolvedValue(1),
+  createReviewCommentReply: vi.fn().mockResolvedValue(1),
 }));
 
 vi.mock("../src/utils/internal", () => ({
@@ -67,6 +68,7 @@ import {
   handleCheckSuiteCompleted,
   handlePullRequestReview,
   handleReviewRequestInternal,
+  quoteForReply,
 } from "../src/handlers";
 import {
   generateInstallationToken,
@@ -75,6 +77,7 @@ import {
   dismissPullRequestReview,
   approvePullRequest,
   createIssueComment,
+  createReviewCommentReply,
 } from "../src/github-auth";
 import { getGitHubConfig } from "../src/utils/integration-config";
 
@@ -245,6 +248,7 @@ beforeEach(() => {
   vi.mocked(dismissPullRequestReview).mockResolvedValue(true);
   vi.mocked(approvePullRequest).mockResolvedValue(true);
   vi.mocked(createIssueComment).mockResolvedValue(1);
+  vi.mocked(createReviewCommentReply).mockResolvedValue(1);
   vi.mocked(getGitHubConfig).mockResolvedValue({ ...defaultConfig });
   // Default PR-details fetch: small diff, so review handlers see largeDiff=false.
   // Includes head/base (and head.repo for fork detection) so handlers that resolve
@@ -1021,8 +1025,13 @@ describe("handleIssueComment", () => {
     const urls = cpFetch.mock.calls.map((c) => c[0] as string);
     expect(urls).not.toContain("https://internal/sessions");
     expect(urls.some((u) => /\/sessions\/sess-live\/prompt$/.test(u))).toBe(true);
-    // The human is told their request was folded in, not silently dropped.
+    // The human is told their request was folded in — the root ack quotes the
+    // original request and links the session, not a stray context-free note.
     expect(createIssueComment).toHaveBeenCalledTimes(1);
+    const ackBody = vi.mocked(createIssueComment).mock.calls[0][4] as string;
+    expect(ackBody).toContain("> ");
+    expect(ackBody).toContain("please fix the error handling");
+    expect(ackBody).toContain("/session/sess-live");
   });
 
   it("creates a fresh request session when the remembered one is no longer live", async () => {
@@ -1329,7 +1338,54 @@ describe("handleReviewComment", () => {
     });
     const urls = cpFetch.mock.calls.map((c) => c[0] as string);
     expect(urls).not.toContain("https://internal/sessions");
-    expect(createIssueComment).toHaveBeenCalledTimes(1);
+    // The ack lands in-thread on the triggering review comment, not at the PR root.
+    expect(createReviewCommentReply).toHaveBeenCalledWith(
+      "test-installation-token",
+      "acme",
+      "widgets",
+      expect.any(Number),
+      200,
+      expect.stringContaining("/session/sess-live"),
+      "Open-Inspect"
+    );
+    expect(createIssueComment).not.toHaveBeenCalled();
+  });
+
+  it("still coalesces (and warns) when the in-thread reply fails to post", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-live");
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        return Promise.resolve(new Response(JSON.stringify({ active: true }), { status: 200 }));
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-coalesced" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+    // In-thread reply fails — must not break the coalesce nor fall back to a
+    // top-level root comment.
+    vi.mocked(createReviewCommentReply).mockResolvedValue(null);
+
+    const result = await handleReviewComment(
+      env,
+      log,
+      reviewCommentPayload,
+      "trace-inline-reply-fail"
+    );
+
+    expect(result).toMatchObject({
+      session_id: "sess-live",
+      handler_action: "review_comment_coalesced",
+    });
+    expect(createIssueComment).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(
+      "request_session.coalesced_reply_failed",
+      expect.anything()
+    );
   });
 
   it("treats @mention of app slug without [bot] as a bot mention on review comments", async () => {
@@ -2919,5 +2975,34 @@ describe("handlePullRequestReview", () => {
     );
 
     expect(result).toEqual({ outcome: "skipped", skip_reason: "dismiss_failed" });
+  });
+});
+
+describe("quoteForReply", () => {
+  it("blockquotes each line of a short request", () => {
+    expect(quoteForReply("please fix this")).toBe("> please fix this");
+    expect(quoteForReply("line one\nline two")).toBe("> line one\n> line two");
+  });
+
+  it("returns an empty string for blank input", () => {
+    expect(quoteForReply("   ")).toBe("");
+    expect(quoteForReply("")).toBe("");
+  });
+
+  it("truncates long requests with an ellipsis", () => {
+    expect(quoteForReply("a".repeat(400))).toBe(`> ${"a".repeat(280)}…`);
+  });
+
+  it("truncates by code point, never splitting a surrogate pair", () => {
+    // slice(0, 280) by UTF-16 unit would cut the first emoji in half here (279
+    // ASCII chars put a surrogate pair astride index 280); code-point slicing
+    // keeps it whole.
+    const out = quoteForReply("a".repeat(279) + "😀😀😀");
+    expect(out.endsWith("…")).toBe(true);
+    // No lone high surrogate left dangling (no mojibake).
+    expect(out).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    // 280 code points kept: 279 "a" + one whole emoji.
+    const inner = out.slice(2, out.length - 1); // strip "> " and the trailing "…"
+    expect(Array.from(inner)).toHaveLength(280);
   });
 });

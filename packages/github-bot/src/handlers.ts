@@ -29,6 +29,7 @@ import {
   checkSenderPermission,
   dismissPullRequestReview,
   createIssueComment,
+  createReviewCommentReply,
   approvePullRequest,
 } from "./github-auth";
 import {
@@ -461,24 +462,81 @@ async function resolveRequestSession(
 }
 
 /**
- * Best-effort reply telling the human their request was folded into the
- * already-running session for this PR (rather than silently starting nothing new
- * or racing a second session). Posts a top-level PR comment — works for both
- * top-level and inline triggers.
+ * Blockquote an original request for a root acknowledgment, so the ack is tied to
+ * what it answers. Truncates long bodies. A mention inside a blockquote can't
+ * re-trigger the bot (the mention gate strips blockquotes, and the bot ignores
+ * its own comments). Returns "" for an empty request.
  */
-async function postRequestCoalescedReply(
+export function quoteForReply(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  // Slice by code point, not UTF-16 code unit, so truncation never splits a
+  // surrogate pair (emoji, astral chars) into a broken character.
+  const codePoints = Array.from(trimmed);
+  const clipped = codePoints.length > 280 ? `${codePoints.slice(0, 280).join("")}…` : trimmed;
+  return clipped
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
+
+/**
+ * Best-effort in-thread ack that an inline @mention request was folded into the
+ * PR's already-running request session. Anchored to the triggering comment so it
+ * lands on the finding, not the PR root. On failure we only log: the 👀 reaction
+ * already signalled "received" and the session replies in-thread later, so a
+ * top-level fallback would just re-introduce the root-stacked notes we removed.
+ */
+async function postInlineCoalescedReply(
   log: Logger,
   ghToken: string,
   owner: string,
   repoName: string,
   prNumber: number,
+  commentId: number,
   sessionUrl: string,
   userAgent: string,
   meta: Record<string, unknown>
 ): Promise<void> {
   const body =
-    `Reef is already working on a request for this PR. I've queued this one into that ` +
-    `session so it runs in order on the same branch instead of racing it — follow along: ${sessionUrl}`;
+    `Queued behind Reef's in-flight request on this PR — I'll handle it on the same ` +
+    `branch, in order. Follow along: ${sessionUrl}`;
+  const id = await createReviewCommentReply(
+    ghToken,
+    owner,
+    repoName,
+    prNumber,
+    commentId,
+    body,
+    userAgent
+  );
+  if (id === null) {
+    log.warn("request_session.coalesced_reply_failed", { ...meta });
+  }
+}
+
+/**
+ * Best-effort top-level ack that a root @mention request was folded into the PR's
+ * running request session. Root PR comments have no thread, so we quote the
+ * original request to tie the note to its origin instead of stacking identical
+ * context-free notes.
+ */
+async function postRootCoalescedReply(
+  log: Logger,
+  ghToken: string,
+  owner: string,
+  repoName: string,
+  prNumber: number,
+  requestText: string,
+  sessionUrl: string,
+  userAgent: string,
+  meta: Record<string, unknown>
+): Promise<void> {
+  const quote = quoteForReply(requestText);
+  const note =
+    `Queued into Reef's in-flight session for this PR — I'll pick this up in order ` +
+    `(same branch, no race). Follow along: ${sessionUrl}`;
+  const body = quote ? `${quote}\n\n${note}` : note;
   const id = await createIssueComment(ghToken, owner, repoName, prNumber, body, userAgent);
   if (id === null) {
     log.warn("request_session.coalesced_reply_failed", { ...meta });
@@ -2067,12 +2125,13 @@ export async function handleIssueComment(
   });
 
   if (coalesced) {
-    await postRequestCoalescedReply(
+    await postRootCoalescedReply(
       log,
       ghToken,
       owner,
       repoName,
       issue.number,
+      commentBody,
       sessionUrl,
       resolveAppName(env),
       meta
@@ -2243,12 +2302,13 @@ export async function handleReviewComment(
   });
 
   if (coalesced) {
-    await postRequestCoalescedReply(
+    await postInlineCoalescedReply(
       log,
       ghToken,
       owner,
       repoName,
       pr.number,
+      comment.id,
       sessionUrl,
       resolveAppName(env),
       meta

@@ -217,7 +217,11 @@ people to request the GitHub App bot through the PR reviewer picker.
    (else create a fresh one and remember it in KV), send the comment-action prompt
 
 **Review Comment:** Same as issue comment, but the prompt additionally includes `filePath`,
-`diffHunk`, and `commentId` for thread-specific context and reply threading.
+`diffHunk`, and `commentId` for thread-specific context and reply threading. The coalesced-request
+acknowledgment also differs by trigger: an inline review comment gets an **in-thread reply**
+anchored to the triggering comment (via `createReviewCommentReply`), whereas a root issue comment
+gets a top-level comment that **quotes the original request** (root comments have no thread to
+anchor to).
 
 ## Authentication
 
