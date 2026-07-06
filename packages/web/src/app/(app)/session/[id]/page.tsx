@@ -356,6 +356,7 @@ function SessionPageContent() {
   // File upload queue state
   const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
   const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { enabledModels, enabledModelOptions, defaultModel, defaultPlanModel } = useEnabledModels();
@@ -421,7 +422,10 @@ function SessionPageContent() {
     const hasPrompt = prompt.trim().length > 0;
     if ((!hasPrompt && queuedFiles.length === 0) || isProcessing) return;
 
+    setUploadError(null);
+
     const uploadedFiles: { artifactId: string; fileName: string }[] = [];
+    const failedFiles: File[] = [];
 
     if (queuedFiles.length > 0) {
       setUploadingFiles(true);
@@ -439,16 +443,30 @@ function SessionPageContent() {
             uploadedFiles.push({ artifactId: data.artifactId, fileName: data.fileName });
           } else {
             console.error(`Failed to upload file: ${file.name}`);
+            failedFiles.push(file);
           }
         } catch (error) {
           console.error(`Error uploading file: ${file.name}`, error);
+          failedFiles.push(file);
         }
       }
 
       setUploadingFiles(false);
-      setQueuedFiles([]);
+      // Keep any files that failed to upload queued so the user can retry —
+      // only drop the ones that succeeded. Clearing unconditionally here would
+      // make failed files vanish silently with no way to resend them.
+      setQueuedFiles(failedFiles);
+
+      if (failedFiles.length > 0) {
+        const names = failedFiles.map((f) => f.name).join(", ");
+        setUploadError(
+          `Couldn't upload ${failedFiles.length} file${failedFiles.length > 1 ? "s" : ""} (${names}). Still queued — try again.`
+        );
+      }
     }
 
+    // Nothing left to send: no text prompt and no file made it through. The
+    // failed files stay queued and the error above tells the user why.
     if (!hasPrompt && uploadedFiles.length === 0) return;
 
     // Append uploaded file context to the prompt so the agent can use download_file
@@ -528,6 +546,8 @@ function SessionPageContent() {
       queuedFiles={queuedFiles}
       setQueuedFiles={setQueuedFiles}
       uploadingFiles={uploadingFiles}
+      uploadError={uploadError}
+      setUploadError={setUploadError}
       fileInputRef={fileInputRef}
     />
   );
@@ -572,6 +592,8 @@ function SessionContent({
   queuedFiles,
   setQueuedFiles,
   uploadingFiles,
+  uploadError,
+  setUploadError,
   fileInputRef,
 }: {
   sessionState: SessionState;
@@ -612,6 +634,8 @@ function SessionContent({
   queuedFiles: File[];
   setQueuedFiles: React.Dispatch<React.SetStateAction<File[]>>;
   uploadingFiles: boolean;
+  uploadError: string | null;
+  setUploadError: React.Dispatch<React.SetStateAction<string | null>>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
 }) {
   const isBelowLg = useMediaQuery("(max-width: 1023px)");
@@ -1065,7 +1089,10 @@ function SessionContent({
                     <span className="truncate">{file.name}</span>
                     <button
                       type="button"
-                      onClick={() => setQueuedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                      onClick={() => {
+                        setUploadError(null);
+                        setQueuedFiles((prev) => prev.filter((_, i) => i !== idx));
+                      }}
                       className="text-secondary-foreground hover:text-destructive flex-shrink-0 transition"
                       aria-label={`Remove ${file.name}`}
                     >
@@ -1073,6 +1100,13 @@ function SessionContent({
                     </button>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Upload error — surfaced so failed files aren't lost silently */}
+            {uploadError && (
+              <div className="px-4 pt-3 text-xs text-destructive" role="alert">
+                {uploadError}
               </div>
             )}
 
@@ -1106,6 +1140,7 @@ function SessionContent({
                 onChange={(e) => {
                   const files = Array.from(e.target.files ?? []);
                   if (files.length > 0) {
+                    setUploadError(null);
                     setQueuedFiles((prev) => [...prev, ...files]);
                   }
                   // Reset so the same file can be re-selected
