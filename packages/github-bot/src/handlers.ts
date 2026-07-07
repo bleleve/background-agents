@@ -2051,6 +2051,7 @@ export async function handleIssueComment(
   // models. Label overrides (`plan`, `plan-<alias>`, `model-/build-<alias>`) are
   // applied inside routeMention.
   const issueLabels: GitHubLabel[] = issue.labels ?? [];
+  const meta = { trace_id: traceId, repo: repoFullName, pull_number: issue.number };
   const decision = await routeMention({
     commentBody: rawCommentBody,
     isInline: false,
@@ -2060,6 +2061,8 @@ export async function handleIssueComment(
       const d = await fetchModelDefaults(env);
       return { defaultPlanModel: d.defaultPlanModel, routingModel: d.defaultRoutingModel };
     },
+    log,
+    meta,
   });
   const commentBody = rawCommentBody;
 
@@ -2075,7 +2078,6 @@ export async function handleIssueComment(
     });
   }
 
-  const meta = { trace_id: traceId, repo: repoFullName, pull_number: issue.number };
   fireAndForgetReaction(
     log,
     ghToken,
@@ -2314,6 +2316,7 @@ export async function handleReviewComment(
 
   const commentBody = stripMentions(comment.body, getTriggerMentions(env));
 
+  const meta = { trace_id: traceId, repo: repoFullName, pull_number: pr.number };
   const decision = await routeMention({
     commentBody,
     isInline: true,
@@ -2323,9 +2326,10 @@ export async function handleReviewComment(
       const d = await fetchModelDefaults(env);
       return { defaultPlanModel: d.defaultPlanModel, routingModel: d.defaultRoutingModel };
     },
+    log,
+    meta,
   });
 
-  const meta = { trace_id: traceId, repo: repoFullName, pull_number: pr.number };
   fireAndForgetReaction(
     log,
     ghToken,
