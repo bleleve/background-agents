@@ -42,13 +42,13 @@ import {
 import { getGitHubConfig, type ResolvedGitHubConfig } from "./utils/integration-config";
 import { routeMention, guardEffort } from "./routing/mention-router";
 import {
-  extractReviewModelFromLabels,
   hasLowRiskLabel,
   isAskForReviewLabel,
   isPreviewLabel,
   isVisualQaApprovalLabel,
   isVisualQaSkipLabel,
   LOW_RISK_LABEL,
+  resolveReviewModel,
   VISUAL_QA_PASS_LABEL,
   VISUAL_QA_SKIP_LABEL,
   type GitHubLabel,
@@ -120,6 +120,20 @@ async function getAuthHeaders(env: Env, traceId: string): Promise<Record<string,
   return {
     "Content-Type": "application/json",
     ...(await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET, traceId)),
+  };
+}
+
+/**
+ * Builds the lazy `resolveDefaults` closure `routeMention` expects — fetches
+ * deployment-level model defaults only when the routing decision actually
+ * needs them (see `MentionRoutingContext.resolveDefaults` doc comment).
+ */
+function makeModelDefaultsResolver(
+  env: Env
+): () => Promise<{ defaultPlanModel: string; routingModel: string }> {
+  return async () => {
+    const d = await fetchModelDefaults(env);
+    return { defaultPlanModel: d.defaultPlanModel, routingModel: d.defaultRoutingModel };
   };
 }
 
@@ -1137,10 +1151,8 @@ export async function handleReviewRequested(
     meta
   );
 
-  // Review model precedence: `review-<alias>` PR label → repo `reviewModel` →
-  // general `model`. Must be applied before the PR is opened or the request fires.
-  const reviewModel =
-    extractReviewModelFromLabels(pr.labels ?? []) ?? config.reviewModel ?? config.model;
+  // Must be applied before the PR is opened or the request fires.
+  const reviewModel = resolveReviewModel(pr.labels ?? [], config);
 
   return runCodeReview(env, log, ghToken, headers, {
     owner,
@@ -1253,7 +1265,7 @@ export async function handlePullRequestOpened(
   // with the default model. Label overrides and config are ignored for self-PRs.
   const autoReviewModel = isBotPr
     ? "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code"
-    : (extractReviewModelFromLabels(pr.labels ?? []) ?? config.reviewModel ?? config.model);
+    : resolveReviewModel(pr.labels ?? [], config);
 
   return runCodeReview(env, log, ghToken, headers, {
     owner,
@@ -1449,8 +1461,7 @@ export async function handlePullRequestLabeled(
     meta
   );
 
-  const reviewModel =
-    extractReviewModelFromLabels(pr.labels ?? []) ?? config.reviewModel ?? config.model;
+  const reviewModel = resolveReviewModel(pr.labels ?? [], config);
   // Re-run in the PR's existing review session when we have one, so a re-review
   // stays in the same thread instead of spawning a new session.
   const existingSessionId = await lookupReviewSession(env, repoFullName, pr.number);
@@ -1743,7 +1754,9 @@ export async function handleReviewRequestInternal(
   }
 
   // Precedence: explicit request model (e.g. web re-run picker) → repo
-  // `reviewModel` → general `model`.
+  // `reviewModel` → general `model`. Deliberately NOT resolveReviewModel
+  // (label-resolution.ts): here the caller-supplied model must win over any
+  // `review-<alias>` label, since the human explicitly picked it in the UI.
   const reviewModel = req.model ?? config.reviewModel ?? config.model;
   const result = await runCodeReview(env, log, ghToken, headers, {
     owner,
@@ -2056,10 +2069,7 @@ export async function handleIssueComment(
     isInline: false,
     labels: issueLabels,
     config,
-    resolveDefaults: async () => {
-      const d = await fetchModelDefaults(env);
-      return { defaultPlanModel: d.defaultPlanModel, routingModel: d.defaultRoutingModel };
-    },
+    resolveDefaults: makeModelDefaultsResolver(env),
   });
   const commentBody = rawCommentBody;
 
@@ -2319,10 +2329,7 @@ export async function handleReviewComment(
     isInline: true,
     labels: pr.labels ?? [],
     config,
-    resolveDefaults: async () => {
-      const d = await fetchModelDefaults(env);
-      return { defaultPlanModel: d.defaultPlanModel, routingModel: d.defaultRoutingModel };
-    },
+    resolveDefaults: makeModelDefaultsResolver(env),
   });
 
   const meta = { trace_id: traceId, repo: repoFullName, pull_number: pr.number };

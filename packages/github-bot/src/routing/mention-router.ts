@@ -18,8 +18,8 @@ import { isValidReasoningEffort } from "@open-inspect/shared";
 import {
   extractModelFromLabels,
   extractPlanModelFromLabels,
-  extractReviewModelFromLabels,
   hasPlanLabel,
+  resolveReviewModel,
   type GitHubLabel,
 } from "../label-resolution";
 import type { ResolvedGitHubConfig } from "../utils/integration-config";
@@ -123,10 +123,9 @@ export function guardEffort(model: string, config: ResolvedGitHubConfig): string
  */
 export async function routeMention(ctx: MentionRoutingContext): Promise<RoutingDecision> {
   if (isReviewCommand(ctx.commentBody)) {
-    // Review lane precedence: `review-<alias>` label → repo reviewModel → model
-    // (mirrors the dedicated review sites).
-    const model =
-      extractReviewModelFromLabels(ctx.labels) ?? ctx.config.reviewModel ?? ctx.config.model;
+    // Review lane precedence mirrors the dedicated review sites — see
+    // resolveReviewModel's doc comment for the ladder.
+    const model = resolveReviewModel(ctx.labels, ctx.config);
     return {
       target: "review",
       model,

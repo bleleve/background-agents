@@ -16,6 +16,7 @@
  */
 
 import { MODEL_ALIAS_MAP } from "@open-inspect/shared";
+import type { ResolvedGitHubConfig } from "./utils/integration-config";
 
 export interface GitHubLabel {
   name: string;
@@ -97,6 +98,19 @@ export function extractPlanModelFromLabels(labels: GitHubLabel[]): string | null
 
 export function extractReviewModelFromLabels(labels: GitHubLabel[]): string | null {
   return extractByPrefix(labels, "review");
+}
+
+/**
+ * Review-model precedence: `review-<alias>` label → repo `reviewModel` →
+ * general `model`. Shared by every review-triggering site (PR opened,
+ * `reef: ask for review` label, review-requested webhook, and the @mention
+ * router's review lane) so the ladder is defined exactly once. NOT used by
+ * the web "re-run review" path — see the comment at that call site for why
+ * its precedence is deliberately different (the explicit re-run picker wins
+ * over the label).
+ */
+export function resolveReviewModel(labels: GitHubLabel[], config: ResolvedGitHubConfig): string {
+  return extractReviewModelFromLabels(labels) ?? config.reviewModel ?? config.model;
 }
 
 function extractByPrefix(labels: GitHubLabel[], prefix: string): string | null {
