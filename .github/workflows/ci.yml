@@ -328,6 +328,13 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      # Needed by the codex-auth-plugin behavioral test, which runs the ESM
+      # plugin hook through node (tests/codex_plugin_behavior.mjs).
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

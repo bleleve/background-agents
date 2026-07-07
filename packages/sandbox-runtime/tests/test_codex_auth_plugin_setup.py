@@ -1,8 +1,12 @@
 """Tests for codex auth proxy plugin deployment in SandboxSupervisor."""
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from sandbox_runtime.entrypoint import SandboxSupervisor
 
@@ -77,6 +81,26 @@ class TestCodexModelRegistration:
         # to a cloned template when the id is absent from the catalog.
         src = _plugin_source()
         assert "catalog[id] || (spec.codex ? codexTemplate : chatTemplate)" in src
+
+    def test_provider_models_hook_behavior(self):
+        # Behavioral coverage (not a substring check): run the real hook via
+        # node and assert template selection (codex vs. chat sibling), the
+        # keep-vs-inject branch, identity/cost/limit overrides, and non-oauth
+        # passthrough. See tests/codex_plugin_behavior.mjs.
+        node = shutil.which("node")
+        if node is None:  # pragma: no cover - node is present on CI
+            pytest.skip("node runtime not available")
+        harness = Path(__file__).parent / "codex_plugin_behavior.mjs"
+        result = subprocess.run(
+            [node, str(harness)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, (
+            "codex plugin behavior harness failed:\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
 
     def test_loader_does_not_register_models(self):
         src = _plugin_source()
