@@ -1090,8 +1090,9 @@ function SessionContent({
               <p className="font-medium text-foreground">Read-only review session</p>
               <p className="mt-1 text-muted-foreground">
                 Reef posts its review as a verdict on the pull request — this session doesn&apos;t
-                take follow-up replies. To run another pass, re-run the review from the PR or
-                mention <code>@reef</code> there.
+                take follow-up replies. To run another pass, use the “Re-run review” button above,
+                add the <code>reef: ask for review</code> label, or mention <code>@reef</code> on
+                the PR.
               </p>
             </div>
           ) : (
