@@ -82,7 +82,10 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v103: include the download_file sandbox-runtime tool in rebuilt base images.
 # v104: reef-verdict skill passes the body inline (no /tmp round-trip) so the agent
 #       stops sending `$(cat …)` as the tool arg (megalith#1314).
-CACHE_BUSTER = "v104-verdict-inline-body"
+# v105: codex-auth-plugin registers the Codex model catalog via the `provider.models`
+#       hook — opencode 1.17.x ignores model mutations made in `auth.loader`, so every
+#       `openai/*` model failed to resolve after the 1.17.13 bump (#325).
+CACHE_BUSTER = "v105-codex-models-provider-hook"
 
 # Base image with all development tools
 base_image = (
