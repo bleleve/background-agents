@@ -223,15 +223,23 @@ people to request the GitHub App bot through the PR reviewer picker.
 1. Check `issue.pull_request` exists — ignore non-PR comments
 2. Check comment body contains `@{GITHUB_BOT_USERNAME}` — ignore if no mention
 3. Check `sender.login !== GITHUB_BOT_USERNAME` — prevent loops
-4. Strip @mention, post eyes reaction; coalesce into the PR's live request session if one exists
-   (else create a fresh one and remember it in KV), send the comment-action prompt
+4. Strip @mention, post eyes reaction, and call `routeMention` to decide the lane:
+   - **Review** — the comment reads as an explicit review command (`review this`, `PTAL`,
+     `re-review`; matched by `isReviewCommand`). Route to the PR's dedicated review session (reuse
+     the one stored under `review-session:<repo>:<pr>` in KV, or create one) with
+     `actionLabel: "mention_review"`, using the review model and skipping the change-request working
+     tree.
+   - **Change request** (everything else) — coalesce into the PR's live request session if one
+     exists (else create a fresh one and remember it in KV), send the comment-action prompt. Mode
+     (plan/direct) and models come from the router, with label overrides (`plan`, `plan-<alias>`,
+     `model-/build-<alias>`) applied inside `routeMention`.
 
-**Review Comment:** Same as issue comment, but the prompt additionally includes `filePath`,
-`diffHunk`, and `commentId` for thread-specific context and reply threading. The coalesced-request
-acknowledgment also differs by trigger: an inline review comment gets an **in-thread reply**
-anchored to the triggering comment (via `createReviewCommentReply`), whereas a root issue comment
-gets a top-level comment that **quotes the original request** (root comments have no thread to
-anchor to).
+**Review Comment:** Same as issue comment, including the `routeMention` review/change-request split,
+but the change-request prompt additionally includes `filePath`, `diffHunk`, and `commentId` for
+thread-specific context and reply threading. The coalesced-request acknowledgment also differs by
+trigger: an inline review comment gets an **in-thread reply** anchored to the triggering comment
+(via `createReviewCommentReply`), whereas a root issue comment gets a top-level comment that
+**quotes the original request** (root comments have no thread to anchor to).
 
 ## Authentication
 
