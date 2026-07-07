@@ -89,7 +89,10 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 #       shape) instead of only filtering — opencode's built-in codex plugin strips
 #       everything <= gpt-5.4 before our hook runs, so a filter-only hook left
 #       gpt-5.2/5.2-codex/5.3-codex unresolvable.
-CACHE_BUSTER = "v106-codex-models-inject"
+# v107: pr-doc-sentinel gains a "trace the doc value to its real source" discipline and
+#       the re-review reconciles with maintainer rebuttals (github-bot prompt); the
+#       bundled sentinel change requires an image rebuild.
+CACHE_BUSTER = "v107-doc-sentinel-source-trace"
 
 # Base image with all development tools
 base_image = (
