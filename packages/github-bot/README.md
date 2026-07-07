@@ -182,10 +182,14 @@ The resulting approval fires a `pull_request_review` event; the backstop (below)
 **Pull Request Opened (Auto-Review):**
 
 1. Check `pull_request.draft` — skip draft PRs
-2. Check `pull_request.user.login !== GITHUB_BOT_USERNAME` — prevent loops on bot-created PRs
-3. Post eyes reaction on the PR (fire-and-forget)
-4. Create session via control plane
-5. Send code review prompt (includes PR metadata + `gh` CLI instructions)
+2. Skip closed/merged PRs; apply repo-enablement, visibility, and the `autoReviewOnOpen` setting
+3. Apply caller gating — bot-authored PRs (`pull_request.user.login === GITHUB_BOT_USERNAME`) bypass
+   gating and mint the installation token directly, since the bot is not a repo collaborator and
+   would otherwise fail the permission check; all other senders go through the normal caller gating
+4. Post eyes reaction on the PR (fire-and-forget)
+5. Create session via control plane — bot-authored PRs always use `kimi-k2.7-code` to avoid infinite
+   review loops with the default model
+6. Send code review prompt (includes PR metadata + `gh` CLI instructions)
 
 **Review Requested (compatibility path):**
 
