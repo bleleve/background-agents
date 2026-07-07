@@ -79,6 +79,22 @@ describe("isReviewCommand", () => {
       expect(isReviewCommand(s)).toBe(false);
     }
   });
+
+  it("declines a compound review-and-write ask — the review lane can't act on the write half", () => {
+    for (const s of [
+      "review my changes and fix the tests",
+      "review this PR and then update the docs",
+      "please review and add a test",
+    ]) {
+      expect(isReviewCommand(s)).toBe(false);
+    }
+  });
+
+  it("still matches a plain review ask followed by non-write coordination", () => {
+    for (const s of ["review this and let me know", "review this PR and merge it"]) {
+      expect(isReviewCommand(s)).toBe(true);
+    }
+  });
 });
 
 describe("guardEffort", () => {
@@ -150,6 +166,14 @@ describe("routeMention — request lane", () => {
     expect(d.mode).toBe("direct");
     expect(d.model).toBe(baseConfig.model);
     expect(d.planModel).toBeUndefined();
+  });
+
+  it("falls through a compound review-and-fix ask to the request lane", async () => {
+    const d = await routeMention(ctx("review my changes and fix the tests"));
+    expect(d.target).toBe("request");
+    if (d.target !== "request") throw new Error("unreachable");
+    expect(d.mode).toBe("direct");
+    expect(d.model).toBe(baseConfig.model);
   });
 
   it("honors a model-/build-<alias> label for the build model", async () => {

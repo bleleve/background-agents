@@ -95,6 +95,19 @@ const REVIEW_STANDALONE =
 const REVIEW_IMPERATIVE =
   /^review(?:[^\w]*$|\s+(?:again|this|that|these|those|it|the|my|our|your|pr|everything|once|please|pls|now|when|thanks|thx)\b)/i;
 
+// A review command that also coordinates a write ask in the same breath (e.g.
+// "review my changes and fix the tests") can't be honored by the read-only
+// review lane — it only posts a verdict comment, so the write half would be
+// silently stranded (the triggerComment is folded into the review prompt so
+// the reviewer *sees* the ask, but has no way to act on it). Asymmetric cost
+// guides the bias: a false negative here just falls through to the request
+// lane, where the agent still judges review-only intent at runtime (see
+// prompts.ts); a false positive lands in a lane that literally cannot act on
+// the write part. So this guard is deliberately narrow (an explicit "and/then
+// <write verb>" coordination) rather than broad.
+const COMPOUND_WRITE_ASK =
+  /\b(?:and|then)\s+(?:fix|update|change|add|remove|rename|implement|refactor|delete)\b/i;
+
 /**
  * Whether an @mention comment reads as an explicit request to (re-)review the
  * PR. Leading-command style (like the plan approve/reject shortcut): the verb
@@ -104,7 +117,8 @@ const REVIEW_IMPERATIVE =
  */
 export function isReviewCommand(body: string): boolean {
   const stripped = body.trim().replace(LEADING_POLITENESS, "");
-  return REVIEW_STANDALONE.test(stripped) || REVIEW_IMPERATIVE.test(stripped);
+  if (!(REVIEW_STANDALONE.test(stripped) || REVIEW_IMPERATIVE.test(stripped))) return false;
+  return !COMPOUND_WRITE_ASK.test(stripped);
 }
 
 /**
