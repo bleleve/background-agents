@@ -185,6 +185,9 @@ export function ModelsSettings() {
           onChange={(v) => handleDefaultChange("routing", v)}
           groups={enabledGroups}
         />
+        <p className="text-xs text-muted-foreground mt-1">
+          Not active yet — reserved for the upcoming @mention model router.
+        </p>
       </div>
 
       <h2 className="text-xl font-semibold text-foreground mb-1">Enabled Models</h2>
