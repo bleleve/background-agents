@@ -263,6 +263,22 @@ describe("IntegrationSettingsStore", () => {
       ).rejects.toThrow(IntegrationSettingsValidationError);
     });
 
+    it("round-trips a valid defaults.reviewModel", async () => {
+      await store.setGlobal("github", {
+        defaults: { reviewModel: "anthropic/claude-opus-4-8" },
+      });
+      const result = await store.getGlobal("github");
+      expect(result?.defaults?.reviewModel).toBe("anthropic/claude-opus-4-8");
+    });
+
+    it("rejects an invalid defaults.reviewModel", async () => {
+      await expect(
+        store.setGlobal("github", {
+          defaults: { reviewModel: "not-a-real-model" },
+        })
+      ).rejects.toThrow(IntegrationSettingsValidationError);
+    });
+
     it("rejects enabledRepos with non-string elements", async () => {
       await expect(
         store.setGlobal("github", {

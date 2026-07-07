@@ -241,6 +241,8 @@ export function buildCodeReviewPrompt(params: {
   /** True when re-running in an existing session — the worktree may be stale. */
   resumed?: boolean;
   sessionUrl?: string;
+  /** Free-text ask from an @mention that routed to this review; folded into the prompt. */
+  triggerComment?: string;
 }): string {
   const {
     owner,
@@ -258,6 +260,7 @@ export function buildCodeReviewPrompt(params: {
     prDiff,
     resumed,
     sessionUrl,
+    triggerComment,
   } = params;
 
   const prTitleBlock = buildUntrustedUserContentBlock({
@@ -284,6 +287,20 @@ export function buildCodeReviewPrompt(params: {
     content: body ?? "_No description provided._",
     includeWarning: false,
   });
+
+  // When an @mention routed here (e.g. "@reef review the auth changes"), fold the
+  // commenter's ask into the prompt so the review honors their focus. It informs
+  // emphasis; it does not narrow the review's scope or override the workflow.
+  const reviewerRequestBlock = triggerComment
+    ? `\n\nA reviewer explicitly requested this review with the following message. Take their focus into account, but still review the whole diff:\n${buildUntrustedUserContentBlock(
+        {
+          source: "github_review_request",
+          author: "github",
+          content: triggerComment,
+          includeWarning: false,
+        }
+      )}`
+    : "";
 
   // You never APPROVE — approvals are handled automatically by the github-bot
   // from PR labels, not by the agent. The only formal verdicts available to you
@@ -352,7 +369,7 @@ ${SUGGESTION_QUALITY_BAR}
 
 ${buildInlineSuggestionWorkflow({ owner, repo, number })}
 
-${buildVerdictWorkflow({ owner, repo, number, sessionUrl })}
+${buildVerdictWorkflow({ owner, repo, number, sessionUrl })}${reviewerRequestBlock}
 ${buildCustomInstructionsSection(codeReviewInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
 }

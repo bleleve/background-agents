@@ -123,6 +123,7 @@ export interface Env {
   // library constant. Mirror DEFAULT_MODEL / DEFAULT_PLAN_MODEL on the bot workers.
   DEFAULT_MODEL?: string;
   DEFAULT_PLAN_MODEL?: string;
+  DEFAULT_ROUTING_MODEL?: string; // Model for the future @mention router (intent/complexity classification)
 
   // Logging
   LOG_LEVEL?: string; // "debug" | "info" | "warn" | "error" (default: "info")

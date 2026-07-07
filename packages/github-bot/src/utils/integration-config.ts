@@ -4,6 +4,8 @@ import { buildInternalAuthHeaders, fetchModelDefaults } from "@open-inspect/shar
 
 export interface ResolvedGitHubConfig {
   model: string;
+  /** Overrides `model` for review work; null = fall back to `model`. */
+  reviewModel: string | null;
   reasoningEffort: string | null;
   autoReviewOnOpen: boolean;
   autoApproveOnOpen: boolean;
@@ -15,6 +17,7 @@ export interface ResolvedGitHubConfig {
 }
 
 const FAIL_CLOSED: Omit<ResolvedGitHubConfig, "model"> = {
+  reviewModel: null,
   reasoningEffort: null,
   autoReviewOnOpen: false,
   autoApproveOnOpen: false,
@@ -62,6 +65,7 @@ export async function getGitHubConfig(
   const data = (await response.json()) as {
     config: {
       model: string | null;
+      reviewModel: string | null;
       reasoningEffort: string | null;
       autoReviewOnOpen: boolean;
       autoApproveOnOpen: boolean;
@@ -76,6 +80,7 @@ export async function getGitHubConfig(
   if (!data.config) {
     return {
       model: defaultModel,
+      reviewModel: null,
       reasoningEffort: null,
       autoReviewOnOpen: true,
       autoApproveOnOpen: false,
@@ -89,6 +94,7 @@ export async function getGitHubConfig(
 
   return {
     model: data.config.model ?? defaultModel,
+    reviewModel: data.config.reviewModel ?? null,
     reasoningEffort: data.config.reasoningEffort,
     autoReviewOnOpen: data.config.autoReviewOnOpen,
     autoApproveOnOpen: data.config.autoApproveOnOpen ?? false,

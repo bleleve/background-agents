@@ -22,6 +22,12 @@ export interface GitHubBotSettings {
   autoApproveOnOpen?: boolean;
   privateReposOnly?: boolean;
   model?: string;
+  /**
+   * Overrides `model` for review work only — automatic PR reviews and @mention
+   * review requests (e.g. "@reef ptal"). Change requests keep using `model`.
+   * When unset, review work falls back to `model`.
+   */
+  reviewModel?: string;
   reasoningEffort?: string;
   allowedTriggerUsers?: string[];
   codeReviewInstructions?: string;

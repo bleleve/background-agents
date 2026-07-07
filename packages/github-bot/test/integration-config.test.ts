@@ -42,6 +42,7 @@ describe("getGitHubConfig", () => {
           JSON.stringify({
             config: {
               model: "anthropic/claude-opus-4-6",
+              reviewModel: "anthropic/claude-opus-4-8",
               reasoningEffort: "high",
               autoReviewOnOpen: true,
               enabledRepos: null,
@@ -60,6 +61,7 @@ describe("getGitHubConfig", () => {
 
     expect(result).toEqual({
       model: "anthropic/claude-opus-4-6",
+      reviewModel: "anthropic/claude-opus-4-8",
       reasoningEffort: "high",
       autoReviewOnOpen: true,
       autoApproveOnOpen: false,
@@ -80,6 +82,7 @@ describe("getGitHubConfig", () => {
 
     expect(result).toEqual({
       model: "anthropic/claude-sonnet-4-6",
+      reviewModel: null,
       reasoningEffort: null,
       autoReviewOnOpen: false,
       autoApproveOnOpen: false,
@@ -108,6 +111,7 @@ describe("getGitHubConfig", () => {
 
     expect(result).toEqual({
       model: "anthropic/claude-sonnet-4-6",
+      reviewModel: null,
       reasoningEffort: null,
       autoReviewOnOpen: false,
       autoApproveOnOpen: false,
@@ -134,6 +138,7 @@ describe("getGitHubConfig", () => {
 
     expect(result).toEqual({
       model: "anthropic/claude-sonnet-4-6",
+      reviewModel: null,
       reasoningEffort: null,
       autoReviewOnOpen: false,
       autoApproveOnOpen: false,
@@ -155,6 +160,7 @@ describe("getGitHubConfig", () => {
 
     expect(result).toEqual({
       model: "anthropic/claude-sonnet-4-6",
+      reviewModel: null,
       reasoningEffort: null,
       autoReviewOnOpen: true,
       autoApproveOnOpen: false,

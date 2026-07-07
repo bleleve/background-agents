@@ -13,11 +13,13 @@
 
 import { buildInternalAuthHeaders } from "./auth";
 import type { ControlPlaneFetcher } from "./completion/extractor";
-import { DEFAULT_MODEL, DEFAULT_PLAN_MODEL } from "./models";
+import { DEFAULT_MODEL, DEFAULT_PLAN_MODEL, DEFAULT_ROUTING_MODEL } from "./models";
 
 export interface ModelDefaults {
   defaultModel: string;
   defaultPlanModel: string;
+  /** Model reserved for the future @mention router (intent/complexity classification). */
+  defaultRoutingModel: string;
 }
 
 export interface FetchModelDefaultsEnv {
@@ -25,22 +27,26 @@ export interface FetchModelDefaultsEnv {
   INTERNAL_CALLBACK_SECRET?: string;
   DEFAULT_MODEL?: string;
   DEFAULT_PLAN_MODEL?: string;
+  DEFAULT_ROUTING_MODEL?: string;
 }
 
 interface ModelPreferencesResponse {
   enabledModels?: string[];
   defaultModel?: string;
   defaultPlanModel?: string;
+  defaultRoutingModel?: string;
 }
 
 /**
- * Resolve the deployment's default + plan default models, with full fallback.
+ * Resolve the deployment's default + plan + routing default models, with full
+ * fallback.
  *
  * Fallback order: control-plane response > env var > shared library constant.
  * Network or non-2xx responses log nothing (caller decides) and fall through
  * to the env-var path, so bots stay functional during a CP outage.
  */
 export async function fetchModelDefaults(env: FetchModelDefaultsEnv): Promise<ModelDefaults> {
+  const routingFallback = env.DEFAULT_ROUTING_MODEL || DEFAULT_ROUTING_MODEL;
   try {
     const headers = await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET);
     const res = await env.CONTROL_PLANE.fetch("https://internal/model-preferences", {
@@ -53,6 +59,7 @@ export async function fetchModelDefaults(env: FetchModelDefaultsEnv): Promise<Mo
         return {
           defaultModel: data.defaultModel,
           defaultPlanModel: data.defaultPlanModel,
+          defaultRoutingModel: data.defaultRoutingModel || routingFallback,
         };
       }
     }
@@ -62,5 +69,6 @@ export async function fetchModelDefaults(env: FetchModelDefaultsEnv): Promise<Mo
   return {
     defaultModel: env.DEFAULT_MODEL || DEFAULT_MODEL,
     defaultPlanModel: env.DEFAULT_PLAN_MODEL || DEFAULT_PLAN_MODEL,
+    defaultRoutingModel: routingFallback,
   };
 }

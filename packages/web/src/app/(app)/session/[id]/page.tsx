@@ -1082,8 +1082,9 @@ function SessionContent({
             />
           )}
 
-          {/* Input container — hidden for read-only review sessions. */}
-          <div className={`border border-border bg-input${isReviewSession ? " hidden" : ""}`}>
+          {/* Input container. For read-only review sessions it stays visible but
+              disabled, with an explanatory placeholder, instead of being hidden. */}
+          <div className={`border border-border bg-input${isReviewSession ? " opacity-60" : ""}`}>
             {/* Queued files list */}
             {queuedFiles.length > 0 && (
               <div className="px-4 pt-3 flex flex-wrap gap-2">
@@ -1128,18 +1129,21 @@ function SessionContent({
                 value={prompt}
                 onChange={handleComposerChange}
                 onKeyDown={handleKeyDown}
+                disabled={isReviewSession}
                 placeholder={
-                  isPlanAwaiting
-                    ? "Amend the plan…"
-                    : isPlanLocked && isProcessing
-                      ? "Generating plan…"
-                      : isProcessing
-                        ? "Type your next message..."
-                        : isPlanLocked || planToggle
-                          ? "Describe what to plan"
-                          : "Ask or build anything"
+                  isReviewSession
+                    ? "Read-only review session — Reef posts a review verdict here and doesn't take replies."
+                    : isPlanAwaiting
+                      ? "Amend the plan…"
+                      : isPlanLocked && isProcessing
+                        ? "Generating plan…"
+                        : isProcessing
+                          ? "Type your next message..."
+                          : isPlanLocked || planToggle
+                            ? "Describe what to plan"
+                            : "Ask or build anything"
                 }
-                className="w-full resize-none bg-transparent px-4 pt-4 pb-12 focus:outline-none text-foreground placeholder:text-secondary-foreground"
+                className="w-full resize-none bg-transparent px-4 pt-4 pb-12 focus:outline-none text-foreground placeholder:text-secondary-foreground disabled:cursor-not-allowed"
                 rows={3}
               />
               {/* Hidden file input */}
@@ -1192,7 +1196,7 @@ function SessionContent({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={isProcessing || uploadingFiles}
+                  disabled={isProcessing || uploadingFiles || isReviewSession}
                   className="p-2 text-secondary-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition"
                   title="Attach file"
                   aria-label="Attach file"
@@ -1202,7 +1206,10 @@ function SessionContent({
                 <button
                   type="submit"
                   disabled={
-                    (!prompt.trim() && queuedFiles.length === 0) || isProcessing || uploadingFiles
+                    (!prompt.trim() && queuedFiles.length === 0) ||
+                    isProcessing ||
+                    uploadingFiles ||
+                    isReviewSession
                   }
                   className="p-2 text-secondary-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition"
                   title={

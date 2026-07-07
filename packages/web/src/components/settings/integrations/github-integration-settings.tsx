@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
 import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
 import {
@@ -100,7 +101,11 @@ export function GitHubIntegrationSettings() {
         )}
       </Section>
 
-      <GlobalSettingsSection settings={settings} availableRepos={availableRepos} />
+      <GlobalSettingsSection
+        settings={settings}
+        availableRepos={availableRepos}
+        enabledModelOptions={enabledModelOptions}
+      />
 
       <Section
         title="Repository Overrides"
@@ -121,13 +126,16 @@ export function GitHubIntegrationSettings() {
 function GlobalSettingsSection({
   settings,
   availableRepos,
+  enabledModelOptions,
 }: {
   settings: GitHubGlobalConfig | null | undefined;
   availableRepos: EnrichedRepository[];
+  enabledModelOptions: { category: string; models: { id: string; name: string }[] }[];
 }) {
   const [autoReviewOnOpen, setAutoReviewOnOpen] = useState(
     settings?.defaults?.autoReviewOnOpen ?? true
   );
+  const [reviewModel, setReviewModel] = useState(settings?.defaults?.reviewModel ?? "");
   const [autoApproveOnOpen, setAutoApproveOnOpen] = useState(
     settings?.defaults?.autoApproveOnOpen ?? false
   );
@@ -161,6 +169,7 @@ function GlobalSettingsSection({
     if (settings !== undefined && !initialized) {
       if (settings) {
         setAutoReviewOnOpen(settings.defaults?.autoReviewOnOpen ?? true);
+        setReviewModel(settings.defaults?.reviewModel ?? "");
         setAutoApproveOnOpen(settings.defaults?.autoApproveOnOpen ?? false);
         setPrivateReposOnly(settings.defaults?.privateReposOnly ?? true);
         setEnabledRepos(settings.enabledRepos ?? []);
@@ -192,6 +201,7 @@ function GlobalSettingsSection({
       if (res.ok) {
         mutate(GLOBAL_SETTINGS_KEY);
         setAutoReviewOnOpen(true);
+        setReviewModel("");
         setAutoApproveOnOpen(false);
         setPrivateReposOnly(true);
         setEnabledRepos([]);
@@ -223,6 +233,7 @@ function GlobalSettingsSection({
         autoReviewOnOpen,
         autoApproveOnOpen,
         privateReposOnly,
+        ...(reviewModel ? { reviewModel } : {}),
         ...(triggerUserMode === "specific" ? { allowedTriggerUsers } : {}),
         ...(codeReviewInstructions ? { codeReviewInstructions } : {}),
         ...(commentActionInstructions ? { commentActionInstructions } : {}),
@@ -298,6 +309,48 @@ function GlobalSettingsSection({
           }}
         />
       </label>
+
+      <div className="px-4 py-3 border border-border mb-2 rounded-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <span className="text-sm font-medium text-foreground">Review model</span>
+            <span className="text-sm text-muted-foreground ml-2">
+              Model for PR reviews — automatic reviews and @mention review requests
+            </span>
+          </div>
+          <Select
+            value={reviewModel}
+            onValueChange={(v) => {
+              setReviewModel(v);
+              setDirty(true);
+              setError("");
+            }}
+          >
+            <SelectTrigger density="compact" className="w-full sm:w-64 shrink-0">
+              <SelectValue placeholder="Deployment default" />
+            </SelectTrigger>
+            <SelectContent>
+              {enabledModelOptions.map((group) => (
+                <SelectGroup key={group.category}>
+                  <SelectLabel>{group.category}</SelectLabel>
+                  {group.models.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          Leave as the deployment default, or{" "}
+          <Link href="/settings?tab=models" className="text-accent hover:underline">
+            configure available models
+          </Link>
+          .
+        </p>
+      </div>
 
       <label
         htmlFor="auto-approve-toggle"
@@ -658,6 +711,7 @@ function RepoOverrideRow({
   defaultAutoApproveOnOpen: boolean;
 }) {
   const [model, setModel] = useState(entry.settings.model ?? "");
+  const [reviewModel, setReviewModel] = useState(entry.settings.reviewModel ?? "");
   const [effort, setEffort] = useState(entry.settings.reasoningEffort ?? "");
   const [triggerUserMode, setTriggerUserMode] = useState<"global" | "override">(
     entry.settings.allowedTriggerUsers !== undefined ? "override" : "global"
@@ -726,6 +780,7 @@ function RepoOverrideRow({
     const [owner, name] = entry.repo.split("/");
     const settings: GitHubBotSettings = {};
     if (model) settings.model = model;
+    if (reviewModel) settings.reviewModel = reviewModel;
     if (effort) settings.reasoningEffort = effort;
     if (triggerUserMode === "override") settings.allowedTriggerUsers = allowedTriggerUsers;
     if (codeReviewMode === "override") settings.codeReviewInstructions = codeReviewInstructions;
@@ -795,6 +850,30 @@ function RepoOverrideRow({
         <Select value={model} onValueChange={handleModelChange}>
           <SelectTrigger density="compact" className="flex-1 min-w-[180px]">
             <SelectValue placeholder="Default model" />
+          </SelectTrigger>
+          <SelectContent>
+            {enabledModelOptions.map((group) => (
+              <SelectGroup key={group.category}>
+                <SelectLabel>{group.category}</SelectLabel>
+                {group.models.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={reviewModel}
+          onValueChange={(v) => {
+            setReviewModel(v);
+            setDirty(true);
+          }}
+        >
+          <SelectTrigger density="compact" className="flex-1 min-w-[180px]">
+            <SelectValue placeholder="Default review model" />
           </SelectTrigger>
           <SelectContent>
             {enabledModelOptions.map((group) => (
