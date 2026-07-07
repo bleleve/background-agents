@@ -62,6 +62,22 @@ class TestCodexModelRegistration:
         assert "async loader(getAuth, provider)" not in src
         assert "delete provider.models" not in src
 
+    def test_non_oauth_catalog_passes_through_untouched(self):
+        # Only Codex (oauth) sessions get curated. API-key / non-oauth openai
+        # usage must be returned unchanged — dropping this guard would filter
+        # and zero-cost every openai/* model regardless of auth type.
+        src = _plugin_source()
+        assert 'if (ctx.auth?.type !== "oauth") return provider.models;' in src
+
+    def test_curation_zeroes_cost_and_corrects_gpt55_limit(self):
+        # Codex is subscription-based (zero marginal cost) and gpt-5.5's context
+        # window is corrected to match opencode's own built-in plugin. Pin the
+        # literals so a future edit can't silently ship wrong pricing/limits.
+        src = _plugin_source()
+        assert "cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }" in src
+        assert 'modelId.includes("gpt-5.5")' in src
+        assert "{ context: 400000, input: 272000, output: 128000 }" in src
+
 
 class TestCodexAuthPluginSetup:
     """Cases for codex auth proxy plugin deployment."""
