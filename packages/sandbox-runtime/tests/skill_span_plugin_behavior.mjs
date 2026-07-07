@@ -212,10 +212,7 @@ createdSpans.length = 0;
 await withEnv({}, async () => {
   const hooks = await server({});
   await hooks["tool.execute.before"]({ tool: "skill", callID: "call-6" }, { args: {} });
-  await hooks["tool.execute.before"](
-    { tool: "skill", callID: "call-7" },
-    { args: { name: 42 } }
-  );
+  await hooks["tool.execute.before"]({ tool: "skill", callID: "call-7" }, { args: { name: 42 } });
   ok(createdSpans.length === 0, "does not create a span when args.name is missing or non-string");
 });
 
