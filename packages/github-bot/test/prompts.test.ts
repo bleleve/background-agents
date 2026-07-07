@@ -473,7 +473,7 @@ describe("buildCommentActionPrompt", () => {
 
   it("wires re-review reconciliation into the comment-triggered Full PR review path", () => {
     // A "review again"/"PTAL" comment re-review must reconcile with the maintainer's
-    // replies too — not just the push-triggered resumed session. The shared Docs-drift
+    // replies too — not just the label/web-button-triggered resumed session. The shared Docs-drift
     // guard referenced a "reconciliation note" that only lived in buildCodeReviewPrompt,
     // so this path used to re-flag already-rebutted items (and reference a missing note).
     const prompt = buildCommentActionPrompt(baseParams);

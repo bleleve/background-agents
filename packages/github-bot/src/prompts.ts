@@ -135,10 +135,11 @@ export const REEF_RISK_MARKER_RE = /<!--\s*reef-risk:\s*(low|medium|high)\s*-->/
 
 // A re-review must not re-litigate a point the maintainer already rebutted. This
 // instruction is shared by BOTH re-review entry points — the resumed
-// `buildCodeReviewPrompt` (push-triggered) and `buildCommentActionPrompt`'s
-// "Full PR review" branch (comment-triggered, e.g. "review again"/"PTAL") — so
-// neither path re-flags a finding or Docs-drift bullet the author already
-// answered. It self-guards: a first-ever review has no prior verdict to read.
+// `buildCodeReviewPrompt` (`reef: ask for review` label or web "Re-run review"
+// button) and `buildCommentActionPrompt`'s "Full PR review" branch
+// (comment-triggered, e.g. "review again"/"PTAL") — so neither path re-flags a
+// finding or Docs-drift bullet the author already answered. It self-guards: a
+// first-ever review has no prior verdict to read.
 function buildReReviewReconciliation(number: number): string {
   return `**Reconcile with the prior conversation before re-raising anything:** if this PR already has a previous Reef verdict, read it and the replies to it (\`gh pr view ${number} --comments\`). If the author or a maintainer explained why a previously-flagged item — a finding *or* a **Docs drift** bullet — is a false positive, treat that as resolved and do NOT re-raise it, unless a new commit changed the underlying code so the rebuttal no longer holds. Re-litigating a point the maintainer already answered, without engaging their reasoning, is a defect in the review.`;
 }

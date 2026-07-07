@@ -148,11 +148,11 @@ the thread stays in one place; the resumed prompt tells the agent to sync the wo
 PR head first. A re-review also **reconciles with the prior conversation**: before re-raising
 anything it reads its previous verdict and the replies to it, and drops any finding or Docs-drift
 bullet the author or a maintainer already rebutted — unless a new commit changed the underlying code
-so the rebuttal no longer holds. This applies to both re-review entry points (the push-triggered
-resumed session and a comment-triggered "review again"/"PTAL"). On a re-review the
-`submit-review-verdict` tool finds the prior verdict by its `<!-- reef-verdict -->` marker,
-**deletes it, and posts a fresh verdict comment** — a new comment notifies subscribers, whereas an
-in-place edit would be silent.
+so the rebuttal no longer holds. This applies to both re-review entry points (the resumed session
+that the `reef: ask for review` label or the web "Re-run review" button re-runs, and a
+comment-triggered "review again"/"PTAL"). On a re-review the `submit-review-verdict` tool finds the
+prior verdict by its `<!-- reef-verdict -->` marker, **deletes it, and posts a fresh verdict
+comment** — a new comment notifies subscribers, whereas an in-place edit would be silent.
 
 - **`reef: ask for review` label** — add the label to a PR to re-run the full review. The bot reuses
   the PR's existing review session (looked up in KV, `review-session:<repo>:<pr>`) when there is
