@@ -13,7 +13,7 @@ interface TunnelUrlsSectionProps {
 
 export function TunnelUrlsSection({ urls, labels }: TunnelUrlsSectionProps) {
   const entries = Object.entries(urls);
-  // Each link is named by its configured label, or "Preview" as the default.
+  // Each link is named by its configured label, or "Tunnel" as the default.
   // When more than one port is exposed, keep the port as a muted suffix to
   // disambiguate — useful even for labeled links (e.g. "API · 8990").
   const showPort = entries.length > 1;
@@ -24,7 +24,7 @@ export function TunnelUrlsSection({ urls, labels }: TunnelUrlsSectionProps) {
         const safeUrl = getSafeExternalUrl(url);
         const label = (
           <>
-            {labels?.[port] || "Preview"}
+            {labels?.[port] || "Tunnel"}
             {showPort && <span className="text-muted-foreground/70"> · {port}</span>}
           </>
         );

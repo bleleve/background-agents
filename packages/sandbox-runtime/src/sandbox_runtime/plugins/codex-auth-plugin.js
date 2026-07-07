@@ -8,23 +8,30 @@
  *
  * Auto-loaded from .opencode/plugins/ - OpenCode discovers project plugins
  * and deduplicates by provider ID (last wins), so this replaces the built-in.
+ * Because it replaces the built-in wholesale, it must also own the built-in's
+ * other job: registering the Codex model catalog via the `provider.models`
+ * hook below (see that hook for why auth.loader can't do it in opencode 1.17.x).
  */
 
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key";
 const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before expiry
 
-const ALLOWED_MODELS = new Set([
-  "gpt-5.1-codex-max",
-  "gpt-5.1-codex-mini",
-  "gpt-5.2",
-  "gpt-5.4",
-  "gpt-5.5",
-  "gpt-5.2-codex",
-  "gpt-5.3-codex",
-  "gpt-5.3-codex-spark",
-  "gpt-5.1-codex",
-]);
+// Models this deployment exposes in its picker — keep in sync with the OpenAI
+// block of `packages/shared/src/models.ts` MODEL_OPTIONS. models.dev's OpenAI
+// catalog churns, and opencode's own built-in codex plugin filters it (dropping
+// everything <= gpt-5.4) BEFORE this hook runs — so registering these by hand,
+// injecting any the live catalog no longer carries, is the only way to keep the
+// picker's `openai/*` choices resolvable. `codex` picks the shape template for
+// injected entries (a codex vs. chat sibling).
+const EXPOSED_MODELS = {
+  "gpt-5.2": { name: "GPT 5.2", codex: false },
+  "gpt-5.4": { name: "GPT 5.4", codex: false },
+  "gpt-5.5": { name: "GPT 5.5", codex: false },
+  "gpt-5.2-codex": { name: "GPT 5.2 Codex", codex: true },
+  "gpt-5.3-codex": { name: "GPT 5.3 Codex", codex: true },
+  "gpt-5.3-codex-spark": { name: "GPT 5.3 Codex Spark", codex: true },
+};
 
 // In-memory token cache (reset on sandbox restart - fresh refresh via bridge)
 let cachedAccessToken = null;
@@ -107,55 +114,53 @@ async function ensureAccessToken(getAuth, setAuth) {
 
 export const CodexAuthProxy = async (input) => {
   return {
+    // Model registration. In opencode 1.17.x a provider's resolvable model
+    // catalog is assembled from models.dev + this `provider.models` hook +
+    // config; model mutations made inside `auth.loader` are ignored (the loader
+    // only contributes apiKey/fetch/options). This mirrors opencode's built-in
+    // CodexAuthPlugin — which this plugin replaces (dedup by provider id, last
+    // wins) to route token refresh through the control plane — so registering
+    // the Codex models here is what keeps `openai/*` resolvable via getModel.
+    provider: {
+      id: "openai",
+      async models(provider, ctx) {
+        // Only curate Codex (oauth) sessions; API-key openai usage passes through.
+        if (ctx.auth?.type !== "oauth") return provider.models;
+        const catalog = provider.models;
+        const values = Object.values(catalog);
+        // Templates cloned for models the live catalog no longer carries, so an
+        // injected entry keeps a real `variants`/`capabilities` block — that is
+        // what carries reasoning-effort support, not the id alone.
+        const codexTemplate = values.find((m) => (m.family || "").includes("codex")) || values[0];
+        const chatTemplate = values.find((m) => m.family === "gpt") || values[0];
+        const zeroCost = { input: 0, output: 0, cache: { read: 0, write: 0 } };
+        const out = {};
+        for (const [id, spec] of Object.entries(EXPOSED_MODELS)) {
+          const template = catalog[id] || (spec.codex ? codexTemplate : chatTemplate);
+          if (!template) continue; // catalog unexpectedly empty — nothing to clone
+          out[id] = {
+            ...template,
+            id,
+            providerID: "openai",
+            name: spec.name,
+            api: { ...template.api, id },
+            // Codex is subscription-based — surface zero marginal cost.
+            cost: zeroCost,
+            // Mirror opencode's own correction of the gpt-5.5 context window.
+            ...(id.includes("gpt-5.5")
+              ? { limit: { context: 400000, input: 272000, output: 128000 } }
+              : {}),
+          };
+        }
+        return out;
+      },
+    },
     auth: {
       provider: "openai",
       methods: [],
-      async loader(getAuth, provider) {
+      async loader(getAuth) {
         const auth = await getAuth();
         if (auth.type !== "oauth") return {};
-
-        // Filter to allowed Codex models
-        for (const modelId of Object.keys(provider.models)) {
-          if (!ALLOWED_MODELS.has(modelId)) {
-            delete provider.models[modelId];
-          }
-        }
-
-        // Inject GPT 5.3 Codex models if missing
-        if (!provider.models["gpt-5.3-codex"]) {
-          provider.models["gpt-5.3-codex"] = {
-            name: "GPT 5.3 Codex",
-            attachment: false,
-            reasoning: false,
-            temperature: false,
-            options: {},
-            variants: {},
-            limit: { context: 1000000, output: 1000000 },
-            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-          };
-        }
-
-        if (!provider.models["gpt-5.3-codex-spark"]) {
-          provider.models["gpt-5.3-codex-spark"] = {
-            name: "GPT 5.3 Codex Spark",
-            attachment: false,
-            reasoning: false,
-            temperature: false,
-            options: {},
-            variants: {},
-            limit: { context: 1000000, output: 1000000 },
-            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-          };
-        }
-
-        // Zero out costs (Codex is subscription-based)
-        for (const model of Object.values(provider.models)) {
-          model.cost = {
-            input: 0,
-            output: 0,
-            cache: { read: 0, write: 0 },
-          };
-        }
 
         const setAuth = async (body) => {
           await input.client.auth.set({ path: { id: "openai" }, body });

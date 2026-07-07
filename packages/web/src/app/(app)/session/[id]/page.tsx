@@ -1508,7 +1508,7 @@ const EventItem = memo(function EventItem({
       const authorName = isCurrentUser ? "You" : event.author?.name || "Unknown User";
 
       return (
-        <div className="group bg-accent-muted p-4 ml-8">
+        <div className="group bg-accent-muted p-4 ml-8 break-words">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               {!isCurrentUser && event.author?.avatar && (
@@ -1533,7 +1533,9 @@ const EventItem = memo(function EventItem({
               <span className="text-xs text-secondary-foreground">{time}</span>
             </div>
           </div>
-          <pre className="whitespace-pre-wrap text-sm text-foreground">{messageContent}</pre>
+          <pre className="whitespace-pre-wrap break-words text-sm text-foreground">
+            {messageContent}
+          </pre>
         </div>
       );
     }

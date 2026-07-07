@@ -145,9 +145,14 @@ action posts after a PR is merged.
 A completed review can be re-run two ways, both reusing the same review machinery. A re-trigger
 **re-runs in the PR's existing review session** (a fresh turn) rather than spawning a new one, so
 the thread stays in one place; the resumed prompt tells the agent to sync the worktree to the latest
-PR head first. On a re-review the `submit-review-verdict` tool finds the prior verdict by its
-`<!-- reef-verdict -->` marker, **deletes it, and posts a fresh verdict comment** — a new comment
-notifies subscribers, whereas an in-place edit would be silent.
+PR head first. A re-review also **reconciles with the prior conversation**: before re-raising
+anything it reads its previous verdict and the replies to it, and drops any finding or Docs-drift
+bullet the author or a maintainer already rebutted — unless a new commit changed the underlying code
+so the rebuttal no longer holds. This applies to both re-review entry points (the resumed session
+that the `reef: ask for review` label or the web "Re-run review" button re-runs, and a
+comment-triggered "review again"/"PTAL"). On a re-review the `submit-review-verdict` tool finds the
+prior verdict by its `<!-- reef-verdict -->` marker, **deletes it, and posts a fresh verdict
+comment** — a new comment notifies subscribers, whereas an in-place edit would be silent.
 
 - **`reef: ask for review` label** — add the label to a PR to re-run the full review. The bot reuses
   the PR's existing review session (looked up in KV, `review-session:<repo>:<pr>`) when there is
@@ -182,10 +187,14 @@ The resulting approval fires a `pull_request_review` event; the backstop (below)
 **Pull Request Opened (Auto-Review):**
 
 1. Check `pull_request.draft` — skip draft PRs
-2. Check `pull_request.user.login !== GITHUB_BOT_USERNAME` — prevent loops on bot-created PRs
-3. Post eyes reaction on the PR (fire-and-forget)
-4. Create session via control plane
-5. Send code review prompt (includes PR metadata + `gh` CLI instructions)
+2. Skip closed/merged PRs; apply repo-enablement, visibility, and the `autoReviewOnOpen` setting
+3. Apply caller gating — bot-authored PRs (`pull_request.user.login === GITHUB_BOT_USERNAME`) bypass
+   gating and mint the installation token directly, since the bot is not a repo collaborator and
+   would otherwise fail the permission check; all other senders go through the normal caller gating
+4. Post eyes reaction on the PR (fire-and-forget)
+5. Create session via control plane — bot-authored PRs always use `kimi-k2.7-code` to avoid infinite
+   review loops with the default model
+6. Send code review prompt (includes PR metadata + `gh` CLI instructions)
 
 **Review Requested (compatibility path):**
 

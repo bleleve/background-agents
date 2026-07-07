@@ -13,13 +13,13 @@ afterEach(() => {
 });
 
 describe("TunnelUrlsSection", () => {
-  it('labels a single tunnel "Preview" with no port suffix', () => {
+  it('labels a single tunnel "Tunnel" with no port suffix', () => {
     render(
       <TunnelUrlsSection urls={{ "3000": "https://app.example.dev" }} sandboxStatus="ready" />
     );
-    const link = screen.getByRole("link", { name: /preview/i });
+    const link = screen.getByRole("link", { name: /tunnel/i });
     expect(link.getAttribute("href")).toContain("app.example.dev");
-    expect(link).toHaveTextContent("Preview");
+    expect(link).toHaveTextContent("Tunnel");
     expect(link).not.toHaveTextContent("3000");
     expect(screen.queryByText(/^port/i)).toBeNull();
   });
@@ -31,17 +31,17 @@ describe("TunnelUrlsSection", () => {
         sandboxStatus="ready"
       />
     );
-    const links = screen.getAllByRole("link", { name: /preview/i });
+    const links = screen.getAllByRole("link", { name: /tunnel/i });
     expect(links).toHaveLength(2);
     expect(links[0]).toHaveTextContent("3000");
     expect(links[1]).toHaveTextContent("8080");
   });
 
-  it("renders Preview as a link even when the sandbox is not active", () => {
+  it("renders Tunnel as a link even when the sandbox is not active", () => {
     render(
       <TunnelUrlsSection urls={{ "3000": "https://app.example.dev" }} sandboxStatus="stopped" />
     );
-    const link = screen.getByRole("link", { name: /preview/i });
+    const link = screen.getByRole("link", { name: /tunnel/i });
     expect(link.getAttribute("href")).toContain("app.example.dev");
   });
 
@@ -53,13 +53,13 @@ describe("TunnelUrlsSection", () => {
         sandboxStatus="ready"
       />
     );
-    // Labeled port shows its label; unlabeled falls back to "Preview". Both keep
+    // Labeled port shows its label; unlabeled falls back to "Tunnel". Both keep
     // the muted port suffix because more than one tunnel is exposed.
     const apiLink = screen.getByRole("link", { name: /api/i });
     expect(apiLink).toHaveTextContent("API");
     expect(apiLink).toHaveTextContent("8990");
-    const previewLink = screen.getByRole("link", { name: /preview/i });
-    expect(previewLink).toHaveTextContent("Preview");
+    const previewLink = screen.getByRole("link", { name: /tunnel/i });
+    expect(previewLink).toHaveTextContent("Tunnel");
     expect(previewLink).toHaveTextContent("8991");
   });
 
