@@ -92,7 +92,11 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v107: pr-doc-sentinel gains a "trace the doc value to its real source" discipline and
 #       the re-review reconciles with maintainer rebuttals (github-bot prompt); the
 #       bundled sentinel change requires an image rebuild.
-CACHE_BUSTER = "v107-doc-sentinel-source-trace"
+# v108: bake sandbox_runtime into an image LAYER (add_local_dir copy=True) instead of a
+#       runtime mount — the mount was outside layer caching, so CACHE_BUSTER never re-baked
+#       it and repo-image snapshots shipped a stale bridge/plugin (v105/v106 didn't reach
+#       sessions booting from a repo-image).
+CACHE_BUSTER = "v108-bake-sandbox-runtime-layer"
 
 # Base image with all development tools
 base_image = (
@@ -370,10 +374,16 @@ base_image = (
             "NODE_PATH": "/usr/lib/node_modules",
         }
     )
-    # Add sandbox runtime code to the image (provider-agnostic bridge, entrypoint, tools, plugins)
+    # Add sandbox runtime code to the image (provider-agnostic bridge, entrypoint, tools, plugins).
+    # copy=True bakes it into an image LAYER rather than a runtime mount. Without it the code was
+    # only mounted at container start: CACHE_BUSTER (which invalidates layers) never re-baked it,
+    # and filesystem snapshots / repo-images built on top of this image did not reliably capture
+    # the mount — so a changed bridge/plugin (e.g. the Codex model registration) could ship to the
+    # base image yet stay stale for any session booting from a repo-image snapshot.
     .add_local_dir(
         str(SANDBOX_RUNTIME_DIR),
         remote_path="/app/sandbox_runtime",
+        copy=True,
     )
 )
 
