@@ -385,6 +385,37 @@ describe("handlePullRequestOpened", () => {
     expect(sessionBody.model).toBe("cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code");
   });
 
+  it("reviews a bot-authored PR even when the caller-gating permission check would fail", async () => {
+    // Regression: the bot is not a repo collaborator, so in production
+    // checkSenderPermission 404s for the bot's own login. Self-PRs must bypass
+    // caller gating entirely, otherwise the auto-review is silently dropped.
+    vi.mocked(checkSenderPermission).mockResolvedValue({ hasPermission: false, error: true });
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: PullRequestOpenedPayload = {
+      ...pullRequestOpenedPayload,
+      pull_request: {
+        ...pullRequestOpenedPayload.pull_request,
+        user: { login: "test-bot[bot]" },
+      },
+    };
+
+    const result = await handlePullRequestOpened(env, log, payload, "trace-self-bypass");
+
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "auto_review",
+    });
+    // Gating is bypassed for self-PRs — the permission API is never consulted.
+    expect(checkSenderPermission).not.toHaveBeenCalled();
+    expect(generateInstallationToken).toHaveBeenCalled();
+    const cpFetch = getControlPlaneFetch(env);
+    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(sessionBody.model).toBe("cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code");
+  });
+
   it("returns early when autoReviewOnOpen is false", async () => {
     vi.mocked(getGitHubConfig).mockResolvedValue({
       ...defaultConfig,
