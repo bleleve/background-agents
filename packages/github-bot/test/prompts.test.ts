@@ -259,6 +259,19 @@ describe("buildCodeReviewPrompt", () => {
     expect(resumed).not.toContain("cloned at its DEFAULT branch");
   });
 
+  it("makes a re-review reconcile with maintainer rebuttals before re-raising", () => {
+    // A re-review must read the replies to its prior verdict and not re-litigate
+    // a finding/Docs-drift bullet the maintainer already rebutted.
+    const resumed = buildCodeReviewPrompt({ ...baseParams, resumed: true });
+    expect(resumed).toContain("Reconcile with the prior conversation");
+    expect(resumed).toContain("gh pr view 42 --comments");
+    expect(resumed).toContain("do NOT re-raise it");
+    // Fresh reviews (no prior verdict to reconcile with) don't carry the note.
+    expect(buildCodeReviewPrompt(baseParams)).not.toContain(
+      "Reconcile with the prior conversation"
+    );
+  });
+
   it("deletes any prior verdict, then posts a fresh comment (re-reviews notify)", () => {
     const prompt = buildCodeReviewPrompt({
       ...baseParams,
@@ -296,6 +309,14 @@ describe("buildCodeReviewPrompt", () => {
     // Doc findings ride in the single verdict comment, not a separate message
     expect(prompt).toContain("**Docs drift**");
     expect(prompt).toContain("never as a separate comment");
+  });
+
+  it("guards the Docs drift line against internal-vs-product-source false positives", () => {
+    // The verdict must not report drift when the doc value is sourced from a file
+    // this PR doesn't touch (a product display name vs an internal metadata field).
+    const prompt = buildCodeReviewPrompt(baseParams);
+    expect(prompt).toContain("confirm the doc actually documents the surface this PR changed");
+    expect(prompt).toContain("is **not** drift");
   });
 
   it("keeps inline suggestions code-only — no inline comments on doc/prose files", () => {
