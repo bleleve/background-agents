@@ -165,14 +165,14 @@ Key invariants:
 
 ## Endpoints (control plane)
 
-| Method        | Path                         | Purpose                                                                              |
-| ------------- | ---------------------------- | ------------------------------------------------------------------------------------ |
-| `GET`         | `/sessions/:id/plan`         | Current plan + approval status                                                       |
-| `POST`        | `/sessions/:id/plan`         | Save a new plan version (agent-source)                                               |
-| `GET`         | `/sessions/:id/plans`        | List all plan versions for a session                                                 |
-| `POST`        | `/sessions/:id/plan/approve` | Flip status to `approved`; optional `implementationModel` override                   |
-| `POST`        | `/sessions/:id/plan/reject`  | Flip status to `rejected` with optional reason                                       |
-| `GET` / `PUT` | `/model-preferences`         | Read/write deployment defaults (`defaultModel`, `defaultPlanModel`, `enabledModels`) |
+| Method        | Path                         | Purpose                                                                                                     |
+| ------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `GET`         | `/sessions/:id/plan`         | Current plan + approval status                                                                              |
+| `POST`        | `/sessions/:id/plan`         | Save a new plan version (agent-source)                                                                      |
+| `GET`         | `/sessions/:id/plans`        | List all plan versions for a session                                                                        |
+| `POST`        | `/sessions/:id/plan/approve` | Flip status to `approved`; optional `implementationModel` override                                          |
+| `POST`        | `/sessions/:id/plan/reject`  | Flip status to `rejected` with optional reason                                                              |
+| `GET` / `PUT` | `/model-preferences`         | Read/write deployment defaults (`defaultModel`, `defaultPlanModel`, `defaultRoutingModel`, `enabledModels`) |
 
 The bots and web app proxy through their own API routes (`/api/sessions/[id]/plan/*`) for auth +
 CSRF.

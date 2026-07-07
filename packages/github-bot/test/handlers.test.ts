@@ -34,6 +34,7 @@ vi.mock("../src/utils/internal", () => ({
 vi.mock("../src/utils/integration-config", () => ({
   getGitHubConfig: vi.fn().mockResolvedValue({
     model: "anthropic/claude-haiku-4-5",
+    reviewModel: null,
     reasoningEffort: null,
     autoReviewOnOpen: true,
     autoApproveOnOpen: false,
@@ -47,6 +48,7 @@ vi.mock("../src/utils/integration-config", () => ({
 
 const defaultConfig: ResolvedGitHubConfig = {
   model: "anthropic/claude-haiku-4-5",
+  reviewModel: null,
   reasoningEffort: null,
   autoReviewOnOpen: true,
   autoApproveOnOpen: false,
@@ -846,6 +848,23 @@ describe("handleCheckSuiteCompleted", () => {
 });
 
 describe("handleReviewRequested", () => {
+  it("prefers config.reviewModel over config.model for the review session", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      model: "anthropic/claude-haiku-4-5",
+      reviewModel: "anthropic/claude-opus-4-8",
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+
+    await handleReviewRequested(env, log, reviewRequestedPayload, "trace-review-model");
+
+    const cpFetch = getControlPlaneFetch(env);
+    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    // Precedence at the dedicated review site: review-<alias> label → reviewModel → model.
+    expect(sessionBody.model).toBe("anthropic/claude-opus-4-8");
+  });
+
   it("creates session, posts reaction, and sends prompt", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
@@ -979,6 +998,50 @@ describe("handleReviewRequested", () => {
 });
 
 describe("handleIssueComment", () => {
+  it("routes a review-command @mention to the PR review session using reviewModel", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      model: "anthropic/claude-haiku-4-5",
+      reviewModel: "anthropic/claude-opus-4-8",
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: IssueCommentPayload = {
+      ...issueCommentPayload,
+      comment: { ...issueCommentPayload.comment, body: "@test-bot[bot] please review this" },
+    };
+
+    const result = await handleIssueComment(env, log, payload, "trace-mention-review");
+
+    // Routed to the dedicated review lane, not the change-request session.
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "mention_review",
+    });
+
+    const cpFetch = getControlPlaneFetch(env);
+    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    // Review session (verdict-only gh guard), not the request session.
+    expect(sessionBody.title).toMatch(/^GitHub: PR #\d+ · review$/);
+    expect(sessionBody.reviewSession).toBe(true);
+    // reviewModel wins over the general model on the review lane.
+    expect(sessionBody.model).toBe("anthropic/claude-opus-4-8");
+
+    // Stacked onto the PR's review-session KV key, not request-session.
+    const kvPut = env.GITHUB_KV.put as unknown as ReturnType<typeof vi.fn>;
+    expect(kvPut).toHaveBeenCalledWith(
+      expect.stringMatching(/^review-session:/),
+      "session-123",
+      expect.anything()
+    );
+
+    // The commenter's message is folded into the review prompt (triggerComment).
+    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    expect(promptBody.content).toContain("please review this");
+  });
+
   it("creates session and sends prompt for PR comment with @mention", async () => {
     const env = createMockEnv();
     const log = createMockLogger();

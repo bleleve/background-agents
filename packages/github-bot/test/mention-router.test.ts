@@ -47,7 +47,11 @@ describe("isReviewCommand", () => {
     for (const s of [
       "ptal",
       "PTAL 🙏",
+      "review",
+      "review.",
+      "review 🙏",
       "review this PR",
+      "review the auth changes now",
       "please review",
       "can you review the auth changes?",
       "re-review please",
@@ -66,6 +70,11 @@ describe("isReviewCommand", () => {
       "take a look when you get a chance",
       "the change was reviewed already",
       "update the review docs",
+      // "review" as a NOUN leading a change request — must NOT route to the
+      // read-only review lane (would silently drop the requested change).
+      "review feedback: please rename this variable",
+      "review comments addressed, please re-run CI",
+      "reviewing the logic, can you extract this helper",
     ]) {
       expect(isReviewCommand(s)).toBe(false);
     }

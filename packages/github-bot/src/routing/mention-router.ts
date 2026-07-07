@@ -77,22 +77,34 @@ export type RoutingDecision =
 const LEADING_POLITENESS =
   /^(?:(?:hey|hi|ok|okay|so|pls|please|kindly|can|could|would|will|you|u|reef|now)\b[\s,!.:—-]*)+/i;
 
-// A review request reads as a command led by one of these verbs. Deliberately
-// conservative — strong, unambiguous review verbs only. Bare "take a look" is
-// excluded (it routes to the request lane, where the agent still judges intent
-// at runtime per prompts.ts): only "take another look" (which implies a prior
-// review) counts.
-const REVIEW_VERB = /^(?:re-?review|review|ptal|take\s+another\s+look)\b/i;
+// Unambiguous review commands — the leading token can only be read as an
+// imperative "review the PR" request, so match on it alone. Bare "take a look"
+// is excluded (it routes to the request lane, where the agent still judges
+// intent at runtime per prompts.ts): only "take another look" (which implies a
+// prior review) counts.
+const REVIEW_STANDALONE =
+  /^(?:re-?review|rereview|ptal|take\s+another\s+look|have\s+another\s+look)\b/i;
+
+// "review" alone is ambiguous — it's a verb ("review this PR") but also a noun
+// ("review feedback: rename x", "review comments"). Treat it as a command ONLY
+// when it is the whole message (optionally + trailing punctuation/emoji) OR is
+// followed by a review target introduced by a determiner/qualifier. This
+// deliberately EXCLUDES "review <bare-noun>" phrases, which are change requests
+// that merely start with the word "review" and must NOT be silently swallowed
+// by the read-only review lane.
+const REVIEW_IMPERATIVE =
+  /^review(?:[^\w]*$|\s+(?:again|this|that|these|those|it|the|my|our|your|pr|everything|once|please|pls|now|when|thanks|thx)\b)/i;
 
 /**
  * Whether an @mention comment reads as an explicit request to (re-)review the
  * PR. Leading-command style (like the plan approve/reject shortcut): the verb
- * must lead the message (after optional politeness). Best-effort and documented
- * — see the router's module doc.
+ * must lead the message (after optional politeness), and a bare "review" must be
+ * used as an imperative, not as a noun. Best-effort and documented — see the
+ * router's module doc.
  */
 export function isReviewCommand(body: string): boolean {
   const stripped = body.trim().replace(LEADING_POLITENESS, "");
-  return REVIEW_VERB.test(stripped);
+  return REVIEW_STANDALONE.test(stripped) || REVIEW_IMPERATIVE.test(stripped);
 }
 
 /**
