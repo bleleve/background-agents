@@ -350,6 +350,10 @@ function SessionPageContent() {
   // Set when the user explicitly picks a model on this page. Until then, the
   // Plan toggle auto-swaps between the session baseline and defaultPlanModel.
   const userPickedModelRef = useRef(false);
+  // Set when the user explicitly picks a reasoning effort on this page. Until
+  // then, a Plan toggle returning to the baseline restores the session's effort
+  // rather than whatever the local state happens to be.
+  const userPickedEffortRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -364,7 +368,15 @@ function SessionPageContent() {
   const handleModelChange = useCallback((model: string) => {
     userPickedModelRef.current = true;
     setSelectedModel(model);
+    // Picking a model resets effort to that model's default — not a deliberate
+    // effort choice, so clear the flag.
+    userPickedEffortRef.current = false;
     setReasoningEffort(getDefaultReasoningEffort(model));
+  }, []);
+
+  const handleReasoningEffortChange = useCallback((effort: string | undefined) => {
+    userPickedEffortRef.current = true;
+    setReasoningEffort(effort);
   }, []);
 
   // Reset to default if the selected model is no longer enabled
@@ -398,16 +410,18 @@ function SessionPageContent() {
     if (enabledModels.length > 0 && !enabledModels.includes(target)) return;
     if (target === selectedModel) return;
     setSelectedModel(target);
-    // Choose the reasoning effort for the target model. Toggling ON: preserve
-    // the current effort if it's valid for the plan model — avoids surprising
-    // the user by promoting them to "max" just because the plan-default model's
-    // default reasoning happens to be max. Toggling OFF (back to the session
-    // baseline): restore the session's own effort — the one chosen at creation —
-    // rather than the current local closure. The latter can still be the initial
-    // default on first load (this effect races the session-sync effect above on
-    // the same commit and sees a stale closure), which is what dropped a "high"
-    // session back to the model default.
-    const preferredEffort = planToggle ? reasoningEffort : sessionState?.reasoningEffort;
+    // Choose the reasoning effort for the target model. Prefer the current local
+    // effort when toggling into plan mode, or whenever the user has deliberately
+    // picked an effort — preserving it (if valid for the target) avoids surprising
+    // them by promoting to "max" just because the plan-default model's default
+    // reasoning happens to be max, and it survives a Plan ON→OFF round trip.
+    // Otherwise (returning to the baseline with no manual pick), restore the
+    // session's own effort — the one chosen at creation. Falling back to the local
+    // closure there is wrong: on first load this effect races the session-sync
+    // effect above on the same commit and sees a stale default, which is what
+    // dropped a "high" session back to the model default.
+    const preferredEffort =
+      planToggle || userPickedEffortRef.current ? reasoningEffort : sessionState?.reasoningEffort;
     setReasoningEffort(
       preferredEffort && isValidReasoningEffort(target, preferredEffort)
         ? preferredEffort
@@ -537,7 +551,7 @@ function SessionPageContent() {
       handleInputChange={handleInputChange}
       handleKeyDown={handleKeyDown}
       setSelectedModel={handleModelChange}
-      setReasoningEffort={setReasoningEffort}
+      setReasoningEffort={handleReasoningEffortChange}
       stopExecution={stopExecution}
       handleArchive={handleArchive}
       handleUnarchive={handleUnarchive}
