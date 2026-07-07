@@ -530,6 +530,38 @@ async function postRootCoalescedReply(
   }
 }
 
+/**
+ * Best-effort in-thread reply for a review-comment @mention that routed to the
+ * review lane but could not fetch the PR details it needs (title/body/author
+ * aren't in the `pull_request_review_comment` payload, so unlike the issue-
+ * comment lane there is no fallback data to run the review with). Posted so the
+ * requester sees more than the earlier 👀 reaction and silence.
+ */
+async function postReviewFetchFailedReply(
+  log: Logger,
+  ghToken: string,
+  owner: string,
+  repoName: string,
+  prNumber: number,
+  commentId: number,
+  userAgent: string,
+  meta: Record<string, unknown>
+): Promise<void> {
+  const body = "Couldn't fetch the PR details needed to start a review — please try again.";
+  const id = await createReviewCommentReply(
+    ghToken,
+    owner,
+    repoName,
+    prNumber,
+    commentId,
+    body,
+    userAgent
+  );
+  if (id === null) {
+    log.warn("mention_review.pr_fetch_failed_reply_failed", { ...meta });
+  }
+}
+
 // ─── Plan approve/reject parsing ─────────────────────────────────────────────
 // parsePlanCommand lives in @open-inspect/shared so command syntax stays in
 // sync between Linear and GitHub. See its docstring for the recognized forms.
@@ -2088,24 +2120,24 @@ export async function handleIssueComment(
   // onto the existing one, or create it) instead of the change-request session,
   // so it uses the review model and stays off the change-request working tree.
   if (decision.target === "review") {
-    if (!prDetails) {
-      log.info("mention_review.pr_fetch_failed", meta);
-      return { outcome: "skipped", skip_reason: "pr_fetch_failed" };
-    }
     const existingReviewSessionId = await lookupReviewSession(env, repoFullName, issue.number);
+    // Degradation contract for a failed PR fetch: unlike the review-comment lane,
+    // the webhook's own `issue` object already carries usable title/body/author,
+    // so we fall back to those and clone the repo default branch instead of
+    // skipping — the agent still resolves the real diff via `gh pr diff`.
     return runCodeReview(env, log, ghToken, headers, {
       owner,
       repoName,
       prNumber: issue.number,
-      prUrl: prDetails.html_url,
-      prState: prDetails.state,
-      prHeadRef: prDetails.head.ref,
-      prBaseRef: prDetails.base.ref,
-      title: prDetails.title,
-      body: prDetails.body,
-      author: prDetails.user.login,
-      base: prDetails.base.ref,
-      head: prDetails.head.ref,
+      prUrl: prDetails?.html_url ?? issue.html_url,
+      prState: prDetails?.state ?? issue.state,
+      prHeadRef: prDetails?.head.ref,
+      prBaseRef: prDetails?.base.ref,
+      title: prDetails?.title ?? issue.title,
+      body: prDetails?.body ?? issue.body,
+      author: prDetails?.user.login ?? issue.user.login,
+      base: prDetails?.base.ref ?? repo.default_branch,
+      head: prDetails?.head.ref ?? repo.default_branch,
       isPublic: !repo.private,
       model: decision.model,
       reasoningEffort: decision.reasoningEffort,
@@ -2117,7 +2149,9 @@ export async function handleIssueComment(
       scmUserId: String(sender.id),
       scmAvatarUrl: sender.avatar_url,
       actionLabel: "mention_review",
-      cloneBranch: prCloneBranch(prDetails.head.ref, prDetails.head.repo?.full_name, repoFullName),
+      cloneBranch: prDetails
+        ? prCloneBranch(prDetails.head.ref, prDetails.head.repo?.full_name, repoFullName)
+        : undefined,
       existingSessionId: existingReviewSessionId,
       meta,
     });
@@ -2340,7 +2374,20 @@ export async function handleReviewComment(
   if (decision.target === "review") {
     const details = await fetchPullRequestDetails(ghToken, owner, repoName, pr.number);
     if (!details) {
+      // Degradation contract for a failed PR fetch: no fallback data exists in
+      // this payload (unlike the issue-comment lane), so post a visible error
+      // reply instead of silently skipping after the earlier 👀 reaction.
       log.info("mention_review.pr_fetch_failed", meta);
+      await postReviewFetchFailedReply(
+        log,
+        ghToken,
+        owner,
+        repoName,
+        pr.number,
+        comment.id,
+        resolveAppName(env),
+        meta
+      );
       return { outcome: "skipped", skip_reason: "pr_fetch_failed" };
     }
     const triggerComment = comment.path ? `On \`${comment.path}\`:\n${commentBody}` : commentBody;
