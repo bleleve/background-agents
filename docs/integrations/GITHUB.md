@@ -97,7 +97,11 @@ See [Re-running a Review](#re-running-a-review) for how a re-review replaces the
 
 A completed review can be re-run two ways. On a re-review the bot replaces its previous verdict — it
 deletes the prior verdict comment and posts a fresh one, so subscribers get a new notification
-rather than a silent in-place edit.
+rather than a silent in-place edit. A re-review is not a blind re-run: it first reconciles with the
+prior conversation, reading the replies to its previous verdict and dropping any finding or
+documentation-drift note the author or a maintainer already rebutted (unless a new commit changed
+the underlying code). So the re-run's verdict can differ from an independent review — a point you
+answered stays resolved instead of being re-flagged.
 
 - **`reef: ask for review` label** — add the `reef: ask for review` label to a PR to re-run the full
   review. The bot removes the label again once the review completes, so re-adding it triggers

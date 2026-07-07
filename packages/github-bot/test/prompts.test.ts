@@ -266,6 +266,10 @@ describe("buildCodeReviewPrompt", () => {
     expect(resumed).toContain("Reconcile with the prior conversation");
     expect(resumed).toContain("gh pr view 42 --comments");
     expect(resumed).toContain("do NOT re-raise it");
+    // The rebutted-item clause explicitly covers Docs-drift bullets, and only a new
+    // commit that changes the code reopens a rebutted point.
+    expect(resumed).toContain("a finding *or* a **Docs drift** bullet");
+    expect(resumed).toContain("unless a new commit changed the underlying code");
     // Fresh reviews (no prior verdict to reconcile with) don't carry the note.
     expect(buildCodeReviewPrompt(baseParams)).not.toContain(
       "Reconcile with the prior conversation"
@@ -465,6 +469,19 @@ describe("buildCommentActionPrompt", () => {
     const prompt = buildCommentActionPrompt(baseParams);
     expect(prompt).toContain("Do NOT submit a formal pull request review");
     expect(prompt).toContain("do not run `gh pr review`");
+  });
+
+  it("wires re-review reconciliation into the comment-triggered Full PR review path", () => {
+    // A "review again"/"PTAL" comment re-review must reconcile with the maintainer's
+    // replies too — not just the push-triggered resumed session. The shared Docs-drift
+    // guard referenced a "reconciliation note" that only lived in buildCodeReviewPrompt,
+    // so this path used to re-flag already-rebutted items (and reference a missing note).
+    const prompt = buildCommentActionPrompt(baseParams);
+    expect(prompt).toContain("## Full PR review");
+    expect(prompt).toContain("Reconcile with the prior conversation");
+    expect(prompt).toContain("a finding *or* a **Docs drift** bullet");
+    // The reference must not dangle: no "note above" pointing at nothing in this builder.
+    expect(prompt).not.toContain("reconciliation note above");
   });
 
   it("inlines a pre-fetched diff for the comment-action prompt", () => {
