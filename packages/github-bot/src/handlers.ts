@@ -823,6 +823,27 @@ type CallerGatingResult =
       reason: "sender_not_allowed" | "sender_insufficient_permission" | "permission_check_failed";
     };
 
+/**
+ * Mint a GitHub App installation token alongside the internal control-plane auth
+ * headers. Used by the caller-gating path and by trusted paths that bypass gating
+ * (e.g. auto-reviewing the bot's own PRs).
+ */
+async function mintInstallationAuth(
+  env: Env,
+  traceId: string
+): Promise<{ ghToken: string; headers: Record<string, string> }> {
+  const [ghToken, headers] = await Promise.all([
+    generateInstallationToken({
+      appId: env.GITHUB_APP_ID,
+      privateKey: env.GITHUB_APP_PRIVATE_KEY,
+      installationId: env.GITHUB_APP_INSTALLATION_ID,
+      userAgent: resolveAppName(env),
+    }),
+    getAuthHeaders(env, traceId),
+  ]);
+  return { ghToken, headers };
+}
+
 async function resolveCallerGating(
   env: Env,
   config: ResolvedGitHubConfig,
@@ -840,16 +861,7 @@ async function resolveCallerGating(
     }
   }
 
-  const userAgent = resolveAppName(env);
-  const [ghToken, headers] = await Promise.all([
-    generateInstallationToken({
-      appId: env.GITHUB_APP_ID,
-      privateKey: env.GITHUB_APP_PRIVATE_KEY,
-      installationId: env.GITHUB_APP_INSTALLATION_ID,
-      userAgent,
-    }),
-    getAuthHeaders(env, traceId),
-  ]);
+  const { ghToken, headers } = await mintInstallationAuth(env, traceId);
 
   if (config.allowedTriggerUsers === null) {
     const { hasPermission, error } = await checkSenderPermission(
@@ -857,7 +869,7 @@ async function resolveCallerGating(
       owner,
       repoName,
       senderLogin,
-      userAgent
+      resolveAppName(env)
     );
     if (!hasPermission) {
       const reason = error ? "permission_check_failed" : "sender_insufficient_permission";
@@ -1204,18 +1216,34 @@ export async function handlePullRequestOpened(
     return { outcome: "skipped", skip_reason: "auto_review_disabled" };
   }
 
-  const gating = await resolveCallerGating(
-    env,
-    config,
-    sender.login,
-    owner,
-    repoName,
-    log,
-    traceId,
-    repoFullName
-  );
-  if (!gating.allowed) return { outcome: "skipped", skip_reason: gating.reason };
-  const { ghToken, headers } = gating;
+  // Bot-authored PRs are trusted by construction: Reef only opens PRs from its own
+  // sessions using the App installation token, so the webhook sender is the bot
+  // itself. The human-oriented caller gating would drop these — the bot is not a
+  // repo collaborator, so checkSenderPermission 404s (permission_check_failed), and
+  // an allowlist wouldn't contain the bot login either (sender_not_allowed). Bypass
+  // gating and mint the token directly for self-PRs. (Comment/mention paths already
+  // early-return on a bot sender before gating, so this is the only path that
+  // reaches gating as the bot.)
+  const isBotPr = pr.user.login === env.GITHUB_BOT_USERNAME;
+
+  let ghToken: string;
+  let headers: Record<string, string>;
+  if (isBotPr) {
+    ({ ghToken, headers } = await mintInstallationAuth(env, traceId));
+  } else {
+    const gating = await resolveCallerGating(
+      env,
+      config,
+      sender.login,
+      owner,
+      repoName,
+      log,
+      traceId,
+      repoFullName
+    );
+    if (!gating.allowed) return { outcome: "skipped", skip_reason: gating.reason };
+    ({ ghToken, headers } = gating);
+  }
 
   const meta = { trace_id: traceId, repo: repoFullName, pull_number: pr.number };
   fireAndForgetReaction(
@@ -1228,7 +1256,6 @@ export async function handlePullRequestOpened(
 
   // Bot-authored PRs always use kimi-k2.7-code to avoid infinite review loops
   // with the default model. Label overrides and config are ignored for self-PRs.
-  const isBotPr = pr.user.login === env.GITHUB_BOT_USERNAME;
   const autoReviewModel = isBotPr
     ? "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code"
     : (extractReviewModelFromLabels(pr.labels ?? []) ?? config.model);
