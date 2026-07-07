@@ -312,87 +312,176 @@ async function lookupPrSession(
   return env.GITHUB_KV.get(getPrSessionKey(repoFullName, prNumber));
 }
 
-// ─── PR → review-session mapping (KV) ────────────────────────────────────────
-// Records the latest review session for a PR so a re-trigger (the `reef: ask for review`
-// label) re-runs in the existing session instead of spawning a new one. Separate
-// key from the plan-mode mapping above. The web "Re-run review" button passes the
-// session id directly and does not need this.
-
-const REVIEW_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
-
-function getReviewSessionKey(repoFullName: string, prNumber: number): string {
-  return `review-session:${repoFullName}:${prNumber}`;
-}
+// ─── PR → review-session "prev" mapping (KV) ─────────────────────────────────
+// Tracks the most recent FAILED review session for a PR so the next successful
+// review can supersede it (archive it, point it at the new one). Unrelated to
+// the D1 claim/confirm/release protocol below: this is a one-way "what failed
+// last time" note, not a coalescing/ownership mechanism, so it stays in KV.
 
 function getReviewSessionPrevKey(repoFullName: string, prNumber: number): string {
   return `review-session-prev:${repoFullName}:${prNumber}`;
 }
 
-async function rememberReviewSession(
-  env: Env,
-  repoFullName: string,
-  prNumber: number,
-  sessionId: string
-): Promise<void> {
-  await env.GITHUB_KV.put(getReviewSessionKey(repoFullName, prNumber), sessionId, {
-    expirationTtl: REVIEW_SESSION_TTL_SECONDS,
-  });
-}
+// ─── PR session slot claims (D1) ─────────────────────────────────────────────
+// Atomic claim/confirm/release protocol against the control plane's
+// `pr_active_sessions` table, replacing the KV-based `review-session:<repo>:<pr>`
+// and `request-session:<repo>:<pr>` pointers this file used to maintain.
+//
+// Why: two genuinely concurrent webhook deliveries for the same PR (e.g. two
+// @mentions landing in the same second — this has happened in production) must
+// never both create a session and race to push the same branch. KV is
+// eventually consistent (writes can take up to ~60s to propagate), so a KV
+// read-then-write is not atomic: both deliveries can read "no pointer" and
+// both proceed. The control plane now serializes this through D1's atomic
+// `INSERT ... ON CONFLICT`. See
+// packages/control-plane/src/db/pr-active-sessions.ts for the full protocol;
+// this section is a thin client for it, used by two "lanes":
+//
+// - `'request'` lane: a single session handles every @mention change request
+//   on a PR — top-level comments and inline review comments alike — so
+//   concurrent requests queue on one working tree instead of racing to push
+//   the same branch. `resolveRequestSession` claims the slot, and additionally
+//   liveness-checks a claimed-but-existing session (a terminal session must
+//   not absorb a queued prompt) with dead-session eviction via release+retry.
+// - `'review'` lane: a re-trigger (the `reef: ask for review` label, or an
+//   explicit @mention review ask) reuses the PR's existing review session
+//   instead of spawning a new one. `resolveReviewSession` claims the slot; no
+//   liveness re-check (review sessions are read-only and short-lived by
+//   nature, so there's no "is it still doing something" question — but the
+//   claim still prevents two concurrent triggers from both creating one).
+//
+// Every path here fails open: any error talking to the control plane (network
+// failure, non-2xx, a lost race that can't be resolved) falls back to
+// creating a fresh, unclaimed session rather than dropping the request or
+// blocking the review. That matches the pre-existing (KV-based) fail-open
+// behavior — this mechanism can only make coalescing more correct, never less
+// available.
 
-async function lookupReviewSession(
-  env: Env,
-  repoFullName: string,
-  prNumber: number
-): Promise<string | null> {
-  return env.GITHUB_KV.get(getReviewSessionKey(repoFullName, prNumber));
-}
+type PrSessionLane = "review" | "request";
+type PrSessionStatus = "creating" | "active";
 
-// ─── Active "request" session per PR (coalescing) ────────────────────────────
-// A single session handles every @mention change request on a PR — top-level PR
-// comments and inline review comments alike — so concurrent requests queue on
-// one working tree instead of racing to push the same branch (the failure mode
-// where a second request silently dies because the first pushed first). We
-// remember the request session per PR here, then confirm it is still live via
-// the control plane before folding a new request into it. Review sessions are
-// never tracked (they are read-only and never contend for the branch), and
-// plan-mode sessions opt out (a plan is a distinct approve/reject interaction).
-
-const REQUEST_SESSION_TTL_SECONDS = 6 * 60 * 60;
-
-function getRequestSessionKey(repoFullName: string, prNumber: number): string {
-  return `request-session:${repoFullName}:${prNumber}`;
-}
-
-async function rememberRequestSession(
-  env: Env,
-  repoFullName: string,
-  prNumber: number,
-  sessionId: string
-): Promise<void> {
-  await env.GITHUB_KV.put(getRequestSessionKey(repoFullName, prNumber), sessionId, {
-    expirationTtl: REQUEST_SESSION_TTL_SECONDS,
-  });
-}
+type PrSessionClaimOutcome =
+  | { result: "claimed"; claimToken: string }
+  | { result: "existing"; sessionId: string | null; status: PrSessionStatus; claimToken: string };
 
 /**
- * The id of a still-live request session for this PR, or null. Reads the
- * remembered pointer, then asks the control plane whether that session is still
- * active (non-terminal and recently updated) — a terminal session must not be
- * coalesced into, or the queued prompt would never run. Any failure resolves to
- * null so the caller falls back to creating a fresh session (the pre-fix
- * behavior — a separate session, never a dropped request).
+ * Attempt to claim the (repo, pr, lane) slot with a freshly generated token.
+ * Returns null (never throws) on any transport/HTTP failure — callers treat
+ * that identically to a lost claim and fail open to an uncoalesced session.
  */
-async function lookupLiveRequestSession(
-  env: Env,
+async function claimPrSession(
   controlPlane: Fetcher,
   headers: Record<string, string>,
   repoFullName: string,
   prNumber: number,
+  lane: PrSessionLane,
   log: Logger,
   meta: Record<string, unknown>
-): Promise<string | null> {
-  const sessionId = await env.GITHUB_KV.get(getRequestSessionKey(repoFullName, prNumber));
-  if (!sessionId) return null;
+): Promise<PrSessionClaimOutcome | null> {
+  const claimToken = crypto.randomUUID();
+  try {
+    const res = await controlPlane.fetch("https://internal/internal/pr-sessions/claim", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ repoFullName, prNumber, lane, claimToken }),
+    });
+    if (!res.ok) {
+      log.warn(`${lane}_session.claim_unavailable`, { ...meta, status: res.status });
+      return null;
+    }
+    const outcome = (await res.json()) as
+      | { result: "claimed" }
+      | {
+          result: "existing";
+          sessionId: string | null;
+          status: PrSessionStatus;
+          claimToken: string;
+        };
+    // The server echoes nothing back for "claimed" — we already know the
+    // token we sent, so attach it here for a uniform return shape.
+    return outcome.result === "claimed" ? { result: "claimed", claimToken } : outcome;
+  } catch (err) {
+    log.warn(`${lane}_session.claim_error`, {
+      ...meta,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+    return null;
+  }
+}
+
+/** Confirm a won claim now that the session exists. False on any failure (never throws). */
+async function confirmPrSession(
+  controlPlane: Fetcher,
+  headers: Record<string, string>,
+  repoFullName: string,
+  prNumber: number,
+  lane: PrSessionLane,
+  claimToken: string,
+  sessionId: string,
+  log: Logger,
+  meta: Record<string, unknown>
+): Promise<boolean> {
+  try {
+    const res = await controlPlane.fetch("https://internal/internal/pr-sessions/confirm", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ repoFullName, prNumber, lane, claimToken, sessionId }),
+    });
+    if (!res.ok) return false;
+    const { updated } = (await res.json()) as { updated: boolean };
+    return updated;
+  } catch (err) {
+    log.warn(`${lane}_session.confirm_error`, {
+      ...meta,
+      session_id: sessionId,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+    return false;
+  }
+}
+
+/**
+ * Free a slot whose session has gone dead, so a subsequent claim can win it
+ * fresh. Best-effort: a failed release just leaves the slot claimed until the
+ * control plane's own stale-claim window expires, so failures are logged and
+ * swallowed rather than thrown.
+ */
+async function releasePrSession(
+  controlPlane: Fetcher,
+  headers: Record<string, string>,
+  repoFullName: string,
+  prNumber: number,
+  lane: PrSessionLane,
+  claimToken: string,
+  log: Logger,
+  meta: Record<string, unknown>
+): Promise<void> {
+  try {
+    await controlPlane.fetch("https://internal/internal/pr-sessions/release", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ repoFullName, prNumber, lane, claimToken }),
+    });
+  } catch (err) {
+    log.warn(`${lane}_session.release_error`, {
+      ...meta,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+  }
+}
+
+/**
+ * Whether a session is still safe to fold a coalesced prompt into: non-terminal
+ * and recently updated per the control plane. False (fail safe) on any
+ * unavailable/erroring liveness check.
+ */
+async function checkSessionLiveness(
+  controlPlane: Fetcher,
+  headers: Record<string, string>,
+  sessionId: string,
+  log: Logger,
+  meta: Record<string, unknown>
+): Promise<boolean> {
   try {
     const res = await controlPlane.fetch(`https://internal/sessions/${sessionId}/liveness`, {
       method: "GET",
@@ -404,27 +493,66 @@ async function lookupLiveRequestSession(
         session_id: sessionId,
         status: res.status,
       });
-      return null;
+      return false;
     }
     const { active } = (await res.json()) as { active: boolean };
-    return active ? sessionId : null;
+    return active;
   } catch (err) {
     log.warn("request_session.liveness_error", {
       ...meta,
       session_id: sessionId,
       error: err instanceof Error ? err : new Error(String(err)),
     });
-    return null;
+    return false;
   }
+}
+
+/** Create the session for a won claim, then confirm it. Never strands the session on a confirm failure. */
+async function createAndConfirmPrSession(
+  controlPlane: Fetcher,
+  headers: Record<string, string>,
+  repoFullName: string,
+  prNumber: number,
+  lane: PrSessionLane,
+  claimToken: string,
+  log: Logger,
+  meta: Record<string, unknown>,
+  createFresh: () => Promise<string>
+): Promise<{ sessionId: string; coalesced: boolean }> {
+  const sessionId = await createFresh();
+  const confirmed = await confirmPrSession(
+    controlPlane,
+    headers,
+    repoFullName,
+    prNumber,
+    lane,
+    claimToken,
+    sessionId,
+    log,
+    meta
+  );
+  if (!confirmed) {
+    // The session already exists and must not be stranded — just note that the
+    // claim table no longer reflects reality (e.g. our claim was stolen as
+    // stale in the narrow window between claim() and this confirm()). Worst
+    // case a future request for this PR claims fresh instead of coalescing
+    // here: one extra session, never a dropped one.
+    log.warn(`${lane}_session.confirm_failed`, { ...meta, session_id: sessionId });
+  }
+  return { sessionId, coalesced: false };
 }
 
 /**
  * Resolve the session that should handle a @mention change request on a PR:
- * fold into the live request session if one exists (coalesce), else create a
- * fresh one via `createFresh` and remember it as the PR's request session.
+ * claim the PR's 'request' lane slot in D1. If we win, create a fresh session
+ * and confirm it. If we lose to an already-confirmed session, liveness-check
+ * it — live folds the request in (coalesce); dead releases the slot and
+ * retries the claim once, so a wedged/terminal session doesn't block new
+ * requests forever. Any failure anywhere in this sequence falls back to
+ * creating a fresh, unclaimed session — this mechanism must never cause a
+ * request to be dropped.
  */
 async function resolveRequestSession(
-  env: Env,
   controlPlane: Fetcher,
   headers: Record<string, string>,
   repoFullName: string,
@@ -433,19 +561,150 @@ async function resolveRequestSession(
   meta: Record<string, unknown>,
   createFresh: () => Promise<string>
 ): Promise<{ sessionId: string; coalesced: boolean }> {
-  const live = await lookupLiveRequestSession(
-    env,
+  const claim = await claimPrSession(
     controlPlane,
     headers,
     repoFullName,
     prNumber,
+    "request",
     log,
     meta
   );
-  if (live) return { sessionId: live, coalesced: true };
-  const sessionId = await createFresh();
-  await rememberRequestSession(env, repoFullName, prNumber, sessionId);
-  return { sessionId, coalesced: false };
+  if (!claim) {
+    return { sessionId: await createFresh(), coalesced: false };
+  }
+  if (claim.result === "claimed") {
+    return createAndConfirmPrSession(
+      controlPlane,
+      headers,
+      repoFullName,
+      prNumber,
+      "request",
+      claim.claimToken,
+      log,
+      meta,
+      createFresh
+    );
+  }
+
+  // claim.result === "existing"
+  if (claim.status === "active" && claim.sessionId) {
+    const live = await checkSessionLiveness(controlPlane, headers, claim.sessionId, log, meta);
+    if (live) return { sessionId: claim.sessionId, coalesced: true };
+
+    // Dead session — free the slot and retry the claim once to pick it up.
+    await releasePrSession(
+      controlPlane,
+      headers,
+      repoFullName,
+      prNumber,
+      "request",
+      claim.claimToken,
+      log,
+      meta
+    );
+    const retryClaim = await claimPrSession(
+      controlPlane,
+      headers,
+      repoFullName,
+      prNumber,
+      "request",
+      log,
+      meta
+    );
+    if (retryClaim?.result === "claimed") {
+      return createAndConfirmPrSession(
+        controlPlane,
+        headers,
+        repoFullName,
+        prNumber,
+        "request",
+        retryClaim.claimToken,
+        log,
+        meta,
+        createFresh
+      );
+    }
+    // Retry failed, or lost again — safe fallback, don't touch the claim
+    // table any further.
+    return { sessionId: await createFresh(), coalesced: false };
+  }
+
+  // status 'creating' with no confirmed session yet: another claimer is
+  // actively creating one, within the control plane's stale-claim window.
+  // Don't contest it — just don't drop this request either.
+  return { sessionId: await createFresh(), coalesced: false };
+}
+
+/**
+ * Resolve the session that should run a code review for this PR: claim the
+ * 'review' lane slot in D1. Returns an existing session id to reuse when the
+ * slot is already confirmed (no liveness re-check — review sessions are
+ * read-only and short-lived, so they don't need eviction the way request
+ * sessions do), or a claim token the caller must thread through
+ * `runCodeReview` (as `reviewClaimToken`) so the session it creates gets
+ * confirmed into the slot for future re-review triggers to find. Any failure,
+ * or losing to a claim that's still `'creating'` (a genuine concurrent race,
+ * not yet resolved), fails open: no existing session, no claim token — the
+ * caller creates an uncoalesced review exactly as it would have before this
+ * mechanism existed.
+ */
+async function resolveReviewSession(
+  controlPlane: Fetcher,
+  headers: Record<string, string>,
+  repoFullName: string,
+  prNumber: number,
+  log: Logger,
+  meta: Record<string, unknown>
+): Promise<{ existingSessionId: string | null; claimToken: string | null }> {
+  const claim = await claimPrSession(
+    controlPlane,
+    headers,
+    repoFullName,
+    prNumber,
+    "review",
+    log,
+    meta
+  );
+  if (!claim) return { existingSessionId: null, claimToken: null };
+  if (claim.result === "claimed") return { existingSessionId: null, claimToken: claim.claimToken };
+  if (claim.status === "active" && claim.sessionId) {
+    return { existingSessionId: claim.sessionId, claimToken: null };
+  }
+  // status 'creating', not yet confirmed — fail open rather than contest it.
+  return { existingSessionId: null, claimToken: null };
+}
+
+/**
+ * Read-only lookup of the PR's confirmed review session, for callers that
+ * only need "is there one" (relaying a PR state change, resolving a branch
+ * for a preview dispatch) without claiming the slot. Never throws; any
+ * failure resolves to null.
+ */
+async function peekReviewSession(
+  controlPlane: Fetcher,
+  headers: Record<string, string>,
+  repoFullName: string,
+  prNumber: number,
+  log: Logger,
+  meta: Record<string, unknown>
+): Promise<string | null> {
+  try {
+    const url = `https://internal/internal/pr-sessions/peek?repoFullName=${encodeURIComponent(repoFullName)}&prNumber=${prNumber}&lane=review`;
+    const res = await controlPlane.fetch(url, { method: "GET", headers });
+    if (!res.ok) {
+      log.debug("review_session.peek_unavailable", { ...meta, status: res.status });
+      return null;
+    }
+    const { sessionId } = (await res.json()) as { sessionId: string | null };
+    return sessionId;
+  } catch (err) {
+    log.warn("review_session.peek_error", {
+      ...meta,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+    return null;
+  }
 }
 
 /**
@@ -913,6 +1172,16 @@ interface RunCodeReviewParams {
    */
   existingSessionId?: string | null;
   /**
+   * D1 claim token for the PR's 'review' lane slot, obtained from
+   * `resolveReviewSession` when it won the claim. Only meaningful when
+   * `existingSessionId` is unset (a fresh session is about to be created);
+   * `runCodeReview` confirms the newly created session into this claim so a
+   * later re-trigger can find it. Null/undefined means either we're reusing
+   * `existingSessionId`, or the claim attempt failed/lost — in the latter case
+   * the fresh session is created but left unclaimed (fail-open).
+   */
+  reviewClaimToken?: string | null;
+  /**
    * Free-text ask from an @mention that routed to a review (e.g. "review the
    * auth changes"). Appended to the review prompt so the reviewer honors the
    * commenter's focus. Undefined for event-triggered reviews.
@@ -977,9 +1246,27 @@ async function runCodeReview(
       // since a fork's head ref is not fetchable from the base repo's origin.
       cloneBranch: params.cloneBranch,
     });
-    // Remember it so a later re-trigger (the `reef: ask for review` label) re-runs in
-    // this session instead of spawning a new one.
-    await rememberReviewSession(env, repoFullName, params.prNumber, sessionId);
+    // Confirm it into the D1 'review' lane slot so a later re-trigger (the
+    // `reef: ask for review` label, or an @mention review ask) finds it and
+    // re-runs in this session instead of spawning a new one. No claim token
+    // means the earlier resolveReviewSession() claim attempt failed or lost
+    // (fail-open) — the review still runs, just uncoalesced.
+    if (params.reviewClaimToken) {
+      const confirmed = await confirmPrSession(
+        env.CONTROL_PLANE,
+        headers,
+        repoFullName,
+        params.prNumber,
+        "review",
+        params.reviewClaimToken,
+        sessionId,
+        log,
+        params.meta
+      );
+      if (!confirmed) {
+        log.warn("review_session.confirm_failed", { ...params.meta, session_id: sessionId });
+      }
+    }
     log.info("session.created", {
       ...params.meta,
       session_id: sessionId,
@@ -1142,6 +1429,15 @@ export async function handleReviewRequested(
   const reviewModel =
     extractReviewModelFromLabels(pr.labels ?? []) ?? config.reviewModel ?? config.model;
 
+  const reviewSlot = await resolveReviewSession(
+    env.CONTROL_PLANE,
+    headers,
+    repoFullName,
+    pr.number,
+    log,
+    meta
+  );
+
   return runCodeReview(env, log, ghToken, headers, {
     owner,
     repoName,
@@ -1165,6 +1461,8 @@ export async function handleReviewRequested(
     scmAvatarUrl: sender.avatar_url,
     actionLabel: "review",
     cloneBranch: prCloneBranch(pr.head.ref, pr.head.repo?.full_name, repoFullName),
+    existingSessionId: reviewSlot.existingSessionId,
+    reviewClaimToken: reviewSlot.claimToken,
     meta,
   });
 }
@@ -1255,6 +1553,15 @@ export async function handlePullRequestOpened(
     ? "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code"
     : (extractReviewModelFromLabels(pr.labels ?? []) ?? config.reviewModel ?? config.model);
 
+  const reviewSlot = await resolveReviewSession(
+    env.CONTROL_PLANE,
+    headers,
+    repoFullName,
+    pr.number,
+    log,
+    meta
+  );
+
   return runCodeReview(env, log, ghToken, headers, {
     owner,
     repoName,
@@ -1278,6 +1585,8 @@ export async function handlePullRequestOpened(
     scmAvatarUrl: sender.avatar_url,
     actionLabel: "auto_review",
     cloneBranch: prCloneBranch(pr.head.ref, pr.head.repo?.full_name, repoFullName),
+    existingSessionId: reviewSlot.existingSessionId,
+    reviewClaimToken: reviewSlot.claimToken,
     meta,
   });
 }
@@ -1306,9 +1615,18 @@ export async function handlePullRequestStateChanged(
         ? "draft"
         : "open";
 
+  const meta = { trace_id: traceId, repo: repoFullName, pull_number: pr.number };
+  const headers = await getAuthHeaders(env, traceId);
   const sessionIds = new Set<string>();
 
-  const reviewSessionId = await lookupReviewSession(env, repoFullName, pr.number);
+  const reviewSessionId = await peekReviewSession(
+    env.CONTROL_PLANE,
+    headers,
+    repoFullName,
+    pr.number,
+    log,
+    meta
+  );
   if (reviewSessionId) sessionIds.add(reviewSessionId);
 
   const planSessionId = await lookupPrSession(env, repoFullName, pr.number);
@@ -1321,7 +1639,6 @@ export async function handlePullRequestStateChanged(
     return { outcome: "skipped", skip_reason: "no_session_for_pr" };
   }
 
-  const headers = await getAuthHeaders(env, traceId);
   const results = await Promise.allSettled(
     Array.from(sessionIds).map(async (sessionId) => {
       const response = await env.CONTROL_PLANE.fetch(
@@ -1382,7 +1699,7 @@ export async function handlePullRequestLabeled(
       log.debug("handler.preview_label_disabled", { trace_id: traceId, label: label.name });
       return { outcome: "skipped", skip_reason: "preview_label_disabled" };
     }
-    return dispatchPullRequestPreview(env, payload, traceId, "github_label_added");
+    return dispatchPullRequestPreview(env, log, payload, traceId, "github_label_added");
   }
 
   if (isVisualQaApprovalLabel(label.name)) {
@@ -1453,7 +1770,14 @@ export async function handlePullRequestLabeled(
     extractReviewModelFromLabels(pr.labels ?? []) ?? config.reviewModel ?? config.model;
   // Re-run in the PR's existing review session when we have one, so a re-review
   // stays in the same thread instead of spawning a new session.
-  const existingSessionId = await lookupReviewSession(env, repoFullName, pr.number);
+  const reviewSlot = await resolveReviewSession(
+    env.CONTROL_PLANE,
+    headers,
+    repoFullName,
+    pr.number,
+    log,
+    meta
+  );
 
   return runCodeReview(env, log, ghToken, headers, {
     owner,
@@ -1479,7 +1803,8 @@ export async function handlePullRequestLabeled(
     scmAvatarUrl: sender.avatar_url,
     actionLabel: "rereview",
     cloneBranch: prCloneBranch(pr.head.ref, pr.head.repo?.full_name, repoFullName),
-    existingSessionId,
+    existingSessionId: reviewSlot.existingSessionId,
+    reviewClaimToken: reviewSlot.claimToken,
     meta,
   });
 }
@@ -1588,7 +1913,7 @@ async function handleVisualQaApprovalLabel(
  */
 export async function handlePullRequestSynchronized(
   env: Env,
-  _log: Logger,
+  log: Logger,
   payload: PullRequestSynchronizedPayload,
   traceId: string
 ): Promise<HandlerResult> {
@@ -1598,11 +1923,12 @@ export async function handlePullRequestSynchronized(
   if (!payload.pull_request.labels?.some((label) => isPreviewLabel(label.name))) {
     return { outcome: "skipped", skip_reason: "preview_not_enabled" };
   }
-  return dispatchPullRequestPreview(env, payload, traceId, "github_synchronized");
+  return dispatchPullRequestPreview(env, log, payload, traceId, "github_synchronized");
 }
 
 async function dispatchPullRequestPreview(
   env: Env,
+  log: Logger,
   payload: Pick<PullRequestLabeledPayload, "pull_request" | "repository">,
   traceId: string,
   reason: string
@@ -1611,11 +1937,12 @@ async function dispatchPullRequestPreview(
   const owner = repo.owner.login;
   const repoName = repo.name;
   const repoFullName = `${owner}/${repoName}`.toLowerCase();
+  const meta = { trace_id: traceId, repo: repoFullName, pull_number: pr.number };
+  const headers = await getAuthHeaders(env, traceId);
   const sessionId =
     extractSessionIdFromBranch(pr.head.ref) ??
     (await lookupPrSession(env, repoFullName, pr.number)) ??
-    (await lookupReviewSession(env, repoFullName, pr.number));
-  const headers = await getAuthHeaders(env, traceId);
+    (await peekReviewSession(env.CONTROL_PLANE, headers, repoFullName, pr.number, log, meta));
   const response = sessionId
     ? await env.CONTROL_PLANE.fetch(
         `https://internal/sessions/${encodeURIComponent(sessionId)}/preview`,
@@ -1745,6 +2072,14 @@ export async function handleReviewRequestInternal(
   // Precedence: explicit request model (e.g. web re-run picker) → repo
   // `reviewModel` → general `model`.
   const reviewModel = req.model ?? config.reviewModel ?? config.model;
+  // The web "Re-run review" button always passes the session it was clicked
+  // from — reuse it directly, no claim needed (this caller already knows
+  // exactly which session to target). Without one (a fresh internal review
+  // request), claim the 'review' lane slot so the session this creates is
+  // findable by a later re-trigger, same as every other review-creation path.
+  const reviewSlot = req.sessionId
+    ? { existingSessionId: req.sessionId, claimToken: null }
+    : await resolveReviewSession(env.CONTROL_PLANE, headers, repoFullName, req.prNumber, log, meta);
   const result = await runCodeReview(env, log, ghToken, headers, {
     owner,
     repoName,
@@ -1768,8 +2103,10 @@ export async function handleReviewRequestInternal(
     scmAvatarUrl: req.requestedBy.avatarUrl ?? "",
     actionLabel: "rereview",
     cloneBranch: prCloneBranch(details.head.ref, details.head.repo?.full_name, repoFullName),
-    // Re-run in the session the button was clicked from (no new session).
-    existingSessionId: req.sessionId,
+    // Re-run in the session the button was clicked from (no new session), or
+    // the claimed 'review' lane slot for a fresh internal request.
+    existingSessionId: reviewSlot.existingSessionId,
+    reviewClaimToken: reviewSlot.claimToken,
     meta,
   });
 
@@ -2092,7 +2429,14 @@ export async function handleIssueComment(
       log.info("mention_review.pr_fetch_failed", meta);
       return { outcome: "skipped", skip_reason: "pr_fetch_failed" };
     }
-    const existingReviewSessionId = await lookupReviewSession(env, repoFullName, issue.number);
+    const reviewSlot = await resolveReviewSession(
+      env.CONTROL_PLANE,
+      headers,
+      repoFullName,
+      issue.number,
+      log,
+      meta
+    );
     return runCodeReview(env, log, ghToken, headers, {
       owner,
       repoName,
@@ -2118,7 +2462,8 @@ export async function handleIssueComment(
       scmAvatarUrl: sender.avatar_url,
       actionLabel: "mention_review",
       cloneBranch: prCloneBranch(prDetails.head.ref, prDetails.head.repo?.full_name, repoFullName),
-      existingSessionId: existingReviewSessionId,
+      existingSessionId: reviewSlot.existingSessionId,
+      reviewClaimToken: reviewSlot.claimToken,
       meta,
     });
   }
@@ -2164,7 +2509,6 @@ export async function handleIssueComment(
     await rememberPrSession(env, repoFullName, issue.number, sessionId);
   } else {
     ({ sessionId, coalesced } = await resolveRequestSession(
-      env,
       env.CONTROL_PLANE,
       headers,
       repoFullName,
@@ -2344,7 +2688,14 @@ export async function handleReviewComment(
       return { outcome: "skipped", skip_reason: "pr_fetch_failed" };
     }
     const triggerComment = comment.path ? `On \`${comment.path}\`:\n${commentBody}` : commentBody;
-    const existingReviewSessionId = await lookupReviewSession(env, repoFullName, pr.number);
+    const reviewSlot = await resolveReviewSession(
+      env.CONTROL_PLANE,
+      headers,
+      repoFullName,
+      pr.number,
+      log,
+      meta
+    );
     return runCodeReview(env, log, ghToken, headers, {
       owner,
       repoName,
@@ -2369,13 +2720,13 @@ export async function handleReviewComment(
       scmAvatarUrl: sender.avatar_url,
       actionLabel: "mention_review",
       cloneBranch: prCloneBranch(details.head.ref, details.head.repo?.full_name, repoFullName),
-      existingSessionId: existingReviewSessionId,
+      existingSessionId: reviewSlot.existingSessionId,
+      reviewClaimToken: reviewSlot.claimToken,
       meta,
     });
   }
 
   const { sessionId, coalesced } = await resolveRequestSession(
-    env,
     env.CONTROL_PLANE,
     headers,
     repoFullName,
