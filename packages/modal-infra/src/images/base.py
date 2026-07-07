@@ -85,7 +85,11 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v105: codex-auth-plugin registers the Codex model catalog via the `provider.models`
 #       hook — opencode 1.17.x ignores model mutations made in `auth.loader`, so every
 #       `openai/*` model failed to resolve after the 1.17.13 bump (#325).
-CACHE_BUSTER = "v105-codex-models-provider-hook"
+# v106: codex-auth-plugin INJECTS the exposed OpenAI models (cloning a catalog sibling's
+#       shape) instead of only filtering — opencode's built-in codex plugin strips
+#       everything <= gpt-5.4 before our hook runs, so a filter-only hook left
+#       gpt-5.2/5.2-codex/5.3-codex unresolvable.
+CACHE_BUSTER = "v106-codex-models-inject"
 
 # Base image with all development tools
 base_image = (

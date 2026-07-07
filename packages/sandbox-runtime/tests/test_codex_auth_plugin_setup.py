@@ -53,7 +53,30 @@ class TestCodexModelRegistration:
         src = _plugin_source()
         assert 'id: "openai"' in src, "must expose a provider hook for openai"
         assert "async models(provider, ctx)" in src, "must register models in provider.models"
-        assert "ALLOWED_MODELS.has(modelId)" in src, "must curate to the exposed model set"
+        assert "const EXPOSED_MODELS = {" in src, "must declare the exposed model set"
+
+    def test_exposes_the_shared_models_ts_openai_set(self):
+        # The plugin registers exactly the OpenAI ids offered in the picker
+        # (shared/models.ts MODEL_OPTIONS). If these drift, users can select a
+        # model the sandbox can't resolve.
+        src = _plugin_source()
+        for model_id in (
+            "gpt-5.2",
+            "gpt-5.4",
+            "gpt-5.5",
+            "gpt-5.2-codex",
+            "gpt-5.3-codex",
+            "gpt-5.3-codex-spark",
+        ):
+            assert f'"{model_id}":' in src, f"{model_id} must be in EXPOSED_MODELS"
+
+    def test_injects_models_missing_from_the_live_catalog(self):
+        # opencode's built-in codex plugin filters the OpenAI catalog (dropping
+        # everything <= gpt-5.4) before this hook runs, so a filter-only hook
+        # can never surface gpt-5.2/5.2-codex/5.3-codex. The hook must fall back
+        # to a cloned template when the id is absent from the catalog.
+        src = _plugin_source()
+        assert "catalog[id] || (spec.codex ? codexTemplate : chatTemplate)" in src
 
     def test_loader_does_not_register_models(self):
         src = _plugin_source()
@@ -74,8 +97,8 @@ class TestCodexModelRegistration:
         # window is corrected to match opencode's own built-in plugin. Pin the
         # literals so a future edit can't silently ship wrong pricing/limits.
         src = _plugin_source()
-        assert "cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }" in src
-        assert 'modelId.includes("gpt-5.5")' in src
+        assert "{ input: 0, output: 0, cache: { read: 0, write: 0 } }" in src
+        assert 'id.includes("gpt-5.5")' in src
         assert "{ context: 400000, input: 272000, output: 128000 }" in src
 
 
