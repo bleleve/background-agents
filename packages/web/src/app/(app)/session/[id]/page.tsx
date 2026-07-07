@@ -398,18 +398,25 @@ function SessionPageContent() {
     if (enabledModels.length > 0 && !enabledModels.includes(target)) return;
     if (target === selectedModel) return;
     setSelectedModel(target);
-    // Preserve the user's current reasoning effort across the auto-switch when
-    // it's valid for the target model — otherwise fall back to the target's
-    // default. Avoids surprising the user by promoting them to "max" just
-    // because the plan-default model's default reasoning happens to be max.
+    // Choose the reasoning effort for the target model. Toggling ON: preserve
+    // the current effort if it's valid for the plan model — avoids surprising
+    // the user by promoting them to "max" just because the plan-default model's
+    // default reasoning happens to be max. Toggling OFF (back to the session
+    // baseline): restore the session's own effort — the one chosen at creation —
+    // rather than the current local closure. The latter can still be the initial
+    // default on first load (this effect races the session-sync effect above on
+    // the same commit and sees a stale closure), which is what dropped a "high"
+    // session back to the model default.
+    const preferredEffort = planToggle ? reasoningEffort : sessionState?.reasoningEffort;
     setReasoningEffort(
-      reasoningEffort && isValidReasoningEffort(target, reasoningEffort)
-        ? reasoningEffort
+      preferredEffort && isValidReasoningEffort(target, preferredEffort)
+        ? preferredEffort
         : getDefaultReasoningEffort(target)
     );
   }, [
     planToggle,
     sessionState?.model,
+    sessionState?.reasoningEffort,
     defaultModel,
     defaultPlanModel,
     enabledModels,
