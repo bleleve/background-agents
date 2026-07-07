@@ -27,6 +27,42 @@ def _auth_file(tmp_path: Path) -> Path:
     return tmp_path / ".local" / "share" / "opencode" / "auth.json"
 
 
+def _plugin_source() -> str:
+    """Read the codex auth proxy plugin JS source."""
+    return (
+        Path(__file__).parent.parent
+        / "src"
+        / "sandbox_runtime"
+        / "plugins"
+        / "codex-auth-plugin.js"
+    ).read_text()
+
+
+class TestCodexModelRegistration:
+    """Guards the opencode 1.17.x model-registration contract.
+
+    opencode 1.17.x assembles a provider's resolvable model catalog from
+    models.dev, the plugin ``provider.models`` hook, and config — model
+    mutations made inside ``auth.loader`` are ignored. Registering the Codex
+    models in the loader (as this plugin did until the 1.17.13 bump) made every
+    ``openai/*`` model fail to resolve. These assertions keep registration in
+    the hook opencode actually reads.
+    """
+
+    def test_registers_models_via_provider_hook(self):
+        src = _plugin_source()
+        assert 'id: "openai"' in src, "must expose a provider hook for openai"
+        assert "async models(provider, ctx)" in src, "must register models in provider.models"
+        assert "ALLOWED_MODELS.has(modelId)" in src, "must curate to the exposed model set"
+
+    def test_loader_does_not_register_models(self):
+        src = _plugin_source()
+        # The loader must not receive or mutate the provider models — that path
+        # is a no-op in opencode 1.17.x and reintroduces the resolution bug.
+        assert "async loader(getAuth, provider)" not in src
+        assert "delete provider.models" not in src
+
+
 class TestCodexAuthPluginSetup:
     """Cases for codex auth proxy plugin deployment."""
 
