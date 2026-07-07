@@ -97,8 +97,9 @@ alias → canonical model map lives in `@open-inspect/shared` so Linear and GitH
 
 ## Settings → Models
 
-Two dropdowns under **Default Models** read and write the deployment-wide defaults. Changes are
-atomic; disabling a model that's the current default is blocked inline.
+Three dropdowns under **Default Models** — Default model, Default plan model, and Routing model —
+read and write the deployment-wide defaults. Changes are atomic; disabling a model that's the
+current default is blocked inline.
 
 Bots (Linear, GitHub, Slack) call `GET /model-preferences` at session-creation time. Fallback chain:
 `D1 > env var > shared constant`. If the control plane is unreachable, bots fall back to the shared
@@ -165,14 +166,14 @@ Key invariants:
 
 ## Endpoints (control plane)
 
-| Method        | Path                         | Purpose                                                                              |
-| ------------- | ---------------------------- | ------------------------------------------------------------------------------------ |
-| `GET`         | `/sessions/:id/plan`         | Current plan + approval status                                                       |
-| `POST`        | `/sessions/:id/plan`         | Save a new plan version (agent-source)                                               |
-| `GET`         | `/sessions/:id/plans`        | List all plan versions for a session                                                 |
-| `POST`        | `/sessions/:id/plan/approve` | Flip status to `approved`; optional `implementationModel` override                   |
-| `POST`        | `/sessions/:id/plan/reject`  | Flip status to `rejected` with optional reason                                       |
-| `GET` / `PUT` | `/model-preferences`         | Read/write deployment defaults (`defaultModel`, `defaultPlanModel`, `enabledModels`) |
+| Method        | Path                         | Purpose                                                                                                     |
+| ------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `GET`         | `/sessions/:id/plan`         | Current plan + approval status                                                                              |
+| `POST`        | `/sessions/:id/plan`         | Save a new plan version (agent-source)                                                                      |
+| `GET`         | `/sessions/:id/plans`        | List all plan versions for a session                                                                        |
+| `POST`        | `/sessions/:id/plan/approve` | Flip status to `approved`; optional `implementationModel` override                                          |
+| `POST`        | `/sessions/:id/plan/reject`  | Flip status to `rejected` with optional reason                                                              |
+| `GET` / `PUT` | `/model-preferences`         | Read/write deployment defaults (`defaultModel`, `defaultPlanModel`, `defaultRoutingModel`, `enabledModels`) |
 
 The bots and web app proxy through their own API routes (`/api/sessions/[id]/plan/*`) for auth +
 CSRF.

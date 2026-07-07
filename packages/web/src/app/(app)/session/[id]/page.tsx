@@ -1082,223 +1082,237 @@ function SessionContent({
             />
           )}
 
-          {/* Input container — hidden for read-only review sessions. */}
-          <div className={`border border-border bg-input${isReviewSession ? " hidden" : ""}`}>
-            {/* Queued files list */}
-            {queuedFiles.length > 0 && (
-              <div className="px-4 pt-3 flex flex-wrap gap-2">
-                {queuedFiles.map((file, idx) => (
-                  <div
-                    key={`${file.name}-${idx}`}
-                    className="flex items-center gap-1.5 bg-muted px-2 py-1 text-xs text-foreground max-w-[200px]"
-                  >
-                    <span className="truncate">{file.name}</span>
+          {/* A review session is read-only — Reef posts its verdict on the PR and
+              takes no follow-up prompts. Show an explicit notice explaining why,
+              instead of a disabled composer (which reads as a broken input). */}
+          {isReviewSession ? (
+            <div className="border border-border bg-muted/40 px-4 py-3 text-sm rounded-sm">
+              <p className="font-medium text-foreground">Read-only review session</p>
+              <p className="mt-1 text-muted-foreground">
+                Reef posts its review as a verdict on the pull request — this session doesn&apos;t
+                take follow-up replies. To run another pass, use the “Re-run review” button above,
+                add the <code>reef: ask for review</code> label, or mention <code>@reef</code> on
+                the PR.
+              </p>
+            </div>
+          ) : (
+            <div className="border border-border bg-input">
+              {/* Queued files list */}
+              {queuedFiles.length > 0 && (
+                <div className="px-4 pt-3 flex flex-wrap gap-2">
+                  {queuedFiles.map((file, idx) => (
+                    <div
+                      key={`${file.name}-${idx}`}
+                      className="flex items-center gap-1.5 bg-muted px-2 py-1 text-xs text-foreground max-w-[200px]"
+                    >
+                      <span className="truncate">{file.name}</span>
+                      <button
+                        type="button"
+                        // Disabled mid-upload: the upload loop iterates a snapshot
+                        // of queuedFiles, so a removal here wouldn't stop the
+                        // upload and a later failure would re-queue the file,
+                        // silently undoing the user's removal.
+                        disabled={uploadingFiles}
+                        onClick={() => {
+                          setUploadError(null);
+                          setQueuedFiles((prev) => prev.filter((_, i) => i !== idx));
+                        }}
+                        className="text-secondary-foreground hover:text-destructive flex-shrink-0 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        <XIcon className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Upload error — surfaced so failed files aren't lost silently */}
+              {uploadError && (
+                <div className="px-4 pt-3 text-xs text-destructive" role="alert">
+                  {uploadError}
+                </div>
+              )}
+
+              {/* Text input area with floating send button */}
+              <div className="relative">
+                <textarea
+                  ref={inputRef}
+                  value={prompt}
+                  onChange={handleComposerChange}
+                  onKeyDown={handleKeyDown}
+                  placeholder={
+                    isPlanAwaiting
+                      ? "Amend the plan…"
+                      : isPlanLocked && isProcessing
+                        ? "Generating plan…"
+                        : isProcessing
+                          ? "Type your next message..."
+                          : isPlanLocked || planToggle
+                            ? "Describe what to plan"
+                            : "Ask or build anything"
+                  }
+                  className="w-full resize-none bg-transparent px-4 pt-4 pb-12 focus:outline-none text-foreground placeholder:text-secondary-foreground"
+                  rows={3}
+                />
+                {/* Hidden file input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    if (files.length > 0) {
+                      setUploadError(null);
+                      setQueuedFiles((prev) => [...prev, ...files]);
+                    }
+                    // Reset so the same file can be re-selected
+                    e.target.value = "";
+                  }}
+                />
+                {/* Floating action buttons */}
+                <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                  {uploadingFiles && (
+                    <span className="text-xs text-muted-foreground">Uploading...</span>
+                  )}
+                  {isProcessing && prompt.trim() && !uploadingFiles && (
+                    <span className="text-xs text-warning">Waiting...</span>
+                  )}
+                  {canRelaunchSandbox && (
                     <button
                       type="button"
-                      // Disabled mid-upload: the upload loop iterates a snapshot
-                      // of queuedFiles, so a removal here wouldn't stop the
-                      // upload and a later failure would re-queue the file,
-                      // silently undoing the user's removal.
-                      disabled={uploadingFiles}
-                      onClick={() => {
-                        setUploadError(null);
-                        setQueuedFiles((prev) => prev.filter((_, i) => i !== idx));
-                      }}
-                      className="text-secondary-foreground hover:text-destructive flex-shrink-0 transition disabled:opacity-30 disabled:cursor-not-allowed"
-                      aria-label={`Remove ${file.name}`}
+                      onClick={handleRelaunchSandbox}
+                      disabled={isRelaunching}
+                      className="p-2 text-warning hover:bg-warning-muted disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      title="Resume"
+                      aria-label="Resume the interrupted turn (relaunches the sandbox if it is down)"
                     >
-                      <XIcon className="w-3 h-3" />
+                      <RefreshIcon className={`w-5 h-5${isRelaunching ? " animate-spin" : ""}`} />
                     </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Upload error — surfaced so failed files aren't lost silently */}
-            {uploadError && (
-              <div className="px-4 pt-3 text-xs text-destructive" role="alert">
-                {uploadError}
-              </div>
-            )}
-
-            {/* Text input area with floating send button */}
-            <div className="relative">
-              <textarea
-                ref={inputRef}
-                value={prompt}
-                onChange={handleComposerChange}
-                onKeyDown={handleKeyDown}
-                placeholder={
-                  isPlanAwaiting
-                    ? "Amend the plan…"
-                    : isPlanLocked && isProcessing
-                      ? "Generating plan…"
-                      : isProcessing
-                        ? "Type your next message..."
-                        : isPlanLocked || planToggle
-                          ? "Describe what to plan"
-                          : "Ask or build anything"
-                }
-                className="w-full resize-none bg-transparent px-4 pt-4 pb-12 focus:outline-none text-foreground placeholder:text-secondary-foreground"
-                rows={3}
-              />
-              {/* Hidden file input */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? []);
-                  if (files.length > 0) {
-                    setUploadError(null);
-                    setQueuedFiles((prev) => [...prev, ...files]);
-                  }
-                  // Reset so the same file can be re-selected
-                  e.target.value = "";
-                }}
-              />
-              {/* Floating action buttons */}
-              <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                {uploadingFiles && (
-                  <span className="text-xs text-muted-foreground">Uploading...</span>
-                )}
-                {isProcessing && prompt.trim() && !uploadingFiles && (
-                  <span className="text-xs text-warning">Waiting...</span>
-                )}
-                {canRelaunchSandbox && (
+                  )}
+                  {isProcessing && (
+                    <button
+                      type="button"
+                      onClick={stopExecution}
+                      className="p-2 text-destructive hover:bg-destructive-muted transition"
+                      title="Stop"
+                    >
+                      <StopIcon className="w-5 h-5" />
+                    </button>
+                  )}
+                  {/* Attach file button */}
                   <button
                     type="button"
-                    onClick={handleRelaunchSandbox}
-                    disabled={isRelaunching}
-                    className="p-2 text-warning hover:bg-warning-muted disabled:opacity-30 disabled:cursor-not-allowed transition"
-                    title="Resume"
-                    aria-label="Resume the interrupted turn (relaunches the sandbox if it is down)"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isProcessing || uploadingFiles}
+                    className="p-2 text-secondary-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    title="Attach file"
+                    aria-label="Attach file"
                   >
-                    <RefreshIcon className={`w-5 h-5${isRelaunching ? " animate-spin" : ""}`} />
+                    <PaperclipIcon className="w-5 h-5" />
                   </button>
-                )}
-                {isProcessing && (
                   <button
-                    type="button"
-                    onClick={stopExecution}
-                    className="p-2 text-destructive hover:bg-destructive-muted transition"
-                    title="Stop"
+                    type="submit"
+                    disabled={
+                      (!prompt.trim() && queuedFiles.length === 0) || isProcessing || uploadingFiles
+                    }
+                    className="p-2 text-secondary-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    title={
+                      isProcessing && prompt.trim()
+                        ? "Wait for execution to complete"
+                        : `Send (${SHORTCUT_LABELS.SEND_PROMPT})`
+                    }
+                    aria-label={
+                      isProcessing && prompt.trim()
+                        ? "Wait for execution to complete"
+                        : `Send (${SHORTCUT_LABELS.SEND_PROMPT})`
+                    }
                   >
-                    <StopIcon className="w-5 h-5" />
+                    <SendIcon className="w-5 h-5" />
                   </button>
-                )}
-                {/* Attach file button */}
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isProcessing || uploadingFiles}
-                  className="p-2 text-secondary-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition"
-                  title="Attach file"
-                  aria-label="Attach file"
-                >
-                  <PaperclipIcon className="w-5 h-5" />
-                </button>
-                <button
-                  type="submit"
-                  disabled={
-                    (!prompt.trim() && queuedFiles.length === 0) || isProcessing || uploadingFiles
-                  }
-                  className="p-2 text-secondary-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition"
-                  title={
-                    isProcessing && prompt.trim()
-                      ? "Wait for execution to complete"
-                      : `Send (${SHORTCUT_LABELS.SEND_PROMPT})`
-                  }
-                  aria-label={
-                    isProcessing && prompt.trim()
-                      ? "Wait for execution to complete"
-                      : `Send (${SHORTCUT_LABELS.SEND_PROMPT})`
-                  }
-                >
-                  <SendIcon className="w-5 h-5" />
-                </button>
+                </div>
               </div>
-            </div>
 
-            {/* Footer row with model selector, reasoning pills, and agent
+              {/* Footer row with model selector, reasoning pills, and agent
                 label. In plan-locked mode (planning turn streaming or plan
                 awaiting approval) the model selector + pills are hidden
                 because the planning model is locked for the duration; only
                 the agent label remains. */}
-            <div className="flex flex-col gap-2 px-4 py-2 border-t border-border-muted sm:flex-row sm:items-center sm:justify-between sm:gap-0">
-              {!isPlanLocked && (
-                <div className="flex flex-wrap items-center gap-2 sm:gap-4 min-w-0">
-                  <Combobox
-                    value={selectedModel}
-                    onChange={setSelectedModel}
-                    items={
-                      modelOptions.map((group) => ({
-                        category: group.category,
-                        options: group.models.map((model) => ({
-                          value: model.id,
-                          label: model.name,
-                          description: model.description,
-                        })),
-                      })) as ComboboxGroup[]
-                    }
-                    direction="up"
-                    dropdownWidth="w-56"
-                    disabled={isProcessing}
-                    triggerClassName="flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
-                  >
-                    <ModelIcon className="w-3.5 h-3.5" />
-                    <span className="truncate max-w-[9rem] sm:max-w-none">
-                      {formatModelNameLower(selectedModel)}
-                    </span>
-                  </Combobox>
+              <div className="flex flex-col gap-2 px-4 py-2 border-t border-border-muted sm:flex-row sm:items-center sm:justify-between sm:gap-0">
+                {!isPlanLocked && (
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-4 min-w-0">
+                    <Combobox
+                      value={selectedModel}
+                      onChange={setSelectedModel}
+                      items={
+                        modelOptions.map((group) => ({
+                          category: group.category,
+                          options: group.models.map((model) => ({
+                            value: model.id,
+                            label: model.name,
+                            description: model.description,
+                          })),
+                        })) as ComboboxGroup[]
+                      }
+                      direction="up"
+                      dropdownWidth="w-56"
+                      disabled={isProcessing}
+                      triggerClassName="flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    >
+                      <ModelIcon className="w-3.5 h-3.5" />
+                      <span className="truncate max-w-[9rem] sm:max-w-none">
+                        {formatModelNameLower(selectedModel)}
+                      </span>
+                    </Combobox>
 
-                  <ReasoningEffortPills
-                    selectedModel={selectedModel}
-                    reasoningEffort={reasoningEffort}
-                    onSelect={setReasoningEffort}
-                    disabled={isProcessing}
-                  />
+                    <ReasoningEffortPills
+                      selectedModel={selectedModel}
+                      reasoningEffort={reasoningEffort}
+                      onSelect={setReasoningEffort}
+                      disabled={isProcessing}
+                    />
 
-                  {/* Per-prompt plan toggle. OFF by default; clicking ON
+                    {/* Per-prompt plan toggle. OFF by default; clicking ON
                       sends `planMode: true` with the next prompt so the
                       server runs it as a planning turn. */}
-                  <button
-                    type="button"
-                    onClick={() => setPlanToggle(!planToggle)}
-                    disabled={isProcessing}
-                    aria-pressed={planToggle}
-                    className={`rounded border px-2 py-0.5 text-xs transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                      planToggle
-                        ? "border-accent bg-accent-muted text-accent"
-                        : "border-border text-muted-foreground hover:text-foreground"
-                    }`}
-                    title={
-                      planToggle
-                        ? "Plan mode ON — next prompt will generate a plan"
-                        : "Plan mode OFF — next prompt will build directly"
-                    }
-                  >
-                    Plan
-                  </button>
-                </div>
-              )}
+                    <button
+                      type="button"
+                      onClick={() => setPlanToggle(!planToggle)}
+                      disabled={isProcessing}
+                      aria-pressed={planToggle}
+                      className={`rounded border px-2 py-0.5 text-xs transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                        planToggle
+                          ? "border-accent bg-accent-muted text-accent"
+                          : "border-border text-muted-foreground hover:text-foreground"
+                      }`}
+                      title={
+                        planToggle
+                          ? "Plan mode ON — next prompt will generate a plan"
+                          : "Plan mode OFF — next prompt will build directly"
+                      }
+                    >
+                      Plan
+                    </button>
+                  </div>
+                )}
 
-              {/* Agent label. Plan-mode sessions run planning turns until
+                {/* Agent label. Plan-mode sessions run planning turns until
                   the plan reaches a terminal status (approved or rejected);
                   any terminal state reverts to the build agent. The per-prompt
                   planToggle also flips the label so the user sees what the
                   next prompt will run as. */}
-              <span className="hidden sm:inline text-sm text-muted-foreground sm:ml-auto">
-                {planToggle ||
-                (sessionState?.planMode &&
-                  sessionState?.planApprovalStatus !== "approved" &&
-                  sessionState?.planApprovalStatus !== "rejected")
-                  ? "plan agent"
-                  : "build agent"}
-              </span>
+                <span className="hidden sm:inline text-sm text-muted-foreground sm:ml-auto">
+                  {planToggle ||
+                  (sessionState?.planMode &&
+                    sessionState?.planApprovalStatus !== "approved" &&
+                    sessionState?.planApprovalStatus !== "rejected")
+                    ? "plan agent"
+                    : "build agent"}
+                </span>
+              </div>
             </div>
-          </div>
+          )}
         </form>
       </footer>
     </div>

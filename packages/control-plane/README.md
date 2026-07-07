@@ -110,10 +110,10 @@ public and sandbox-auth route lists.
 Deployment-wide model settings. Bots fetch these at session-creation time. Fallback chain when
 unreachable: `D1 > env var > shared constant`.
 
-| Endpoint             | Method | Description                                                                              |
-| -------------------- | ------ | ---------------------------------------------------------------------------------------- |
-| `/model-preferences` | GET    | Returns `{ enabledModels, defaultModel, defaultPlanModel }`                              |
-| `/model-preferences` | PUT    | Atomic update of the three fields; rejects when `defaultModel` is not in `enabledModels` |
+| Endpoint             | Method | Description                                                                                                              |
+| -------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `/model-preferences` | GET    | Returns `{ enabledModels, defaultModel, defaultPlanModel, defaultRoutingModel }`                                         |
+| `/model-preferences` | PUT    | Atomic update; rejects when a non-null `defaultModel`/`defaultPlanModel`/`defaultRoutingModel` is not in `enabledModels` |
 
 ### Create PR Payload
 

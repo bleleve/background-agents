@@ -6,6 +6,7 @@ import {
   DEFAULT_ENABLED_MODELS,
   DEFAULT_MODEL as SHARED_DEFAULT_MODEL,
   DEFAULT_PLAN_MODEL as SHARED_DEFAULT_PLAN_MODEL,
+  DEFAULT_ROUTING_MODEL as SHARED_DEFAULT_ROUTING_MODEL,
   getValidModelOrDefault,
 } from "@open-inspect/shared";
 import {
@@ -35,7 +36,7 @@ const logger = createLogger("router:model-preferences");
 function resolveDefaults(
   env: Env,
   prefs: ModelPreferences | null
-): { defaultModel: string; defaultPlanModel: string } {
+): { defaultModel: string; defaultPlanModel: string; defaultRoutingModel: string } {
   const defaultModel =
     prefs?.defaultModel ??
     (env.DEFAULT_MODEL ? getValidModelOrDefault(env.DEFAULT_MODEL) : SHARED_DEFAULT_MODEL);
@@ -44,7 +45,12 @@ function resolveDefaults(
     (env.DEFAULT_PLAN_MODEL
       ? getValidModelOrDefault(env.DEFAULT_PLAN_MODEL)
       : SHARED_DEFAULT_PLAN_MODEL);
-  return { defaultModel, defaultPlanModel };
+  const defaultRoutingModel =
+    prefs?.defaultRoutingModel ??
+    (env.DEFAULT_ROUTING_MODEL
+      ? getValidModelOrDefault(env.DEFAULT_ROUTING_MODEL)
+      : SHARED_DEFAULT_ROUTING_MODEL);
+  return { defaultModel, defaultPlanModel, defaultRoutingModel };
 }
 
 async function handleGetModelPreferences(
@@ -92,6 +98,7 @@ async function handleSetModelPreferences(
     enabledModels?: string[];
     defaultModel?: string | null;
     defaultPlanModel?: string | null;
+    defaultRoutingModel?: string | null;
   }>(request);
   if (body instanceof Response) return body;
 
@@ -105,6 +112,7 @@ async function handleSetModelPreferences(
     // Treat explicit null and missing field both as "delegate to fallback".
     defaultModel: body.defaultModel ?? null,
     defaultPlanModel: body.defaultPlanModel ?? null,
+    defaultRoutingModel: body.defaultRoutingModel ?? null,
   };
 
   try {
@@ -115,6 +123,7 @@ async function handleSetModelPreferences(
       enabled_count: prefs.enabledModels.length,
       has_default_model: prefs.defaultModel !== null,
       has_default_plan_model: prefs.defaultPlanModel !== null,
+      has_default_routing_model: prefs.defaultRoutingModel !== null,
       request_id: ctx.request_id,
       trace_id: ctx.trace_id,
     });
@@ -124,6 +133,7 @@ async function handleSetModelPreferences(
       enabledModels: prefs.enabledModels,
       defaultModel: prefs.defaultModel,
       defaultPlanModel: prefs.defaultPlanModel,
+      defaultRoutingModel: prefs.defaultRoutingModel,
     });
   } catch (e) {
     if (e instanceof ModelPreferencesValidationError) {

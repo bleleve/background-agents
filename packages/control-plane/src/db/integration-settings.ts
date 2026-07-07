@@ -269,6 +269,12 @@ export class IntegrationSettingsStore {
   private validateAndNormalizeGitHubSettings(settings: GitHubBotSettings): GitHubBotSettings {
     this.validateModelAndEffort(settings);
 
+    if (settings.reviewModel !== undefined && !isValidModel(settings.reviewModel)) {
+      throw new IntegrationSettingsValidationError(
+        `Invalid review model ID: ${settings.reviewModel}`
+      );
+    }
+
     if (settings.privateReposOnly !== undefined && typeof settings.privateReposOnly !== "boolean") {
       throw new IntegrationSettingsValidationError("privateReposOnly must be a boolean");
     }

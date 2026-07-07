@@ -15,19 +15,21 @@ describe("ModelPreferencesStore (D1 integration)", () => {
     expect(await store.getEnabledModels()).toBeNull();
   });
 
-  it("upserts the singleton row and round-trips all three fields", async () => {
+  it("upserts the singleton row and round-trips all fields", async () => {
     const store = new ModelPreferencesStore(env.DB);
 
     await store.setPreferences({
       enabledModels: ["anthropic/claude-haiku-4-5", "anthropic/claude-opus-4-6"],
       defaultModel: "anthropic/claude-haiku-4-5",
       defaultPlanModel: "anthropic/claude-opus-4-6",
+      defaultRoutingModel: "anthropic/claude-haiku-4-5",
     });
 
     expect(await store.getPreferences()).toEqual({
       enabledModels: ["anthropic/claude-haiku-4-5", "anthropic/claude-opus-4-6"],
       defaultModel: "anthropic/claude-haiku-4-5",
       defaultPlanModel: "anthropic/claude-opus-4-6",
+      defaultRoutingModel: "anthropic/claude-haiku-4-5",
     });
   });
 
@@ -38,6 +40,7 @@ describe("ModelPreferencesStore (D1 integration)", () => {
       enabledModels: ["anthropic/claude-haiku-4-5"],
       defaultModel: null,
       defaultPlanModel: null,
+      defaultRoutingModel: null,
     });
 
     const prefs = await store.getPreferences();
@@ -45,6 +48,7 @@ describe("ModelPreferencesStore (D1 integration)", () => {
       enabledModels: ["anthropic/claude-haiku-4-5"],
       defaultModel: null,
       defaultPlanModel: null,
+      defaultRoutingModel: null,
     });
   });
 
@@ -55,17 +59,20 @@ describe("ModelPreferencesStore (D1 integration)", () => {
       enabledModels: ["anthropic/claude-haiku-4-5"],
       defaultModel: "anthropic/claude-haiku-4-5",
       defaultPlanModel: null,
+      defaultRoutingModel: "anthropic/claude-haiku-4-5",
     });
     await store.setPreferences({
       enabledModels: ["anthropic/claude-opus-4-7"],
       defaultModel: "anthropic/claude-opus-4-7",
       defaultPlanModel: "anthropic/claude-opus-4-7",
+      defaultRoutingModel: "anthropic/claude-opus-4-7",
     });
 
     expect(await store.getPreferences()).toEqual({
       enabledModels: ["anthropic/claude-opus-4-7"],
       defaultModel: "anthropic/claude-opus-4-7",
       defaultPlanModel: "anthropic/claude-opus-4-7",
+      defaultRoutingModel: "anthropic/claude-opus-4-7",
     });
   });
 
@@ -79,6 +86,7 @@ describe("ModelPreferencesStore (D1 integration)", () => {
       ],
       defaultModel: null,
       defaultPlanModel: null,
+      defaultRoutingModel: null,
     });
     expect((await store.getPreferences())?.enabledModels).toEqual([
       "anthropic/claude-haiku-4-5",
@@ -89,7 +97,12 @@ describe("ModelPreferencesStore (D1 integration)", () => {
   it("rejects empty enabledModels", async () => {
     const store = new ModelPreferencesStore(env.DB);
     await expect(
-      store.setPreferences({ enabledModels: [], defaultModel: null, defaultPlanModel: null })
+      store.setPreferences({
+        enabledModels: [],
+        defaultModel: null,
+        defaultPlanModel: null,
+        defaultRoutingModel: null,
+      })
     ).rejects.toBeInstanceOf(ModelPreferencesValidationError);
   });
 
@@ -100,6 +113,7 @@ describe("ModelPreferencesStore (D1 integration)", () => {
         enabledModels: ["not-a-real-model"],
         defaultModel: null,
         defaultPlanModel: null,
+        defaultRoutingModel: null,
       })
     ).rejects.toBeInstanceOf(ModelPreferencesValidationError);
   });
@@ -111,6 +125,7 @@ describe("ModelPreferencesStore (D1 integration)", () => {
         enabledModels: ["anthropic/claude-haiku-4-5"],
         defaultModel: "anthropic/claude-opus-4-7",
         defaultPlanModel: null,
+        defaultRoutingModel: null,
       })
     ).rejects.toThrow(/not in the enabled models list/);
   });
@@ -122,8 +137,33 @@ describe("ModelPreferencesStore (D1 integration)", () => {
         enabledModels: ["anthropic/claude-haiku-4-5"],
         defaultModel: null,
         defaultPlanModel: "anthropic/claude-opus-4-7",
+        defaultRoutingModel: null,
       })
     ).rejects.toThrow(/not in the enabled models list/);
+  });
+
+  it("rejects a defaultRoutingModel that is not in enabledModels", async () => {
+    const store = new ModelPreferencesStore(env.DB);
+    await expect(
+      store.setPreferences({
+        enabledModels: ["anthropic/claude-haiku-4-5"],
+        defaultModel: null,
+        defaultPlanModel: null,
+        defaultRoutingModel: "anthropic/claude-opus-4-7",
+      })
+    ).rejects.toThrow(/not in the enabled models list/);
+  });
+
+  it("rejects an invalid defaultRoutingModel id", async () => {
+    const store = new ModelPreferencesStore(env.DB);
+    await expect(
+      store.setPreferences({
+        enabledModels: ["anthropic/claude-haiku-4-5"],
+        defaultModel: null,
+        defaultPlanModel: null,
+        defaultRoutingModel: "garbage",
+      })
+    ).rejects.toThrow(/Invalid default routing model ID/);
   });
 
   it("rejects an invalid defaultModel id", async () => {
@@ -133,6 +173,7 @@ describe("ModelPreferencesStore (D1 integration)", () => {
         enabledModels: ["anthropic/claude-haiku-4-5"],
         defaultModel: "garbage",
         defaultPlanModel: null,
+        defaultRoutingModel: null,
       })
     ).rejects.toThrow(/Invalid default model ID/);
   });
@@ -143,6 +184,7 @@ describe("ModelPreferencesStore (D1 integration)", () => {
       enabledModels: ["anthropic/claude-haiku-4-5", "anthropic/claude-opus-4-6"],
       defaultModel: "anthropic/claude-haiku-4-5",
       defaultPlanModel: null,
+      defaultRoutingModel: null,
     });
     expect(await store.getEnabledModels()).toEqual([
       "anthropic/claude-haiku-4-5",

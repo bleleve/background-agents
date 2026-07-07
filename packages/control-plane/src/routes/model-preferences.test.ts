@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_ENABLED_MODELS, DEFAULT_MODEL, DEFAULT_PLAN_MODEL } from "@open-inspect/shared";
+import {
+  DEFAULT_ENABLED_MODELS,
+  DEFAULT_MODEL,
+  DEFAULT_PLAN_MODEL,
+  DEFAULT_ROUTING_MODEL,
+} from "@open-inspect/shared";
 import { modelPreferencesRoutes } from "./model-preferences";
 import { ModelPreferencesValidationError } from "../db/model-preferences";
 import type { RequestContext } from "./shared";
@@ -132,6 +137,30 @@ describe("GET /model-preferences", () => {
     expect(body.defaultPlanModel).toBe("anthropic/claude-opus-4-7");
   });
 
+  it("resolves defaultRoutingModel (DB > env > shared)", async () => {
+    // shared fallback when neither DB nor env sets it
+    mockStore.getPreferences.mockResolvedValue(null);
+    let res = await callGet(createEnv());
+    let body = (await res.json()) as { defaultRoutingModel: string };
+    expect(body.defaultRoutingModel).toBe(DEFAULT_ROUTING_MODEL);
+
+    // env var (normalized) over shared
+    res = await callGet(createEnv({ DEFAULT_ROUTING_MODEL: "claude-haiku-4-5" }));
+    body = (await res.json()) as { defaultRoutingModel: string };
+    expect(body.defaultRoutingModel).toBe("anthropic/claude-haiku-4-5");
+
+    // DB row over env
+    mockStore.getPreferences.mockResolvedValue({
+      enabledModels: ["anthropic/claude-opus-4-7"],
+      defaultModel: null,
+      defaultPlanModel: null,
+      defaultRoutingModel: "anthropic/claude-opus-4-7",
+    });
+    res = await callGet(createEnv({ DEFAULT_ROUTING_MODEL: "claude-haiku-4-5" }));
+    body = (await res.json()) as { defaultRoutingModel: string };
+    expect(body.defaultRoutingModel).toBe("anthropic/claude-opus-4-7");
+  });
+
   it("falls back to shared defaults when env vars hold invalid model ids", async () => {
     mockStore.getPreferences.mockResolvedValue(null);
     const res = await callGet(
@@ -206,19 +235,21 @@ describe("PUT /model-preferences", () => {
     vi.clearAllMocks();
   });
 
-  it("persists all three fields atomically and echoes them back", async () => {
+  it("persists all fields atomically and echoes them back", async () => {
     mockStore.setPreferences.mockResolvedValue(undefined);
 
     const res = await callPut(createEnv(), {
       enabledModels: ["anthropic/claude-haiku-4-5", "anthropic/claude-opus-4-6"],
       defaultModel: "anthropic/claude-haiku-4-5",
       defaultPlanModel: "anthropic/claude-opus-4-6",
+      defaultRoutingModel: "anthropic/claude-haiku-4-5",
     });
     const body = (await res.json()) as {
       status: string;
       enabledModels: string[];
       defaultModel: string;
       defaultPlanModel: string;
+      defaultRoutingModel: string;
     };
 
     expect(res.status).toBe(200);
@@ -226,11 +257,13 @@ describe("PUT /model-preferences", () => {
     expect(body.enabledModels).toEqual(["anthropic/claude-haiku-4-5", "anthropic/claude-opus-4-6"]);
     expect(body.defaultModel).toBe("anthropic/claude-haiku-4-5");
     expect(body.defaultPlanModel).toBe("anthropic/claude-opus-4-6");
+    expect(body.defaultRoutingModel).toBe("anthropic/claude-haiku-4-5");
 
     expect(mockStore.setPreferences).toHaveBeenCalledWith({
       enabledModels: ["anthropic/claude-haiku-4-5", "anthropic/claude-opus-4-6"],
       defaultModel: "anthropic/claude-haiku-4-5",
       defaultPlanModel: "anthropic/claude-opus-4-6",
+      defaultRoutingModel: "anthropic/claude-haiku-4-5",
     });
   });
 
@@ -241,6 +274,7 @@ describe("PUT /model-preferences", () => {
       enabledModels: ["anthropic/claude-haiku-4-5"],
       defaultModel: null,
       defaultPlanModel: null,
+      defaultRoutingModel: null,
     });
 
     expect(res.status).toBe(200);
@@ -248,6 +282,7 @@ describe("PUT /model-preferences", () => {
       enabledModels: ["anthropic/claude-haiku-4-5"],
       defaultModel: null,
       defaultPlanModel: null,
+      defaultRoutingModel: null,
     });
   });
 
@@ -262,6 +297,7 @@ describe("PUT /model-preferences", () => {
       enabledModels: ["anthropic/claude-haiku-4-5"],
       defaultModel: null,
       defaultPlanModel: null,
+      defaultRoutingModel: null,
     });
   });
 

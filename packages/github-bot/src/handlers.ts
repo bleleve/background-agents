@@ -40,11 +40,9 @@ import {
   INLINE_SUGGESTION_PROMPT_VERSION,
 } from "./prompts";
 import { getGitHubConfig, type ResolvedGitHubConfig } from "./utils/integration-config";
+import { routeMention, guardEffort } from "./routing/mention-router";
 import {
-  extractModelFromLabels,
-  extractPlanModelFromLabels,
   extractReviewModelFromLabels,
-  hasPlanLabel,
   hasLowRiskLabel,
   isAskForReviewLabel,
   isPreviewLabel,
@@ -283,17 +281,6 @@ async function createSession(
   }
   const result = (await response.json()) as { sessionId: string };
   return result.sessionId;
-}
-
-/**
- * Resolve the plan model for a label-driven session creation.
- * Precedence: `plan-<alias>` label → control-plane defaults (DB > env > shared).
- */
-async function resolvePlanModel(env: Env, labels: GitHubLabel[]): Promise<string> {
-  const labelModel = extractPlanModelFromLabels(labels);
-  if (labelModel) return labelModel;
-  const { defaultPlanModel } = await fetchModelDefaults(env);
-  return defaultPlanModel;
 }
 
 // ─── PR → session mapping (KV) ───────────────────────────────────────────────
@@ -889,7 +876,7 @@ async function resolveCallerGating(
 }
 
 /** Logged `action` / `handler_action` value identifying which path ran a review. */
-type ReviewActionLabel = "review" | "auto_review" | "rereview";
+type ReviewActionLabel = "review" | "auto_review" | "rereview" | "mention_review";
 
 interface RunCodeReviewParams {
   owner: string;
@@ -925,6 +912,12 @@ interface RunCodeReviewParams {
    * stays in the same session/thread.
    */
   existingSessionId?: string | null;
+  /**
+   * Free-text ask from an @mention that routed to a review (e.g. "review the
+   * auth changes"). Appended to the review prompt so the reviewer honors the
+   * commenter's focus. Undefined for event-triggered reviews.
+   */
+  triggerComment?: string;
   meta: Record<string, unknown>;
 }
 
@@ -1039,6 +1032,7 @@ async function runCodeReview(
     head: params.head,
     isPublic: params.isPublic,
     codeReviewInstructions: params.codeReviewInstructions,
+    triggerComment: params.triggerComment,
     autoApproveOnOpen: params.autoApproveOnOpen,
     largeDiff,
     prDiff,
@@ -1143,9 +1137,10 @@ export async function handleReviewRequested(
     meta
   );
 
-  // `review-<alias>` label overrides the configured model for PR reviews only.
-  // It must be applied before the PR is opened or the review request fires.
-  const reviewModel = extractReviewModelFromLabels(pr.labels ?? []) ?? config.model;
+  // Review model precedence: `review-<alias>` PR label → repo `reviewModel` →
+  // general `model`. Must be applied before the PR is opened or the request fires.
+  const reviewModel =
+    extractReviewModelFromLabels(pr.labels ?? []) ?? config.reviewModel ?? config.model;
 
   return runCodeReview(env, log, ghToken, headers, {
     owner,
@@ -1162,7 +1157,7 @@ export async function handleReviewRequested(
     head: pr.head.ref,
     isPublic: !repo.private,
     model: reviewModel,
-    reasoningEffort: config.reasoningEffort,
+    reasoningEffort: guardEffort(reviewModel, config),
     codeReviewInstructions: config.codeReviewInstructions,
     autoApproveOnOpen: config.autoApproveOnOpen,
     scmLogin: sender.login,
@@ -1258,7 +1253,7 @@ export async function handlePullRequestOpened(
   // with the default model. Label overrides and config are ignored for self-PRs.
   const autoReviewModel = isBotPr
     ? "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code"
-    : (extractReviewModelFromLabels(pr.labels ?? []) ?? config.model);
+    : (extractReviewModelFromLabels(pr.labels ?? []) ?? config.reviewModel ?? config.model);
 
   return runCodeReview(env, log, ghToken, headers, {
     owner,
@@ -1275,7 +1270,7 @@ export async function handlePullRequestOpened(
     head: pr.head.ref,
     isPublic: !repo.private,
     model: autoReviewModel,
-    reasoningEffort: config.reasoningEffort,
+    reasoningEffort: guardEffort(autoReviewModel, config),
     codeReviewInstructions: config.codeReviewInstructions,
     autoApproveOnOpen: config.autoApproveOnOpen,
     scmLogin: sender.login,
@@ -1454,7 +1449,8 @@ export async function handlePullRequestLabeled(
     meta
   );
 
-  const reviewModel = extractReviewModelFromLabels(pr.labels ?? []) ?? config.model;
+  const reviewModel =
+    extractReviewModelFromLabels(pr.labels ?? []) ?? config.reviewModel ?? config.model;
   // Re-run in the PR's existing review session when we have one, so a re-review
   // stays in the same thread instead of spawning a new session.
   const existingSessionId = await lookupReviewSession(env, repoFullName, pr.number);
@@ -1474,7 +1470,7 @@ export async function handlePullRequestLabeled(
     head: pr.head.ref,
     isPublic: !repo.private,
     model: reviewModel,
-    reasoningEffort: config.reasoningEffort,
+    reasoningEffort: guardEffort(reviewModel, config),
     codeReviewInstructions: config.codeReviewInstructions,
     // An explicit re-review never auto-approves.
     autoApproveOnOpen: false,
@@ -1746,6 +1742,9 @@ export async function handleReviewRequestInternal(
     return { ok: false, status: 403, error: "public_repo_skipped" };
   }
 
+  // Precedence: explicit request model (e.g. web re-run picker) → repo
+  // `reviewModel` → general `model`.
+  const reviewModel = req.model ?? config.reviewModel ?? config.model;
   const result = await runCodeReview(env, log, ghToken, headers, {
     owner,
     repoName,
@@ -1760,8 +1759,8 @@ export async function handleReviewRequestInternal(
     base: details.base.ref,
     head: details.head.ref,
     isPublic,
-    model: req.model ?? config.model,
-    reasoningEffort: config.reasoningEffort,
+    model: reviewModel,
+    reasoningEffort: guardEffort(reviewModel, config),
     codeReviewInstructions: config.codeReviewInstructions,
     autoApproveOnOpen: false,
     scmLogin: req.requestedBy.login,
@@ -2047,15 +2046,21 @@ export async function handleIssueComment(
     };
   }
 
-  // Label-based plan / model overrides (dash-separated, unified with Linear).
-  //   - `plan`              → opt into plan-mode for this trigger
-  //   - `plan-<alias>`      → plan-turn model override
-  //   - `model-<alias>`     → build-turn model override
-  //   - `build-<alias>`     → alias of `model-<alias>` (more readable in plan-mode)
+  // Route the @mention through the seam. It decides the lane (review vs change
+  // request); for change requests it also decides the mode (plan/direct) and the
+  // models. Label overrides (`plan`, `plan-<alias>`, `model-/build-<alias>`) are
+  // applied inside routeMention.
   const issueLabels: GitHubLabel[] = issue.labels ?? [];
-  const planMode = hasPlanLabel(issueLabels);
-  const implModel = extractModelFromLabels(issueLabels) ?? config.model;
-  const planModel = planMode ? await resolvePlanModel(env, issueLabels) : undefined;
+  const decision = await routeMention({
+    commentBody: rawCommentBody,
+    isInline: false,
+    labels: issueLabels,
+    config,
+    resolveDefaults: async () => {
+      const d = await fetchModelDefaults(env);
+      return { defaultPlanModel: d.defaultPlanModel, routingModel: d.defaultRoutingModel };
+    },
+  });
   const commentBody = rawCommentBody;
 
   // issue_comment payloads don't carry the PR's branch refs, so fetch them to
@@ -2079,6 +2084,50 @@ export async function handleIssueComment(
     meta
   );
 
+  // Explicit review request → run in the PR's dedicated review session (stack
+  // onto the existing one, or create it) instead of the change-request session,
+  // so it uses the review model and stays off the change-request working tree.
+  if (decision.target === "review") {
+    if (!prDetails) {
+      log.info("mention_review.pr_fetch_failed", meta);
+      return { outcome: "skipped", skip_reason: "pr_fetch_failed" };
+    }
+    const existingReviewSessionId = await lookupReviewSession(env, repoFullName, issue.number);
+    return runCodeReview(env, log, ghToken, headers, {
+      owner,
+      repoName,
+      prNumber: issue.number,
+      prUrl: prDetails.html_url,
+      prState: prDetails.state,
+      prHeadRef: prDetails.head.ref,
+      prBaseRef: prDetails.base.ref,
+      title: prDetails.title,
+      body: prDetails.body,
+      author: prDetails.user.login,
+      base: prDetails.base.ref,
+      head: prDetails.head.ref,
+      isPublic: !repo.private,
+      model: decision.model,
+      reasoningEffort: decision.reasoningEffort,
+      codeReviewInstructions: config.codeReviewInstructions,
+      // An explicit ask never auto-approves.
+      autoApproveOnOpen: false,
+      triggerComment: rawCommentBody,
+      scmLogin: sender.login,
+      scmUserId: String(sender.id),
+      scmAvatarUrl: sender.avatar_url,
+      actionLabel: "mention_review",
+      cloneBranch: prCloneBranch(prDetails.head.ref, prDetails.head.repo?.full_name, repoFullName),
+      existingSessionId: existingReviewSessionId,
+      meta,
+    });
+  }
+
+  // Change-request lane: model, mode, and plan-turn model all come from the router.
+  const planMode = decision.mode === "plan";
+  const implModel = decision.model;
+  const planModel = decision.planModel;
+
   // Build the fresh-session params once; used only when we actually create a
   // new session (a coalesced request reuses the live one and ignores these).
   const createFresh = () =>
@@ -2087,7 +2136,7 @@ export async function handleIssueComment(
       repoName,
       title: requestSessionTitle(issue.number),
       model: implModel,
-      reasoningEffort: config.reasoningEffort,
+      reasoningEffort: decision.reasoningEffort,
       scmLogin: sender.login,
       scmUserId: String(sender.id),
       scmAvatarUrl: sender.avatar_url,
@@ -2265,6 +2314,17 @@ export async function handleReviewComment(
 
   const commentBody = stripMentions(comment.body, getTriggerMentions(env));
 
+  const decision = await routeMention({
+    commentBody,
+    isInline: true,
+    labels: pr.labels ?? [],
+    config,
+    resolveDefaults: async () => {
+      const d = await fetchModelDefaults(env);
+      return { defaultPlanModel: d.defaultPlanModel, routingModel: d.defaultRoutingModel };
+    },
+  });
+
   const meta = { trace_id: traceId, repo: repoFullName, pull_number: pr.number };
   fireAndForgetReaction(
     log,
@@ -2273,6 +2333,46 @@ export async function handleReviewComment(
     resolveAppName(env),
     meta
   );
+
+  // Explicit review request in an inline thread → the PR's dedicated review
+  // session. ReviewCommentPayload's PR object lacks body/author, so fetch
+  // details (only on actual review intent — a rare path).
+  if (decision.target === "review") {
+    const details = await fetchPullRequestDetails(ghToken, owner, repoName, pr.number);
+    if (!details) {
+      log.info("mention_review.pr_fetch_failed", meta);
+      return { outcome: "skipped", skip_reason: "pr_fetch_failed" };
+    }
+    const triggerComment = comment.path ? `On \`${comment.path}\`:\n${commentBody}` : commentBody;
+    const existingReviewSessionId = await lookupReviewSession(env, repoFullName, pr.number);
+    return runCodeReview(env, log, ghToken, headers, {
+      owner,
+      repoName,
+      prNumber: pr.number,
+      prUrl: details.html_url,
+      prState: details.state,
+      prHeadRef: details.head.ref,
+      prBaseRef: details.base.ref,
+      title: details.title,
+      body: details.body,
+      author: details.user.login,
+      base: details.base.ref,
+      head: details.head.ref,
+      isPublic: !repo.private,
+      model: decision.model,
+      reasoningEffort: decision.reasoningEffort,
+      codeReviewInstructions: config.codeReviewInstructions,
+      autoApproveOnOpen: false,
+      triggerComment,
+      scmLogin: sender.login,
+      scmUserId: String(sender.id),
+      scmAvatarUrl: sender.avatar_url,
+      actionLabel: "mention_review",
+      cloneBranch: prCloneBranch(details.head.ref, details.head.repo?.full_name, repoFullName),
+      existingSessionId: existingReviewSessionId,
+      meta,
+    });
+  }
 
   const { sessionId, coalesced } = await resolveRequestSession(
     env,
@@ -2287,8 +2387,8 @@ export async function handleReviewComment(
         repoOwner: owner,
         repoName,
         title: requestSessionTitle(pr.number),
-        model: config.model,
-        reasoningEffort: config.reasoningEffort,
+        model: decision.model,
+        reasoningEffort: decision.reasoningEffort,
         scmLogin: sender.login,
         scmUserId: String(sender.id),
         scmAvatarUrl: sender.avatar_url,

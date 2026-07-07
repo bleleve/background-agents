@@ -11,12 +11,15 @@ export interface ModelPreferences {
   enabledModels: string[];
   defaultModel: string | null;
   defaultPlanModel: string | null;
+  /** Model reserved for the future @mention router; null = delegate to env/shared fallback. */
+  defaultRoutingModel: string | null;
 }
 
 interface ModelPreferencesRow {
   enabled_models: string;
   default_model: string | null;
   default_plan_model: string | null;
+  default_routing_model: string | null;
 }
 
 export class ModelPreferencesStore {
@@ -28,7 +31,7 @@ export class ModelPreferencesStore {
   async getPreferences(): Promise<ModelPreferences | null> {
     const row = await this.db
       .prepare(
-        "SELECT enabled_models, default_model, default_plan_model FROM model_preferences WHERE id = 'global'"
+        "SELECT enabled_models, default_model, default_plan_model, default_routing_model FROM model_preferences WHERE id = 'global'"
       )
       .first<ModelPreferencesRow>();
 
@@ -38,6 +41,7 @@ export class ModelPreferencesStore {
       enabledModels: JSON.parse(row.enabled_models) as string[],
       defaultModel: row.default_model,
       defaultPlanModel: row.default_plan_model,
+      defaultRoutingModel: row.default_routing_model,
     };
   }
 
@@ -49,8 +53,8 @@ export class ModelPreferencesStore {
   }
 
   /**
-   * Atomically persist the three preference fields. defaultModel /
-   * defaultPlanModel may be null (= delegate to env/shared fallback). When
+   * Atomically persist the preference fields. defaultModel / defaultPlanModel /
+   * defaultRoutingModel may be null (= delegate to env/shared fallback). When
    * non-null, they must be members of enabledModels.
    */
   async setPreferences(prefs: ModelPreferences): Promise<void> {
@@ -92,18 +96,38 @@ export class ModelPreferencesStore {
       }
     }
 
+    if (prefs.defaultRoutingModel !== null) {
+      if (!isValidModel(prefs.defaultRoutingModel)) {
+        throw new ModelPreferencesValidationError(
+          `Invalid default routing model ID: ${prefs.defaultRoutingModel}`
+        );
+      }
+      if (!enabledSet.has(prefs.defaultRoutingModel)) {
+        throw new ModelPreferencesValidationError(
+          `Default routing model "${prefs.defaultRoutingModel}" is not in the enabled models list`
+        );
+      }
+    }
+
     const now = Date.now();
     await this.db
       .prepare(
-        `INSERT INTO model_preferences (id, enabled_models, default_model, default_plan_model, updated_at)
-         VALUES ('global', ?, ?, ?, ?)
+        `INSERT INTO model_preferences (id, enabled_models, default_model, default_plan_model, default_routing_model, updated_at)
+         VALUES ('global', ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
-           enabled_models     = excluded.enabled_models,
-           default_model      = excluded.default_model,
-           default_plan_model = excluded.default_plan_model,
-           updated_at         = excluded.updated_at`
+           enabled_models        = excluded.enabled_models,
+           default_model         = excluded.default_model,
+           default_plan_model    = excluded.default_plan_model,
+           default_routing_model = excluded.default_routing_model,
+           updated_at            = excluded.updated_at`
       )
-      .bind(JSON.stringify(unique), prefs.defaultModel, prefs.defaultPlanModel, now)
+      .bind(
+        JSON.stringify(unique),
+        prefs.defaultModel,
+        prefs.defaultPlanModel,
+        prefs.defaultRoutingModel,
+        now
+      )
       .run();
   }
 }

@@ -139,21 +139,31 @@ comment on the PR.
 ### Requesting a Review
 
 If your mention reads as a request to review or re-review the PR — in any phrasing or language ("can
-you review this?", "PTAL", "take another look", "review again") — the agent runs a full PR review
-instead of a targeted reply. The agent classifies the intent itself from the comment's meaning;
-there is no keyword matching in the bot. A review-request mention produces the same inline
-`suggestion` comments and structured **verdict** comment (with the matching risk label) as an
-[automatic review](#what-it-posts), not a plain summary comment. The verdict footer links back to
-the session that produced it. When the mention is a _re_-review (a prior Reef verdict already
-exists), it reconciles with the conversation just like the label and web-button re-runs do (see
+you review this?", "PTAL", "take another look", "review again") — Reef runs a full PR review instead
+of a targeted reply, producing the same inline `suggestion` comments and structured **verdict**
+comment (with the matching risk label) as an [automatic review](#what-it-posts), not a plain summary
+comment. The verdict footer links back to the session that produced it. This happens through two
+complementary paths:
+
+- **Explicit review commands.** A mention that leads with a review verb (`review …`, `re-review`,
+  `PTAL`, `take another look`) is recognized by the bot's lightweight command matcher and routed
+  **straight to the PR's dedicated review session**: it runs read-only with the repo's configured
+  review model, stacks onto any existing review session for the PR, and — like auto-review — clones
+  the PR head. The matcher is deliberately conservative (a _leading_ verb, not the word "review"
+  used as a noun), so a change request that merely starts with "review" ("review feedback: rename
+  `X`") is **not** mistaken for a review command and still gets its change made.
+- **Everything else.** A mention the matcher does not recognize as a review command still reaches
+  the `@mention` change-request session, where the agent classifies the intent from the comment's
+  meaning and runs the full review itself if that is what you asked for. That fallback session
+  starts from the repository default branch rather than the PR head (see
+  [Current Branch Behavior](#current-branch-behavior)); this does not change the review output — the
+  diff is pre-fetched and inlined into the prompt, and inline suggestions are anchored to the PR
+  head SHA, so it does not need the PR branch checked out.
+
+When the mention is a _re_-review (a prior Reef verdict already exists), it reconciles with the
+conversation just like the label and web-button re-runs do (see
 [Re-running a Review](#re-running-a-review)): it reads your replies to the previous verdict and
 drops findings or documentation-drift notes you already rebutted rather than re-flagging them.
-
-Unlike auto-review, the session starts from the repository default branch rather than the PR head
-(see [Current Branch Behavior](#current-branch-behavior) below). This does not change the review
-output: the diff is pre-fetched and inlined into the prompt (the agent runs `gh pr diff` only as a
-fallback for large diffs), and inline suggestions are anchored to the PR head SHA, so it does not
-need the PR branch checked out.
 
 ### Current Branch Behavior
 

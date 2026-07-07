@@ -8,6 +8,7 @@ import {
   DEFAULT_ENABLED_MODELS,
   DEFAULT_MODEL,
   DEFAULT_PLAN_MODEL,
+  DEFAULT_ROUTING_MODEL,
 } from "@open-inspect/shared";
 import { MODEL_PREFERENCES_KEY } from "@/hooks/use-enabled-models";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ interface ModelPreferencesResponse {
   enabledModels: string[];
   defaultModel?: string;
   defaultPlanModel?: string;
+  defaultRoutingModel?: string;
 }
 
 export function ModelsSettings() {
@@ -27,6 +29,7 @@ export function ModelsSettings() {
   const [enabledModels, setEnabledModels] = useState<Set<string>>(new Set(DEFAULT_ENABLED_MODELS));
   const [defaultModel, setDefaultModel] = useState<string>(DEFAULT_MODEL);
   const [defaultPlanModel, setDefaultPlanModel] = useState<string>(DEFAULT_PLAN_MODEL);
+  const [defaultRoutingModel, setDefaultRoutingModel] = useState<string>(DEFAULT_ROUTING_MODEL);
   const [initialized, setInitialized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -37,6 +40,7 @@ export function ModelsSettings() {
     setEnabledModels(new Set(data.enabledModels));
     if (data.defaultModel) setDefaultModel(data.defaultModel);
     if (data.defaultPlanModel) setDefaultPlanModel(data.defaultPlanModel);
+    if (data.defaultRoutingModel) setDefaultRoutingModel(data.defaultRoutingModel);
     setInitialized(true);
   }
 
@@ -46,7 +50,11 @@ export function ModelsSettings() {
       const next = new Set(prev);
       if (next.has(modelId)) {
         if (next.size <= 1) return prev;
-        if (modelId === defaultModel || modelId === defaultPlanModel) {
+        if (
+          modelId === defaultModel ||
+          modelId === defaultPlanModel ||
+          modelId === defaultRoutingModel
+        ) {
           setToggleError(
             `"${formatModelNameLower(modelId)}" is the current default — pick a different default before disabling.`
           );
@@ -70,7 +78,11 @@ export function ModelsSettings() {
         if (enable) {
           next.add(model.id);
         } else {
-          if (model.id === defaultModel || model.id === defaultPlanModel) {
+          if (
+            model.id === defaultModel ||
+            model.id === defaultPlanModel ||
+            model.id === defaultRoutingModel
+          ) {
             blockedDefault = model.id;
             continue;
           }
@@ -88,9 +100,10 @@ export function ModelsSettings() {
     setDirty(true);
   };
 
-  const handleDefaultChange = (which: "model" | "plan", value: string) => {
+  const handleDefaultChange = (which: "model" | "plan" | "routing", value: string) => {
     if (which === "model") setDefaultModel(value);
-    else setDefaultPlanModel(value);
+    else if (which === "plan") setDefaultPlanModel(value);
+    else setDefaultRoutingModel(value);
     setDirty(true);
     setToggleError(null);
   };
@@ -117,6 +130,7 @@ export function ModelsSettings() {
           enabledModels: Array.from(enabledModels),
           defaultModel,
           defaultPlanModel,
+          defaultRoutingModel,
         }),
       });
 
@@ -149,7 +163,7 @@ export function ModelsSettings() {
       <h2 className="text-xl font-semibold text-foreground mb-1">Default Models</h2>
       <p className="text-sm text-muted-foreground mb-4">
         Used as the initial selection across the web UI and as the fallback for the Linear, GitHub,
-        and Slack bots.
+        and Slack bots. The routing model is reserved for the GitHub @mention model router.
       </p>
 
       <div className="space-y-3 mb-8">
@@ -163,6 +177,12 @@ export function ModelsSettings() {
           label="Default plan model"
           value={defaultPlanModel}
           onChange={(v) => handleDefaultChange("plan", v)}
+          groups={enabledGroups}
+        />
+        <DefaultModelPicker
+          label="Routing model"
+          value={defaultRoutingModel}
+          onChange={(v) => handleDefaultChange("routing", v)}
           groups={enabledGroups}
         />
       </div>

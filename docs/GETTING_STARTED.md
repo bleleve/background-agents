@@ -765,17 +765,19 @@ curl -I https://open-inspect-web-{deployment_name}.YOUR-SUBDOMAIN.workers.dev
 
 ### Configure Default Models
 
-The web UI exposes a **Settings → Models → Default Models** section that controls which build and
-plan models the deployment uses by default. Bots (Linear, GitHub, Slack) read these values at
+The web UI exposes a **Settings → Models → Default Models** section that controls which build, plan,
+and routing models the deployment uses by default. Bots (Linear, GitHub, Slack) read these values at
 session-creation time, so changes propagate without a Terraform redeploy.
 
 1. Open **Settings → Models** in the web UI.
 2. Under **Default Models**, pick:
    - **Default model** — the build model used when no per-request override is in play.
    - **Default plan model** — the model that runs the planning turn when plan mode is enabled.
+   - **Routing model** — the model reserved for the @mention router's intent/complexity
+     classification.
 3. Save. The values are stored in D1; bots fall back to the worker's `DEFAULT_MODEL` /
-   `DEFAULT_PLAN_MODEL` env var only when the control plane is unreachable, then to a shared
-   constant.
+   `DEFAULT_PLAN_MODEL` / `DEFAULT_ROUTING_MODEL` env vars only when the control plane is
+   unreachable, then to a shared constant.
 
 Disabling a model that is the current default is blocked inline — pick a new default first.
 

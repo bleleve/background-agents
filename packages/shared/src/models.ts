@@ -55,6 +55,16 @@ export const DEFAULT_MODEL: ValidModel = "anthropic/claude-sonnet-4-6";
 export const DEFAULT_PLAN_MODEL: ValidModel = "anthropic/claude-opus-4-6";
 
 /**
+ * Default model used by the @mention router (intent + complexity classification).
+ *
+ * Reserved for the future GitHub @mention model router: a small, fast model is
+ * the right default for a cheap classification pass. Selectable in Settings →
+ * Models (persisted as `model_preferences.default_routing_model`). Stored today;
+ * consumed once the router's LLM classifier lands.
+ */
+export const DEFAULT_ROUTING_MODEL: ValidModel = "anthropic/claude-haiku-4-5";
+
+/**
  * Map from short alias used in labels to the canonical provider/model
  * identifier. Used by Linear/GitHub label parsing — labels are dash-separated
  * (Linear forbids `:` in label names, so we unified on dashes everywhere):

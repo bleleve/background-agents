@@ -75,21 +75,22 @@ The bot is deployed via Terraform as a standalone Cloudflare Worker alongside th
 
 ### Environment Bindings
 
-| Binding                      | Type                  | Description                                                                                                                                                                                                       |
-| ---------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GITHUB_KV`                  | KV namespace          | Delivery dedupe store keyed by `X-GitHub-Delivery`                                                                                                                                                                |
-| `CONTROL_PLANE`              | Service binding       | Fetcher to the control plane worker                                                                                                                                                                               |
-| `DEPLOYMENT_NAME`            | Plain text            | Deployment identifier for logging                                                                                                                                                                                 |
-| `WEB_APP_URL`                | Plain text            | Web app base URL (e.g., `https://reef.example.com`); used to link the originating session in PR review verdicts                                                                                                   |
-| `DEFAULT_MODEL`              | Plain text            | Fallback build model when D1 `model_preferences` is unreachable (e.g., `anthropic/claude-haiku-4-5`). Resolution: `D1 > env var > shared constant`. Set the primary value via **Settings → Models** in the web UI |
-| `DEFAULT_PLAN_MODEL`         | Plain text            | Fallback plan-turn model when D1 is unreachable (e.g., `anthropic/claude-opus-4-7`). Same fallback chain as `DEFAULT_MODEL`                                                                                       |
-| `GITHUB_BOT_USERNAME`        | Plain text            | Bot's GitHub login (e.g., `my-app[bot]`) for @mention detection and loop prevention                                                                                                                               |
-| `GITHUB_APP_ID`              | Secret                | GitHub App ID for JWT generation                                                                                                                                                                                  |
-| `GITHUB_APP_PRIVATE_KEY`     | Secret                | GitHub App private key (must be PKCS#8 format)                                                                                                                                                                    |
-| `GITHUB_APP_INSTALLATION_ID` | Secret                | GitHub App installation ID for token exchange                                                                                                                                                                     |
-| `GITHUB_WEBHOOK_SECRET`      | Secret                | Shared secret for verifying webhook signatures                                                                                                                                                                    |
-| `INTERNAL_CALLBACK_SECRET`   | Secret                | Shared secret for HMAC auth to the control plane                                                                                                                                                                  |
-| `LOG_LEVEL`                  | Plain text (optional) | Log level override (`debug`, `info`, `warn`, `error`)                                                                                                                                                             |
+| Binding                      | Type                  | Description                                                                                                                                                                                                                         |
+| ---------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_KV`                  | KV namespace          | Delivery dedupe store keyed by `X-GitHub-Delivery`                                                                                                                                                                                  |
+| `CONTROL_PLANE`              | Service binding       | Fetcher to the control plane worker                                                                                                                                                                                                 |
+| `DEPLOYMENT_NAME`            | Plain text            | Deployment identifier for logging                                                                                                                                                                                                   |
+| `WEB_APP_URL`                | Plain text            | Web app base URL (e.g., `https://reef.example.com`); used to link the originating session in PR review verdicts                                                                                                                     |
+| `DEFAULT_MODEL`              | Plain text            | Fallback build model when D1 `model_preferences` is unreachable (e.g., `anthropic/claude-haiku-4-5`). Resolution: `D1 > env var > shared constant`. Set the primary value via **Settings → Models** in the web UI                   |
+| `DEFAULT_PLAN_MODEL`         | Plain text            | Fallback plan-turn model when D1 is unreachable (e.g., `anthropic/claude-opus-4-7`). Same fallback chain as `DEFAULT_MODEL`                                                                                                         |
+| `DEFAULT_ROUTING_MODEL`      | Plain text            | Fallback model for the @mention router (intent/complexity classification) when D1 is unreachable (e.g., `anthropic/claude-haiku-4-5`). Same `D1 > env var > shared constant` chain; set the primary value via **Settings → Models** |
+| `GITHUB_BOT_USERNAME`        | Plain text            | Bot's GitHub login (e.g., `my-app[bot]`) for @mention detection and loop prevention                                                                                                                                                 |
+| `GITHUB_APP_ID`              | Secret                | GitHub App ID for JWT generation                                                                                                                                                                                                    |
+| `GITHUB_APP_PRIVATE_KEY`     | Secret                | GitHub App private key (must be PKCS#8 format)                                                                                                                                                                                      |
+| `GITHUB_APP_INSTALLATION_ID` | Secret                | GitHub App installation ID for token exchange                                                                                                                                                                                       |
+| `GITHUB_WEBHOOK_SECRET`      | Secret                | Shared secret for verifying webhook signatures                                                                                                                                                                                      |
+| `INTERNAL_CALLBACK_SECRET`   | Secret                | Shared secret for HMAC auth to the control plane                                                                                                                                                                                    |
+| `LOG_LEVEL`                  | Plain text (optional) | Log level override (`debug`, `info`, `warn`, `error`)                                                                                                                                                                               |
 
 ### GitHub App Configuration
 
@@ -222,15 +223,23 @@ people to request the GitHub App bot through the PR reviewer picker.
 1. Check `issue.pull_request` exists — ignore non-PR comments
 2. Check comment body contains `@{GITHUB_BOT_USERNAME}` — ignore if no mention
 3. Check `sender.login !== GITHUB_BOT_USERNAME` — prevent loops
-4. Strip @mention, post eyes reaction; coalesce into the PR's live request session if one exists
-   (else create a fresh one and remember it in KV), send the comment-action prompt
+4. Strip @mention, post eyes reaction, and call `routeMention` to decide the lane:
+   - **Review** — the comment reads as an explicit review command (`review this`, `PTAL`,
+     `re-review`; matched by `isReviewCommand`). Route to the PR's dedicated review session (reuse
+     the one stored under `review-session:<repo>:<pr>` in KV, or create one) with
+     `actionLabel: "mention_review"`, using the review model and skipping the change-request working
+     tree.
+   - **Change request** (everything else) — coalesce into the PR's live request session if one
+     exists (else create a fresh one and remember it in KV), send the comment-action prompt. Mode
+     (plan/direct) and models come from the router, with label overrides (`plan`, `plan-<alias>`,
+     `model-/build-<alias>`) applied inside `routeMention`.
 
-**Review Comment:** Same as issue comment, but the prompt additionally includes `filePath`,
-`diffHunk`, and `commentId` for thread-specific context and reply threading. The coalesced-request
-acknowledgment also differs by trigger: an inline review comment gets an **in-thread reply**
-anchored to the triggering comment (via `createReviewCommentReply`), whereas a root issue comment
-gets a top-level comment that **quotes the original request** (root comments have no thread to
-anchor to).
+**Review Comment:** Same as issue comment, including the `routeMention` review/change-request split,
+but the change-request prompt additionally includes `filePath`, `diffHunk`, and `commentId` for
+thread-specific context and reply threading. The coalesced-request acknowledgment also differs by
+trigger: an inline review comment gets an **in-thread reply** anchored to the triggering comment
+(via `createReviewCommentReply`), whereas a root issue comment gets a top-level comment that
+**quotes the original request** (root comments have no thread to anchor to).
 
 ## Authentication
 
@@ -300,9 +309,11 @@ Three prompt templates in `src/prompts.ts`:
   badge as the verdict comment; the session link in the footer is built from `sessionUrl`, the only
   extra param the handler passes beyond webhook metadata
 
-**`buildCommentActionPrompt`** — Includes the user's request (with @mention stripped) and asks the
-agent to first classify the request into one of two paths (the model decides from the comment's
-meaning in any phrasing or language — there is no keyword matching in the bot):
+**`buildCommentActionPrompt`** — the change-request prompt, reached only for @mentions the bot did
+**not** already route to a review session (`routeMention`/`isReviewCommand` send an explicit review
+command — "review this", "PTAL", "re-review" — straight to `buildCodeReviewPrompt` instead). For the
+rest, it includes the user's request (with @mention stripped) and asks the agent to classify it into
+one of two paths from the comment's meaning in any phrasing or language:
 
 - **Targeted request** (the default) — answer a question or make a specific change. Instructions to:
   - Check prior conversation via `gh pr view --comments`
