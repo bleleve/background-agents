@@ -120,6 +120,41 @@ const raw = { models: makeCatalog() };
 const passthrough = await hooks.provider.models(raw, { auth: { type: "api" } });
 ok(passthrough === raw.models, "non-oauth returns the catalog object unchanged");
 
+// --- Empty catalog: must still inject all six from the built-in template ----
+// opencode can hand the hook an empty openai catalog; cloning has nothing to
+// copy, so injection must fall back to a complete built-in shape. This is the
+// staging failure mode (every openai/* "Model not found").
+const empty = await hooks.provider.models({ models: {} }, { auth: { type: "oauth" } });
+const emptyKeys = Object.keys(empty).sort();
+ok(
+  JSON.stringify(emptyKeys) ===
+    JSON.stringify(
+      [
+        "gpt-5.2",
+        "gpt-5.2-codex",
+        "gpt-5.3-codex",
+        "gpt-5.3-codex-spark",
+        "gpt-5.4",
+        "gpt-5.5",
+      ].sort()
+    ),
+  "empty catalog still yields all six exposed models (got " + emptyKeys.join(",") + ")"
+);
+ok(
+  Object.keys(empty["gpt-5.3-codex"].variants || {}).length === 5,
+  "template-injected model carries the 5 reasoning variants"
+);
+ok(
+  empty["gpt-5.3-codex"].api.id === "gpt-5.3-codex" &&
+    empty["gpt-5.3-codex"].capabilities?.reasoning === true,
+  "template-injected model has correct api.id and reasoning capability"
+);
+ok(
+  JSON.stringify(empty["gpt-5.5"].limit) ===
+    JSON.stringify({ context: 400000, input: 272000, output: 128000 }),
+  "template-injected gpt-5.5 gets the corrected limit"
+);
+
 if (failures) {
   console.error(`\n${failures} assertion(s) failed`);
   process.exit(1);
