@@ -22,6 +22,7 @@ import {
   resolveReviewModel,
   type GitHubLabel,
 } from "../label-resolution";
+import type { Logger } from "../logger";
 import type { ResolvedGitHubConfig } from "../utils/integration-config";
 
 export type RouteTarget = "review" | "request";
@@ -29,8 +30,6 @@ export type RouteTarget = "review" | "request";
 export interface MentionRoutingContext {
   /** The comment body, already stripped of the `@mention`. */
   commentBody: string;
-  /** Top-level PR comment vs inline review-thread comment. */
-  isInline: boolean;
   /** PR/issue labels — for review / model / plan-alias overrides. */
   labels: GitHubLabel[];
   /** Resolved GitHub bot config (reviewModel, model, reasoningEffort, …). */
@@ -44,6 +43,11 @@ export interface MentionRoutingContext {
    */
   resolveDefaults: () => Promise<{ defaultPlanModel: string; routingModel: string }>;
   // ── reserved for the future complexity router (unused in v1) ──────────────
+  // isInline (top-level PR comment vs inline review-thread comment) is already
+  // threaded through from both call sites, but routeMention's body doesn't
+  // consult it yet — it's forward-looking context for a future
+  // inline-vs-toplevel routing decision, not a behavior toggle today.
+  isInline: boolean;
   // prSizeHint?: number; changedFilePaths?: string[]; diffStat?: string;
   // threadContext?: string; prTitle?: string;
 }
@@ -125,10 +129,18 @@ export function isReviewCommand(body: string): boolean {
  * `config.reasoningEffort` is tied to `config.model`; it may be invalid for a
  * different chosen model. Pass it through only when valid for `model`.
  */
-export function guardEffort(model: string, config: ResolvedGitHubConfig): string | undefined {
-  return config.reasoningEffort && isValidReasoningEffort(model, config.reasoningEffort)
-    ? config.reasoningEffort
-    : undefined;
+export function guardEffort(
+  model: string,
+  config: ResolvedGitHubConfig,
+  log?: Logger
+): string | undefined {
+  if (!config.reasoningEffort) return undefined;
+  if (isValidReasoningEffort(model, config.reasoningEffort)) return config.reasoningEffort;
+  log?.debug("mention_router.effort_dropped", {
+    model,
+    configured_effort: config.reasoningEffort,
+  });
+  return undefined;
 }
 
 /**

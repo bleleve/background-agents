@@ -243,6 +243,12 @@ currently exposes model and reasoning settings on repository overrides. If globa
 defaults exist in integration settings, GitHub-started sessions honor them. If neither a repository
 override nor global default sets a model, sessions use the deployment default model.
 
+For plan-mode `@mention` sessions, the build-turn model and the plan-turn model are resolved
+independently: the build model comes from the settings above (or a `model-`/`build-<alias>` label),
+the plan model from the deployment's default plan model (or a `plan-<alias>` label). This differs
+from the web app, where a single model picker in plan mode drives both turns — see
+[Plan mode → Models](../PLAN_MODE.md#models) for the full comparison.
+
 ---
 
 ## Admin and Safety Notes

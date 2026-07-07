@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { MODEL_ALIAS_MAP, MODEL_REASONING_CONFIG } from "@open-inspect/shared";
 import {
   isReviewCommand,
@@ -8,6 +8,17 @@ import {
 } from "../src/routing/mention-router";
 import type { ResolvedGitHubConfig } from "../src/utils/integration-config";
 import type { GitHubLabel } from "../src/label-resolution";
+import type { Logger } from "../src/logger";
+
+function createMockLogger(): Logger {
+  return {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    child: vi.fn().mockReturnThis(),
+  };
+}
 
 const baseConfig: ResolvedGitHubConfig = {
   model: "anthropic/claude-sonnet-4-6",
@@ -121,6 +132,35 @@ describe("guardEffort", () => {
     const [model, cfg] = entry;
     const effort = (cfg as { efforts: string[] }).efforts[0];
     expect(guardEffort(model, { ...baseConfig, reasoningEffort: effort })).toBe(effort);
+  });
+
+  it("logs a debug event when it drops an invalid effort", () => {
+    const log = createMockLogger();
+    guardEffort(
+      "anthropic/claude-sonnet-4-6",
+      { ...baseConfig, reasoningEffort: "definitely-not-an-effort" },
+      log
+    );
+    expect(log.debug).toHaveBeenCalledWith("mention_router.effort_dropped", {
+      model: "anthropic/claude-sonnet-4-6",
+      configured_effort: "definitely-not-an-effort",
+    });
+  });
+
+  it("does not log when there is nothing to drop", () => {
+    const log = createMockLogger();
+    guardEffort("anthropic/claude-sonnet-4-6", { ...baseConfig, reasoningEffort: null }, log);
+    expect(log.debug).not.toHaveBeenCalled();
+
+    const entry = Object.entries(MODEL_REASONING_CONFIG).find(
+      ([, cfg]) => (cfg as { efforts?: string[] }).efforts?.length
+    );
+    if (entry) {
+      const [model, cfg] = entry;
+      const effort = (cfg as { efforts: string[] }).efforts[0];
+      guardEffort(model, { ...baseConfig, reasoningEffort: effort }, log);
+      expect(log.debug).not.toHaveBeenCalled();
+    }
   });
 });
 
