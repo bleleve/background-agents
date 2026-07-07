@@ -96,7 +96,10 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 #       runtime mount — the mount was outside layer caching, so CACHE_BUSTER never re-baked
 #       it and repo-image snapshots shipped a stale bridge/plugin (v105/v106 didn't reach
 #       sessions booting from a repo-image).
-CACHE_BUSTER = "v108-bake-sandbox-runtime-layer"
+# v109: entrypoint logs `openai_oauth.plugin_fingerprint` at boot (baked codex plugin
+#       version + SANDBOX_VERSION) so Modal logs reveal whether the deployed base image
+#       actually ships the injecting plugin — diagnosing why v105-v108 didn't take effect.
+CACHE_BUSTER = "v109-plugin-fingerprint-log"
 
 # Base image with all development tools
 base_image = (
