@@ -1425,6 +1425,70 @@ describe("handleIssueComment", () => {
     ).toHaveLength(3);
   });
 
+  it("stops polling and falls back to a fresh session when the confirmed poll target is already dead", async () => {
+    // Distinct from budget-exhaustion: peek() finds a confirmed session on the
+    // very first poll, but its liveness check comes back dead — the loop must
+    // `break` immediately (not keep polling, not release/retry) and fall
+    // through to the same uncoalesced fallback as the exhausted-budget path.
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const cpFetch = getControlPlaneFetch(env);
+    let peekCalls = 0;
+    let livenessCalls = 0;
+    cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: null,
+              status: "creating",
+              claimToken: "tok-in-flight",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (/\/internal\/pr-sessions\/peek\?.*lane=request/.test(url)) {
+        peekCalls++;
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "sess-dead", status: "active" }), {
+            status: 200,
+          })
+        );
+      }
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        livenessCalls++;
+        return Promise.resolve(new Response(JSON.stringify({ active: false }), { status: 200 }));
+      }
+      if (url === "https://internal/internal/pr-sessions/confirm") {
+        return Promise.resolve(new Response(JSON.stringify({ updated: true }), { status: 200 }));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-fresh" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-fresh" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-poll-dead-peek");
+
+    expect(result).toMatchObject({ session_id: "session-fresh", handler_action: "comment" });
+    // Exactly one peek (the loop breaks on the first confirmed-but-dead
+    // observation) and exactly one liveness check for the dead session — no
+    // release/retry attempted from inside the poll loop.
+    expect(peekCalls).toBe(1);
+    expect(livenessCalls).toBe(1);
+    const urls = cpFetch.mock.calls.map((c) => c[0] as string);
+    expect(urls).not.toContain("https://internal/internal/pr-sessions/release");
+  });
+
   it("creates a fresh request session when the remembered one is no longer live", async () => {
     const env = createMockEnv();
     const log = createMockLogger();

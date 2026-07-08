@@ -55,11 +55,15 @@ Key design decisions:
   top-level comments and inline review comments alike — coalesce into a single "request" session so
   concurrent requests queue on one working tree instead of racing to push the branch. The bot claims
   the PR's `request` lane slot via an atomic D1 claim/confirm/release protocol
-  (`POST /internal/pr-sessions/{claim,confirm,release}`) and confirms the winning session is still
-  live via the control plane (`GET /sessions/:id/liveness`) before folding a new request in, else
-  creates a fresh session. Reviews are separate: the `reef: ask for review` label and the web
-  "Re-run review" button re-run in the PR's existing review session, claimed the same way against
-  the `review` lane slot. Delivery dedupe uses KV `X-GitHub-Delivery`.
+  (`POST /internal/pr-sessions/{claim,confirm,release}`). If the slot is already confirmed, it
+  checks the winning session is still live via the control plane (`GET /sessions/:id/liveness`)
+  before folding a new request in. If the slot is still `creating` (another request just won it and
+  hasn't confirmed yet), it polls briefly (`GET /internal/pr-sessions/peek`, 3 attempts / 150ms
+  apart) to coalesce into the winner once it confirms instead of racing it. Either way, once the
+  budget is exhausted or the found session turns out dead, it creates a fresh session. Reviews are
+  separate: the `reef: ask for review` label and the web "Re-run review" button re-run in the PR's
+  existing review session, claimed the same way against the `review` lane slot. Delivery dedupe uses
+  KV `X-GitHub-Delivery`.
 - **Minimal PR context fetching**: The bot pre-fetches the PR diff and inlines it into the prompt
   for diffs below the large-diff threshold, so the agent reviews it directly without running
   `gh pr diff` (larger diffs fall back to the agent fetching them itself). Beyond the diff, the
