@@ -138,6 +138,11 @@ export interface IssueCommentPayload {
   issue: {
     number: number;
     title: string;
+    // Present on every issue payload (nullable body, always-present author) —
+    // used as the review-lane fallback when the dedicated PR fetch fails, since
+    // an issue-linked-to-a-PR carries its own title/body/author.
+    body: string | null;
+    user: { login: string };
     html_url: string;
     state: string;
     pull_request?: { url: string };
@@ -148,7 +153,14 @@ export interface IssueCommentPayload {
     body: string;
     user: { login: string };
   };
-  repository: { owner: { login: string }; name: string; private: boolean };
+  repository: {
+    owner: { login: string };
+    name: string;
+    private: boolean;
+    // Standard GitHub webhook field — used as the review-lane fallback clone
+    // target when the dedicated PR fetch fails and no head ref is known.
+    default_branch: string;
+  };
   sender: { login: string; id: number; avatar_url: string };
 }
 

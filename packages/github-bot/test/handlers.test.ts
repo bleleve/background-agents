@@ -232,6 +232,8 @@ const issueCommentPayload: IssueCommentPayload = {
   issue: {
     number: 42,
     title: "Add caching",
+    body: "Adds Redis caching",
+    user: { login: "alice" },
     html_url: "https://github.com/acme/widgets/pull/42",
     state: "open",
     pull_request: { url: "https://api.github.com/repos/acme/widgets/pulls/42" },
@@ -241,7 +243,12 @@ const issueCommentPayload: IssueCommentPayload = {
     body: "@test-bot[bot] please fix the error handling",
     user: { login: "bob" },
   },
-  repository: { owner: { login: "acme" }, name: "widgets", private: false },
+  repository: {
+    owner: { login: "acme" },
+    name: "widgets",
+    private: false,
+    default_branch: "main",
+  },
   sender: { login: "bob", id: 1002, avatar_url: "https://avatars.githubusercontent.com/u/1002" },
 };
 
@@ -1930,6 +1937,59 @@ describe("handleIssueComment", () => {
     expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
     expect(log.debug).toHaveBeenCalledWith("handler.repo_not_enabled", expect.anything());
   });
+
+  it("still runs the review, using issue/repo fallback fields, when the PR fetch fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not found", { status: 404 })));
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: IssueCommentPayload = {
+      ...issueCommentPayload,
+      comment: { ...issueCommentPayload.comment, body: "@test-bot[bot] please review this" },
+    };
+
+    const result = await handleIssueComment(env, log, payload, "trace-review-fetch-failed");
+
+    // Not skipped: the review still runs on the fallback fields instead of the
+    // fetched PR details.
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "mention_review",
+    });
+
+    const cpFetch = getControlPlaneFetch(env);
+    // The D1 claim/confirm calls (from resolveReviewSession) now precede session
+    // creation, so locate calls by URL rather than positional index.
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
+    expect(sessionBody.reviewSession).toBe(true);
+    // No PR head known — clones the repo default branch instead (mirrors the
+    // request lane's "no cloneBranch override" fallback): no `branch` override
+    // is sent, so the control plane clones the repo default.
+    expect(sessionBody.branch).toBeUndefined();
+    expect(sessionBody.prUrl).toBe(issueCommentPayload.issue.html_url);
+    expect(sessionBody.prState).toBe(issueCommentPayload.issue.state);
+
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
+    // The prompt is built from the issue's own title/body/author.
+    expect(promptBody.content).toContain(issueCommentPayload.issue.title);
+    expect(promptBody.content).toContain(issueCommentPayload.issue.body as string);
+
+    // Proves the two fixes compose: the D1 claim/confirm slot resolution runs
+    // (and confirms the created session) even though the PR-details fetch
+    // failed — a failed fetch must not short-circuit the claim protocol.
+    const claimCall = findCall(cpFetch, "https://internal/internal/pr-sessions/claim");
+    expect(claimCall).toBeTruthy();
+    const confirmBody = JSON.parse(
+      findCall(cpFetch, "https://internal/internal/pr-sessions/confirm")[1].body!
+    );
+    expect(confirmBody).toMatchObject({ lane: "review", sessionId: "session-123" });
+
+    expect(log.warn).toHaveBeenCalledWith(
+      "handler.issue_comment_pr_fetch_failed",
+      expect.anything()
+    );
+  });
 });
 
 describe("handleReviewComment", () => {
@@ -2183,6 +2243,57 @@ describe("handleReviewComment", () => {
     expect(result).toEqual({ outcome: "skipped", skip_reason: "repo_not_enabled" });
     expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
     expect(log.debug).toHaveBeenCalledWith("handler.repo_not_enabled", expect.anything());
+  });
+
+  it("posts a reply and skips (no review session) when the PR fetch fails on a review request", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not found", { status: 404 })));
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: ReviewCommentPayload = {
+      ...reviewCommentPayload,
+      comment: { ...reviewCommentPayload.comment, body: "@test-bot[bot] please review this" },
+    };
+
+    const result = await handleReviewComment(env, log, payload, "trace-review-fetch-failed");
+
+    // No fallback data exists in this payload (title/body/author aren't carried
+    // by pull_request_review_comment), so the review is not started.
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "pr_fetch_failed" });
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
+
+    // A visible error reply is posted in-thread instead of leaving the user with
+    // just the earlier 👀 reaction and silence.
+    expect(createReviewCommentReply).toHaveBeenCalledWith(
+      "test-installation-token",
+      "acme",
+      "widgets",
+      reviewCommentPayload.pull_request.number,
+      reviewCommentPayload.comment.id,
+      expect.stringContaining("Couldn't fetch the PR details"),
+      "Open-Inspect"
+    );
+  });
+
+  it("logs a warning but still skips when the fetch-failed reply itself fails to post", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not found", { status: 404 })));
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: ReviewCommentPayload = {
+      ...reviewCommentPayload,
+      comment: { ...reviewCommentPayload.comment, body: "@test-bot[bot] please review this" },
+    };
+    // Best-effort reply: if it fails to post, the handler must not throw or
+    // change outcome — just log, matching the identical pattern already
+    // covered for postRootCoalescedReply's failure branch.
+    vi.mocked(createReviewCommentReply).mockResolvedValue(null);
+
+    const result = await handleReviewComment(env, log, payload, "trace-review-fetch-failed-reply");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "pr_fetch_failed" });
+    expect(log.warn).toHaveBeenCalledWith(
+      "mention_review.pr_fetch_failed_reply_failed",
+      expect.anything()
+    );
   });
 });
 
