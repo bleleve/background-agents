@@ -93,7 +93,7 @@ describe("updateUserPreferences", () => {
       "user_prefs:U123",
       JSON.stringify({
         userId: "U123",
-        model: "openai/gpt-5.2",
+        model: "openai/gpt-5.5",
         updatedAt: 1,
       })
     );
@@ -101,7 +101,7 @@ describe("updateUserPreferences", () => {
     await updateUserPreferences(env, "U123", { branch: "feature/test" });
 
     const prefs = await getUserPreferences(env, "U123");
-    expect(prefs?.model).toBe("openai/gpt-5.2");
+    expect(prefs?.model).toBe("openai/gpt-5.5");
     expect(prefs?.branch).toBe("feature/test");
   });
 
@@ -121,8 +121,8 @@ describe("updateUserPreferences", () => {
       "U123",
       { branch: "feature/test" },
       {
-        defaultModel: "openai/gpt-5.2",
-        enabledModels: ["openai/gpt-5.2"],
+        defaultModel: "openai/gpt-5.5",
+        enabledModels: ["openai/gpt-5.5"],
       }
     );
 
@@ -140,8 +140,8 @@ describe("updateUserPreferences", () => {
       "U123",
       { reasoningEffort: "none" },
       {
-        defaultModel: "openai/gpt-5.2",
-        enabledModels: ["openai/gpt-5.2"],
+        defaultModel: "openai/gpt-5.5",
+        enabledModels: ["openai/gpt-5.5"],
       }
     );
 
@@ -186,11 +186,11 @@ describe("resolveUserPreferences", () => {
         model: "not-a-real-model",
         updatedAt: 1,
       },
-      "openai/gpt-5.2",
-      ["anthropic/claude-sonnet-4-6", "openai/gpt-5.2"]
+      "openai/gpt-5.5",
+      ["anthropic/claude-sonnet-4-6", "openai/gpt-5.5"]
     );
 
-    expect(resolved.model).toBe("openai/gpt-5.2");
+    expect(resolved.model).toBe("openai/gpt-5.5");
   });
 
   it("falls back when the App Home model is no longer enabled", () => {
@@ -201,7 +201,7 @@ describe("resolveUserPreferences", () => {
         updatedAt: 1,
       },
       "anthropic/claude-sonnet-4-6",
-      ["openai/gpt-5.2", "anthropic/claude-sonnet-4-6"]
+      ["openai/gpt-5.5", "anthropic/claude-sonnet-4-6"]
     );
 
     expect(resolved.model).toBe("anthropic/claude-sonnet-4-6");
@@ -215,10 +215,10 @@ describe("resolveUserPreferences", () => {
         updatedAt: 1,
       },
       "anthropic/claude-sonnet-4-6",
-      ["openai/gpt-5.2"]
+      ["openai/gpt-5.5"]
     );
 
-    expect(resolved.model).toBe("openai/gpt-5.2");
+    expect(resolved.model).toBe("openai/gpt-5.5");
   });
 
   it("validates stored reasoning effort against the resolved Slack default model", () => {
@@ -228,11 +228,11 @@ describe("resolveUserPreferences", () => {
         reasoningEffort: "none",
         updatedAt: 1,
       },
-      "openai/gpt-5.2",
-      ["openai/gpt-5.2"]
+      "openai/gpt-5.5",
+      ["openai/gpt-5.5"]
     );
 
-    expect(resolved.model).toBe("openai/gpt-5.2");
+    expect(resolved.model).toBe("openai/gpt-5.5");
     expect(resolved.reasoningEffort).toBe("none");
   });
 });
