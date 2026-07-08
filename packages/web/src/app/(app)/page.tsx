@@ -73,6 +73,11 @@ export default function Home() {
   // one-time pick would permanently disable the Plan auto-switch on every later
   // visit (it persisted in localStorage and was replayed into this ref).
   const userPickedModelRef = useRef(false);
+  // Tracks whether the user explicitly clicked the Plan toggle *in this
+  // visit*. When false, planMode is sent as `undefined` on session create so
+  // the control plane can infer plan-vs-direct via the intent classifier
+  // instead of defaulting to the toggle's initial `false` state.
+  const planModeTouchedRef = useRef(false);
   // Previous Plan-toggle value, so the auto-switch reacts only to real toggles
   // (not initial hydration or unrelated re-renders) and never clobbers a
   // remembered/picked model on load.
@@ -193,11 +198,19 @@ export default function Home() {
             model: selectedModel,
             reasoningEffort,
             branch: selectedBranch || undefined,
-            planMode,
+            // Untouched this visit -> undefined, so the control plane infers
+            // plan-vs-direct via the intent classifier instead of defaulting
+            // to the toggle's initial `false`. A real click always wins.
+            planMode: planModeTouchedRef.current ? planMode : undefined,
             // In plan mode the picker controls the planning model, so send it as
             // planModel too. Otherwise the control plane defaults plan_model to
             // DEFAULT_PLAN_MODEL and the "Plan" line shows the wrong model.
             planModel: planMode ? selectedModel : undefined,
+            // Classifier input when planMode is inferred (ignored otherwise) —
+            // the session's first prompt isn't sent until after creation (see
+            // the separate POST .../prompt call below), so the in-progress
+            // composer text is the only signal available at create time.
+            planClassificationText: planModeTouchedRef.current ? undefined : prompt,
           }),
           signal: abortController.signal,
         });
@@ -232,7 +245,15 @@ export default function Home() {
 
     sessionCreationPromise.current = promise;
     return promise;
-  }, [selectedRepo, selectedModel, reasoningEffort, selectedBranch, planMode, pendingSessionId]);
+  }, [
+    selectedRepo,
+    selectedModel,
+    reasoningEffort,
+    selectedBranch,
+    planMode,
+    pendingSessionId,
+    prompt,
+  ]);
 
   // Toggling plan-mode invalidates any pre-warmed session so the next
   // submission creates a session with the matching planMode flag.
@@ -317,6 +338,11 @@ export default function Home() {
     userPickedModelRef.current = true;
     setSelectedModel(model);
     setReasoningEffort(getDefaultReasoningEffort(model));
+  }, []);
+
+  const handlePlanModeChange = useCallback((value: boolean) => {
+    planModeTouchedRef.current = true;
+    setPlanMode(value);
   }, []);
 
   const handlePromptChange = (value: string) => {
@@ -429,7 +455,7 @@ export default function Home() {
       reasoningEffort={reasoningEffort}
       setReasoningEffort={setReasoningEffort}
       planMode={planMode}
-      setPlanMode={setPlanMode}
+      setPlanMode={handlePlanModeChange}
       prompt={prompt}
       handlePromptChange={handlePromptChange}
       creating={creating}

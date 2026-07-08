@@ -363,4 +363,44 @@ describe("sessions API route (POST)", () => {
     expect(sent.planMode).toBe(false);
     expect(sent.planModel).toBeUndefined();
   });
+
+  it("does not coerce a missing planMode to false — forwards undefined so the control plane can infer it", async () => {
+    vi.mocked(getServerSession).mockResolvedValue({
+      user: { id: "12345", provider: "github" },
+    } as never);
+    vi.mocked(getToken).mockResolvedValue({} as never);
+    vi.mocked(controlPlaneFetch).mockResolvedValue(Response.json({ id: "sess5" }, { status: 201 }));
+
+    await POST(
+      postRequest({
+        repoOwner: "o",
+        repoName: "r",
+        model: "anthropic/claude-opus-4-8",
+        planClassificationText: "refactor the whole billing pipeline",
+      })
+    );
+
+    const sent = controlPlaneBody();
+    expect(sent.planMode).toBeUndefined();
+    expect(sent.planClassificationText).toBe("refactor the whole billing pipeline");
+  });
+
+  it("drops a non-string planClassificationText rather than forwarding a bad value", async () => {
+    vi.mocked(getServerSession).mockResolvedValue({
+      user: { id: "12345", provider: "github" },
+    } as never);
+    vi.mocked(getToken).mockResolvedValue({} as never);
+    vi.mocked(controlPlaneFetch).mockResolvedValue(Response.json({ id: "sess6" }, { status: 201 }));
+
+    await POST(
+      postRequest({
+        repoOwner: "o",
+        repoName: "r",
+        model: "anthropic/claude-opus-4-8",
+        planClassificationText: 12345,
+      })
+    );
+
+    expect(controlPlaneBody().planClassificationText).toBeUndefined();
+  });
 });

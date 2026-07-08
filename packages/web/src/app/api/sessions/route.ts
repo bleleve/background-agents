@@ -87,11 +87,20 @@ export async function POST(request: NextRequest) {
       reasoningEffort: body.reasoningEffort,
       branch: body.branch,
       title: body.title,
-      planMode: body.planMode === true,
+      // Tri-state: an explicit true/false from the client (the user touched
+      // the Plan toggle this visit) passes through unchanged; anything else
+      // (missing/undefined — the toggle was never touched) stays undefined so
+      // the control plane can infer plan-vs-direct via the intent classifier
+      // instead of silently defaulting to false.
+      planMode: typeof body.planMode === "boolean" ? body.planMode : undefined,
       // Carry the plan-model selection so planning turns (and the sidebar "Plan"
       // line) use the model the user actually picked. Without this the control
       // plane falls back to DEFAULT_PLAN_MODEL regardless of the pick.
       planModel: body.planMode === true ? body.planModel : undefined,
+      // Classifier input for inferring planMode server-side; only meaningful
+      // (and only sent by the client) when planMode above is undefined.
+      planClassificationText:
+        typeof body.planClassificationText === "string" ? body.planClassificationText : undefined,
       spawnSource: "user" as const,
       userId,
       // Provider-agnostic auth identity (GitHub or Google) resolves the
