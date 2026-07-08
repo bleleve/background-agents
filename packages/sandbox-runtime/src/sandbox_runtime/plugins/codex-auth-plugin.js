@@ -25,11 +25,8 @@ const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before expiry
 // picker's `openai/*` choices resolvable. `codex` picks the shape template for
 // injected entries (a codex vs. chat sibling).
 const EXPOSED_MODELS = {
-  "gpt-5.2": { name: "GPT 5.2", codex: false },
   "gpt-5.4": { name: "GPT 5.4", codex: false },
   "gpt-5.5": { name: "GPT 5.5", codex: false },
-  "gpt-5.2-codex": { name: "GPT 5.2 Codex", codex: true },
-  "gpt-5.3-codex": { name: "GPT 5.3 Codex", codex: true },
   "gpt-5.3-codex-spark": { name: "GPT 5.3 Codex Spark", codex: true },
 };
 
@@ -179,11 +176,6 @@ export const CodexAuthProxy = async (input) => {
       async models(provider, ctx) {
         const catalog = provider.models || {};
         const values = Object.values(catalog);
-        // Diagnostic (forwarded via opencode --print-logs): shows the auth type
-        // and the size of the catalog this hook actually receives at runtime.
-        console.error(
-          `[codex-plugin] models hook: auth=${ctx?.auth?.type} incoming=${values.length}`
-        );
         // Only curate Codex (oauth) sessions; API-key openai usage passes through.
         if (ctx.auth?.type !== "oauth") return provider.models;
         // Prefer cloning a real catalog sibling (keeps upstream metadata), but
@@ -213,7 +205,6 @@ export const CodexAuthProxy = async (input) => {
               : {}),
           };
         }
-        console.error(`[codex-plugin] models hook: out=${Object.keys(out).join(",")}`);
         return out;
       },
     },

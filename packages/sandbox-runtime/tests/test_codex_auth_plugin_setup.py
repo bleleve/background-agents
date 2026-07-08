@@ -65,20 +65,17 @@ class TestCodexModelRegistration:
         # model the sandbox can't resolve.
         src = _plugin_source()
         for model_id in (
-            "gpt-5.2",
             "gpt-5.4",
             "gpt-5.5",
-            "gpt-5.2-codex",
-            "gpt-5.3-codex",
             "gpt-5.3-codex-spark",
         ):
             assert f'"{model_id}":' in src, f"{model_id} must be in EXPOSED_MODELS"
 
     def test_injects_models_missing_from_the_live_catalog(self):
-        # opencode's built-in codex plugin filters the OpenAI catalog (dropping
-        # everything <= gpt-5.4) before this hook runs, so a filter-only hook
-        # can never surface gpt-5.2/5.2-codex/5.3-codex. The hook must fall back
-        # to a cloned template when the id is absent from the catalog.
+        # opencode's built-in codex plugin filters the OpenAI catalog, and the
+        # ChatGPT-account Codex backend only supports a subset — so the live
+        # catalog may not carry every exposed model. The hook must fall back to
+        # a cloned template when the id is absent from the catalog.
         src = _plugin_source()
         assert "catalog[id] || (spec.codex ? codexTemplate : chatTemplate)" in src
 

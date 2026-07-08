@@ -1012,26 +1012,6 @@ class SandboxSupervisor:
 
     def _deploy_opencode_plugins(self, opencode_dir: Path) -> None:
         """Deploy bundled OpenCode plugins into .opencode/plugins."""
-        # Diagnostic: fingerprint the codex plugin baked into the base image so
-        # Modal logs reveal which version the image actually shipped. This tells
-        # apart "base image not rebuilt" from "plugin stale despite rebuild" when
-        # chasing OpenAI model-resolution regressions: the injecting version (>=
-        # #355) declares `EXPOSED_MODELS`; the pre-#355 version declared
-        # `ALLOWED_MODELS`. Best-effort; never blocks boot.
-        try:
-            codex_src = Path(self.CODEX_AUTH_PLUGIN_SOURCE_PATH)
-            if codex_src.exists():
-                text = codex_src.read_text()
-                self.log.info(
-                    "openai_oauth.plugin_fingerprint",
-                    sandbox_version=os.environ.get("SANDBOX_VERSION", ""),
-                    has_exposed_models="EXPOSED_MODELS" in text,
-                    has_allowed_models="const ALLOWED_MODELS" in text,
-                    size_bytes=len(text),
-                )
-        except Exception as exc:  # diagnostic must never block boot
-            self.log.warn("openai_oauth.plugin_fingerprint_failed", error=str(exc))
-
         plugins_to_copy: list[tuple[Path, str, str]] = []
 
         codex_source = Path(self.CODEX_AUTH_PLUGIN_SOURCE_PATH)
