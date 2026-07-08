@@ -99,7 +99,14 @@ DOCKER_CE_VERSION = "5:27.5.0-1~debian.12~bookworm"
 # v109: entrypoint logs `openai_oauth.plugin_fingerprint` at boot (baked codex plugin
 #       version + SANDBOX_VERSION) so Modal logs reveal whether the deployed base image
 #       actually ships the injecting plugin — diagnosing why v105-v108 didn't take effect.
-CACHE_BUSTER = "v109-plugin-fingerprint-log"
+# v110: codex-auth-plugin injection is robust to an EMPTY incoming catalog (falls back to a
+#       complete built-in model shape instead of cloning a sibling) — the deployed opencode
+#       hands the hook an empty openai catalog, so cloning yielded `{}` and every openai/*
+#       failed. Plugin also logs its runtime auth/incoming/out shape.
+# v111: trim exposed OpenAI models to what ChatGPT-account Codex actually serves
+#       (gpt-5.4/gpt-5.5/gpt-5.3-codex-spark); drop deprecated gpt-5.2/5.2-codex/5.3-codex.
+#       Remove the temporary codex-plugin fingerprint + console.error debug logs.
+CACHE_BUSTER = "v111-trim-openai-models"
 
 # Base image with all development tools
 base_image = (

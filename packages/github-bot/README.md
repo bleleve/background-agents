@@ -53,11 +53,16 @@ Key design decisions:
   sandbox.
 - **One request session per PR, reuse on re-trigger**: `@mention` change requests on a PR —
   top-level comments and inline review comments alike — coalesce into a single "request" session so
-  concurrent requests queue on one working tree instead of racing to push the branch. The bot
-  remembers it in KV (`request-session:<repo>:<pr>`) and confirms it is still live via the control
-  plane (`GET /sessions/:id/liveness`) before folding a new request in, else creates a fresh
-  session. Reviews are separate: the `reef: ask for review` label and the web "Re-run review" button
-  re-run in the PR's existing review session (KV `review-session:<repo>:<pr>`). Delivery dedupe uses
+  concurrent requests queue on one working tree instead of racing to push the branch. The bot claims
+  the PR's `request` lane slot via an atomic D1 claim/confirm/release protocol
+  (`POST /internal/pr-sessions/{claim,confirm,release}`). If the slot is already confirmed, it
+  checks the winning session is still live via the control plane (`GET /sessions/:id/liveness`)
+  before folding a new request in. If the slot is still `creating` (another request just won it and
+  hasn't confirmed yet), it polls briefly (`GET /internal/pr-sessions/peek`, 3 attempts / 150ms
+  apart) to coalesce into the winner once it confirms instead of racing it. Either way, once the
+  budget is exhausted or the found session turns out dead, it creates a fresh session. Reviews are
+  separate: the `reef: ask for review` label and the web "Re-run review" button re-run in the PR's
+  existing review session, claimed the same way against the `review` lane slot. Delivery dedupe uses
   KV `X-GitHub-Delivery`.
 - **Minimal PR context fetching**: The bot pre-fetches the PR diff and inlines it into the prompt
   for diffs below the large-diff threshold, so the agent reviews it directly without running
@@ -156,9 +161,9 @@ prior verdict by its `<!-- reef-verdict -->` marker, **deletes it, and posts a f
 comment** — a new comment notifies subscribers, whereas an in-place edit would be silent.
 
 - **`reef: ask for review` label** — add the label to a PR to re-run the full review. The bot reuses
-  the PR's existing review session (looked up in KV, `review-session:<repo>:<pr>`) when there is
-  one. It removes the label again once the review completes, so re-adding it re-triggers. (No extra
-  GitHub App config — the `labeled` action ships with the already-subscribed `Pull request` event.)
+  the PR's existing review session (found via the D1 `review` lane slot) when there is one. It
+  removes the label again once the review completes, so re-adding it re-triggers. (No extra GitHub
+  App config — the `labeled` action ships with the already-subscribed `Pull request` event.)
 - **Web UI** — the "Re-run review" button on a PR-review session calls the bot's internal
   `POST /internal/reviews` endpoint (HMAC-authenticated with `INTERNAL_CALLBACK_SECRET`) with the
   current session id, so the review re-runs in that session. Requires `GITHUB_BOT_URL` set on the
@@ -214,7 +219,7 @@ people to request the GitHub App bot through the PR reviewer picker.
 1. Check the added `label.name` is `reef: ask for review` — skip otherwise
 2. Skip drafts and closed/merged PRs; apply repo-enablement, visibility, the `autoReviewOnOpen`
    setting, and caller gating
-3. Post eyes reaction; reuse the PR's existing review session from KV (`review-session:<repo>:<pr>`)
+3. Post eyes reaction; reuse the PR's existing review session (found via the D1 `review` lane slot)
    when present, else create one; send the code review prompt
 4. On completion, the bot removes the `reef: ask for review` label (see `handleCompleteCallback`)
 
@@ -225,14 +230,14 @@ people to request the GitHub App bot through the PR reviewer picker.
 3. Check `sender.login !== GITHUB_BOT_USERNAME` — prevent loops
 4. Strip @mention, post eyes reaction, and call `routeMention` to decide the lane:
    - **Review** — the comment reads as an explicit review command (`review this`, `PTAL`,
-     `re-review`; matched by `isReviewCommand`). Route to the PR's dedicated review session (reuse
-     the one stored under `review-session:<repo>:<pr>` in KV, or create one) with
-     `actionLabel: "mention_review"`, using the review model and skipping the change-request working
-     tree.
-   - **Change request** (everything else) — coalesce into the PR's live request session if one
-     exists (else create a fresh one and remember it in KV), send the comment-action prompt. Mode
-     (plan/direct) and models come from the router, with label overrides (`plan`, `plan-<alias>`,
-     `model-/build-<alias>`) applied inside `routeMention`.
+     `re-review`; matched by `isReviewCommand`). Route to the PR's dedicated review session (claim
+     the D1 `review` lane slot, reusing the confirmed session if one is already there, or create
+     one) with `actionLabel: "mention_review"`, using the review model and skipping the
+     change-request working tree.
+   - **Change request** (everything else) — claim the D1 `request` lane slot and coalesce into the
+     PR's live request session if one exists (else create a fresh one and confirm it into the slot),
+     send the comment-action prompt. Mode (plan/direct) and models come from the router, with label
+     overrides (`plan`, `plan-<alias>`, `model-/build-<alias>`) applied inside `routeMention`.
 
 **Review Comment:** Same as issue comment, including the `routeMention` review/change-request split,
 but the change-request prompt additionally includes `filePath`, `diffHunk`, and `commentId` for
@@ -347,18 +352,19 @@ GitHub webhook → Bot (trace_id generated) → Control plane (trace_id in x-tra
 
 Key log events:
 
-| Event                            | Level | When                                          |
-| -------------------------------- | ----- | --------------------------------------------- |
-| `webhook.received`               | info  | Webhook arrives (event type, repo, action)    |
-| `webhook.duplicate_delivery`     | info  | Redelivery or replay skipped by delivery ID   |
-| `webhook.dedupe_finalize_failed` | warn  | Success path could not extend dedupe TTL      |
-| `webhook.dedupe_clear_failed`    | warn  | Failure path could not clear in-flight marker |
-| `webhook.signature_invalid`      | warn  | Signature verification fails                  |
-| `webhook.ignored`                | debug | Event doesn't match any handler               |
-| `session.created`                | info  | Session created via control plane             |
-| `prompt.sent`                    | info  | Prompt delivered to session                   |
-| `acknowledgment.posted`          | debug | Eyes reaction posted                          |
-| `acknowledgment.failed`          | warn  | Reaction failed (non-blocking)                |
+| Event                            | Level | When                                                |
+| -------------------------------- | ----- | --------------------------------------------------- |
+| `webhook.received`               | info  | Webhook arrives (event type, repo, action)          |
+| `webhook.duplicate_delivery`     | info  | Redelivery or replay skipped by delivery ID         |
+| `webhook.dedupe_finalize_failed` | warn  | Success path could not extend dedupe TTL            |
+| `webhook.dedupe_clear_failed`    | warn  | Failure path could not clear in-flight marker       |
+| `webhook.signature_invalid`      | warn  | Signature verification fails                        |
+| `webhook.ignored`                | debug | Event doesn't match any handler                     |
+| `mention_router.decision`        | info  | @mention routed (target/model/source, content-free) |
+| `session.created`                | info  | Session created via control plane                   |
+| `prompt.sent`                    | info  | Prompt delivered to session                         |
+| `acknowledgment.posted`          | debug | Eyes reaction posted                                |
+| `acknowledgment.failed`          | warn  | Reaction failed (non-blocking)                      |
 
 ## Development
 

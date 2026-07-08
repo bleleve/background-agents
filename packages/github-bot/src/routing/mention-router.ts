@@ -24,6 +24,7 @@ import {
 } from "../label-resolution";
 import type { Logger } from "../logger";
 import type { ResolvedGitHubConfig } from "../utils/integration-config";
+import type { Logger } from "../logger";
 
 export type RouteTarget = "review" | "request";
 
@@ -42,6 +43,10 @@ export interface MentionRoutingContext {
    * future LLM classifier will call it to get `routingModel`.
    */
   resolveDefaults: () => Promise<{ defaultPlanModel: string; routingModel: string }>;
+  /** Emits the `mention_router.decision` telemetry line — the labeled dataset a future classifier will be calibrated/shadow-tested against. */
+  log: Logger;
+  /** Correlation ids for the decision log, same shape the call sites already build for their other `log.info` calls (trace_id, repo, pull_number). */
+  meta: Record<string, unknown>;
   // ── reserved for the future complexity router (unused in v1) ──────────────
   // isInline (top-level PR comment vs inline review-thread comment) is already
   // threaded through from both call sites, but routeMention's body doesn't
@@ -148,6 +153,12 @@ export function guardEffort(
  * body verbatim.
  */
 export async function routeMention(ctx: MentionRoutingContext): Promise<RoutingDecision> {
+  const decision = await decideRoute(ctx);
+  logRoutingDecision(ctx, decision);
+  return decision;
+}
+
+async function decideRoute(ctx: MentionRoutingContext): Promise<RoutingDecision> {
   if (isReviewCommand(ctx.commentBody)) {
     // Review lane precedence mirrors the dedicated review sites — see
     // resolveReviewModel's doc comment for the ladder.
@@ -180,4 +191,33 @@ export async function routeMention(ctx: MentionRoutingContext): Promise<RoutingD
     reasoningEffort: guardEffort(model, ctx.config),
     source: "deterministic",
   };
+}
+
+/** Word-count bucket only — never the raw body (see module doc: no comment text in logs). */
+function bucketCommentWordCount(body: string): "1" | "2-5" | "6+" {
+  const words = body.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return "1";
+  if (words.length <= 5) return "2-5";
+  return "6+";
+}
+
+// Labeled dataset for the future classifier (see module doc): one line per
+// routed mention, content-free so it's safe to retain/export without a
+// comment-body redaction pass.
+function logRoutingDecision(ctx: MentionRoutingContext, decision: RoutingDecision): void {
+  const payload: Record<string, unknown> = {
+    ...ctx.meta,
+    target: decision.target,
+    model: decision.model,
+    source: decision.source,
+    is_inline: ctx.isInline,
+    body_word_count: bucketCommentWordCount(ctx.commentBody),
+  };
+  if (decision.target === "request") {
+    payload.mode = decision.mode;
+    if (decision.mode === "plan") {
+      payload.plan_model = decision.planModel;
+    }
+  }
+  ctx.log.info("mention_router.decision", payload);
 }

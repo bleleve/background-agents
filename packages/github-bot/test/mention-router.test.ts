@@ -33,19 +33,40 @@ const baseConfig: ResolvedGitHubConfig = {
   commentActionInstructions: null,
 };
 
+function createMockLogger(): Logger {
+  return {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    child: vi.fn().mockReturnThis(),
+  };
+}
+
+const defaultMeta = { trace_id: "trace-1", repo: "acme/widgets", pull_number: 42 };
+
 function ctx(
   commentBody: string,
-  opts: { labels?: GitHubLabel[]; config?: ResolvedGitHubConfig; defaultPlanModel?: string } = {}
+  opts: {
+    labels?: GitHubLabel[];
+    config?: ResolvedGitHubConfig;
+    defaultPlanModel?: string;
+    isInline?: boolean;
+    log?: Logger;
+    meta?: Record<string, unknown>;
+  } = {}
 ): MentionRoutingContext {
   return {
     commentBody,
-    isInline: false,
+    isInline: opts.isInline ?? false,
     labels: opts.labels ?? [],
     config: opts.config ?? baseConfig,
     resolveDefaults: async () => ({
       defaultPlanModel: opts.defaultPlanModel ?? "anthropic/claude-opus-4-6",
       routingModel: "anthropic/claude-haiku-4-5",
     }),
+    log: opts.log ?? createMockLogger(),
+    meta: opts.meta ?? defaultMeta,
   };
 }
 
@@ -242,5 +263,82 @@ describe("routeMention — request lane", () => {
     if (d.target !== "request") throw new Error("unreachable");
     expect(d.mode).toBe("plan");
     expect(d.planModel).toBe(ALIAS_MODEL);
+  });
+});
+
+// Labeled-dataset telemetry for the future classifier (see module doc) — the
+// log must be content-free, so these assert shape and the absence of the raw
+// body rather than routing behavior (already covered above).
+describe("routeMention — decision logging", () => {
+  it("logs once with the review-lane shape", async () => {
+    const log = createMockLogger();
+    const meta = { trace_id: "t-review", repo: "acme/widgets", pull_number: 7 };
+    await routeMention(ctx("ptal", { log, meta }));
+
+    expect(log.info).toHaveBeenCalledTimes(1);
+    expect(log.info).toHaveBeenCalledWith("mention_router.decision", {
+      ...meta,
+      target: "review",
+      model: baseConfig.model,
+      source: "deterministic",
+      is_inline: false,
+      body_word_count: "1",
+    });
+  });
+
+  it("logs once with the request-lane direct-mode shape", async () => {
+    const log = createMockLogger();
+    const meta = { trace_id: "t-direct", repo: "acme/widgets", pull_number: 8 };
+    await routeMention(ctx("fix the failing test", { log, meta, isInline: true }));
+
+    expect(log.info).toHaveBeenCalledTimes(1);
+    expect(log.info).toHaveBeenCalledWith("mention_router.decision", {
+      ...meta,
+      target: "request",
+      mode: "direct",
+      model: baseConfig.model,
+      source: "deterministic",
+      is_inline: true,
+      body_word_count: "2-5",
+    });
+  });
+
+  it("logs once with the request-lane plan-mode shape, including plan_model", async () => {
+    const log = createMockLogger();
+    const meta = { trace_id: "t-plan", repo: "acme/widgets", pull_number: 9 };
+    const d = await routeMention(
+      ctx("please implement this whole feature end to end thoroughly", {
+        labels: [{ name: "plan" }],
+        defaultPlanModel: "anthropic/claude-opus-4-6",
+        log,
+        meta,
+      })
+    );
+    expect(d.target).toBe("request");
+
+    expect(log.info).toHaveBeenCalledTimes(1);
+    expect(log.info).toHaveBeenCalledWith("mention_router.decision", {
+      ...meta,
+      target: "request",
+      mode: "plan",
+      model: baseConfig.model,
+      plan_model: "anthropic/claude-opus-4-6",
+      source: "deterministic",
+      is_inline: false,
+      body_word_count: "6+",
+    });
+  });
+
+  it("never logs the raw comment body text", async () => {
+    const log = createMockLogger();
+    const secretBody = "please rewrite the auth token handshake flow, it leaks session ids";
+    await routeMention(ctx(secretBody, { log }));
+    await routeMention(
+      ctx(secretBody, { log, labels: [{ name: "plan" }], defaultPlanModel: "x/y" })
+    );
+
+    expect(log.info).toHaveBeenCalledTimes(2);
+    const serializedCalls = JSON.stringify((log.info as ReturnType<typeof vi.fn>).mock.calls);
+    expect(serializedCalls).not.toContain(secretBody);
   });
 });

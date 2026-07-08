@@ -26,11 +26,8 @@ setup instructions.
 
 | Model ID                     | Display name        | Description               | Reasoning efforts              | Default effort |
 | ---------------------------- | ------------------- | ------------------------- | ------------------------------ | -------------- |
-| `openai/gpt-5.2`             | GPT 5.2             | 400K context, fast        | none, low, medium, high, xhigh | Not set        |
 | `openai/gpt-5.4`             | GPT 5.4             | Flagship model            | none, low, medium, high, xhigh | Not set        |
 | `openai/gpt-5.5`             | GPT 5.5             | Latest flagship model     | none, low, medium, high, xhigh | Not set        |
-| `openai/gpt-5.2-codex`       | GPT 5.2 Codex       | Optimized for code        | low, medium, high, xhigh       | high           |
-| `openai/gpt-5.3-codex`       | GPT 5.3 Codex       | Latest codex              | low, medium, high, xhigh       | high           |
 | `openai/gpt-5.3-codex-spark` | GPT 5.3 Codex Spark | Low-latency codex variant | low, medium, high, xhigh       | high           |
 
 ## OpenCode Zen

@@ -25,12 +25,62 @@ const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before expiry
 // picker's `openai/*` choices resolvable. `codex` picks the shape template for
 // injected entries (a codex vs. chat sibling).
 const EXPOSED_MODELS = {
-  "gpt-5.2": { name: "GPT 5.2", codex: false },
   "gpt-5.4": { name: "GPT 5.4", codex: false },
   "gpt-5.5": { name: "GPT 5.5", codex: false },
-  "gpt-5.2-codex": { name: "GPT 5.2 Codex", codex: true },
-  "gpt-5.3-codex": { name: "GPT 5.3 Codex", codex: true },
   "gpt-5.3-codex-spark": { name: "GPT 5.3 Codex Spark", codex: true },
+};
+
+// Complete model shape used when the incoming catalog has no OpenAI sibling to
+// clone from. opencode can hand this hook an EMPTY openai catalog (e.g. when its
+// models.dev data isn't populated at hook time) — cloning-based injection would
+// then return `{}` and every openai/* model would fail to resolve, which is
+// exactly the staging symptom. Mirrors the shape opencode's own catalog uses
+// (api/limit/capabilities/variants) so reasoning-effort variants keep working.
+const OPENAI_MODEL_TEMPLATE = {
+  providerID: "openai",
+  family: "gpt",
+  api: { id: "", url: "", npm: "@ai-sdk/openai" },
+  status: "active",
+  headers: {},
+  options: {},
+  cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+  limit: { context: 400000, input: 272000, output: 128000 },
+  capabilities: {
+    temperature: false,
+    reasoning: true,
+    attachment: true,
+    toolcall: true,
+    input: { text: true, audio: false, image: true, video: false, pdf: true },
+    output: { text: true, audio: false, image: false, video: false, pdf: false },
+    interleaved: false,
+  },
+  variants: {
+    none: {
+      reasoningEffort: "none",
+      reasoningSummary: "auto",
+      include: ["reasoning.encrypted_content"],
+    },
+    low: {
+      reasoningEffort: "low",
+      reasoningSummary: "auto",
+      include: ["reasoning.encrypted_content"],
+    },
+    medium: {
+      reasoningEffort: "medium",
+      reasoningSummary: "auto",
+      include: ["reasoning.encrypted_content"],
+    },
+    high: {
+      reasoningEffort: "high",
+      reasoningSummary: "auto",
+      include: ["reasoning.encrypted_content"],
+    },
+    xhigh: {
+      reasoningEffort: "xhigh",
+      reasoningSummary: "auto",
+      include: ["reasoning.encrypted_content"],
+    },
+  },
 };
 
 // In-memory token cache (reset on sandbox restart - fresh refresh via bridge)
@@ -124,26 +174,29 @@ export const CodexAuthProxy = async (input) => {
     provider: {
       id: "openai",
       async models(provider, ctx) {
+        const catalog = provider.models || {};
+        const values = Object.values(catalog);
         // Only curate Codex (oauth) sessions; API-key openai usage passes through.
         if (ctx.auth?.type !== "oauth") return provider.models;
-        const catalog = provider.models;
-        const values = Object.values(catalog);
-        // Templates cloned for models the live catalog no longer carries, so an
-        // injected entry keeps a real `variants`/`capabilities` block — that is
-        // what carries reasoning-effort support, not the id alone.
-        const codexTemplate = values.find((m) => (m.family || "").includes("codex")) || values[0];
-        const chatTemplate = values.find((m) => m.family === "gpt") || values[0];
+        // Prefer cloning a real catalog sibling (keeps upstream metadata), but
+        // fall back to a complete built-in shape so injection still works when
+        // the catalog is empty — otherwise nothing resolves.
+        const codexTemplate =
+          values.find((m) => (m.family || "").includes("codex")) ||
+          values[0] ||
+          OPENAI_MODEL_TEMPLATE;
+        const chatTemplate =
+          values.find((m) => m.family === "gpt") || values[0] || OPENAI_MODEL_TEMPLATE;
         const zeroCost = { input: 0, output: 0, cache: { read: 0, write: 0 } };
         const out = {};
         for (const [id, spec] of Object.entries(EXPOSED_MODELS)) {
           const template = catalog[id] || (spec.codex ? codexTemplate : chatTemplate);
-          if (!template) continue; // catalog unexpectedly empty — nothing to clone
           out[id] = {
             ...template,
             id,
             providerID: "openai",
             name: spec.name,
-            api: { ...template.api, id },
+            api: { ...(template.api || {}), id },
             // Codex is subscription-based — surface zero marginal cost.
             cost: zeroCost,
             // Mirror opencode's own correction of the gpt-5.5 context window.

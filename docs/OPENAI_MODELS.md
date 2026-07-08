@@ -12,17 +12,20 @@ how to configure your deployment to use them.
 For the full model list, including Claude Fable 5 and other Anthropic models, see
 [Available Models](AVAILABLE_MODELS.md).
 
-| Model               | Description                    |
-| ------------------- | ------------------------------ |
-| GPT 5.2             | Fast baseline model (400K ctx) |
-| GPT 5.4             | Flagship model                 |
-| GPT 5.5             | Latest flagship model          |
-| GPT 5.2 Codex       | Optimized for code tasks       |
-| GPT 5.3 Codex       | Latest codex variant           |
-| GPT 5.3 Codex Spark | Lightweight Codex variant      |
+| Model               | Description                             |
+| ------------------- | --------------------------------------- |
+| GPT 5.4             | Flagship model                          |
+| GPT 5.5             | Latest flagship model                   |
+| GPT 5.3 Codex Spark | Lightweight Codex variant (ChatGPT Pro) |
 
 OpenAI models support reasoning effort levels: none, low, medium, high, and extra high (default:
 high for Codex models).
+
+> **Model availability**: with **ChatGPT sign-in** (the auth flow below), OpenAI only serves the
+> Codex models currently offered to your ChatGPT plan. Older models (e.g. `gpt-5.2`,
+> `gpt-5.2-codex`, `gpt-5.3-codex`) have been deprecated by OpenAI for ChatGPT sign-in and are only
+> reachable via API-key auth, so they are not listed here. See
+> [OpenAI's Codex models page](https://developers.openai.com/codex/models) for the current lineup.
 
 ---
 
