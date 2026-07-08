@@ -174,86 +174,99 @@ export default function Home() {
     pendingConfigRef.current = null;
   }, [selectedRepo, selectedModel, selectedBranch]);
 
-  const createSessionForWarming = useCallback(async () => {
-    if (pendingSessionId) return pendingSessionId;
-    if (sessionCreationPromise.current) return sessionCreationPromise.current;
-    if (!selectedRepo) return null;
+  const createSessionForWarming = useCallback(
+    async (source: "warmup" | "submit") => {
+      if (pendingSessionId) return pendingSessionId;
+      if (sessionCreationPromise.current) return sessionCreationPromise.current;
+      if (!selectedRepo) return null;
 
-    setIsCreatingSession(true);
-    const [owner, name] = selectedRepo.split("/");
-    const currentConfig = { repo: selectedRepo, model: selectedModel, branch: selectedBranch };
-    pendingConfigRef.current = currentConfig;
+      setIsCreatingSession(true);
+      const [owner, name] = selectedRepo.split("/");
+      const currentConfig = { repo: selectedRepo, model: selectedModel, branch: selectedBranch };
+      pendingConfigRef.current = currentConfig;
 
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
 
-    const promise = (async () => {
-      try {
-        const res = await fetch("/api/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            repoOwner: owner,
-            repoName: name,
-            model: selectedModel,
-            reasoningEffort,
-            branch: selectedBranch || undefined,
-            // Untouched this visit -> undefined, so the control plane infers
-            // plan-vs-direct via the intent classifier instead of defaulting
-            // to the toggle's initial `false`. A real click always wins.
-            planMode: planModeTouchedRef.current ? planMode : undefined,
-            // In plan mode the picker controls the planning model, so send it as
-            // planModel too. Otherwise the control plane defaults plan_model to
-            // DEFAULT_PLAN_MODEL and the "Plan" line shows the wrong model.
-            planModel: planMode ? selectedModel : undefined,
-            // Classifier input when planMode is inferred (ignored otherwise) —
-            // the session's first prompt isn't sent until after creation (see
-            // the separate POST .../prompt call below), so the in-progress
-            // composer text is the only signal available at create time.
-            planClassificationText: planModeTouchedRef.current ? undefined : prompt,
-          }),
-          signal: abortController.signal,
-        });
+      const promise = (async () => {
+        try {
+          const res = await fetch("/api/sessions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              repoOwner: owner,
+              repoName: name,
+              model: selectedModel,
+              reasoningEffort,
+              branch: selectedBranch || undefined,
+              // Untouched this visit -> undefined, so the control plane infers
+              // plan-vs-direct via the intent classifier instead of defaulting
+              // to the toggle's initial `false`. A real click always wins.
+              planMode: planModeTouchedRef.current ? planMode : undefined,
+              // In plan mode the picker controls the planning model, so send it as
+              // planModel too. Otherwise the control plane defaults plan_model to
+              // DEFAULT_PLAN_MODEL and the "Plan" line shows the wrong model.
+              planModel: planMode ? selectedModel : undefined,
+              // Classifier input when planMode is inferred (ignored otherwise) —
+              // the session's first prompt isn't sent until after creation (see
+              // the separate POST .../prompt call below), so the in-progress
+              // composer text is the only signal available at create time.
+              // Restricted to source === "submit": this function is idempotent
+              // (guarded above) and usually fires from handlePromptChange's
+              // pre-warm the moment shouldWarmForPrompt trips, well before the
+              // user finishes typing — classifying that partial prefix would
+              // permanently misjudge intent since a later, complete submit
+              // reuses the pre-warmed session instead of re-creating it. Warmup
+              // creation skips classification and lets the server fall back to
+              // direct; only a submit that outraces pre-warming classifies,
+              // where `prompt` is genuinely the full text.
+              planClassificationText:
+                !planModeTouchedRef.current && source === "submit" ? prompt : undefined,
+            }),
+            signal: abortController.signal,
+          });
 
-        if (res.ok) {
-          const data = await res.json();
-          if (
-            pendingConfigRef.current?.repo === currentConfig.repo &&
-            pendingConfigRef.current?.model === currentConfig.model &&
-            pendingConfigRef.current?.branch === currentConfig.branch
-          ) {
-            setPendingSessionId(data.sessionId);
-            return data.sessionId as string;
+          if (res.ok) {
+            const data = await res.json();
+            if (
+              pendingConfigRef.current?.repo === currentConfig.repo &&
+              pendingConfigRef.current?.model === currentConfig.model &&
+              pendingConfigRef.current?.branch === currentConfig.branch
+            ) {
+              setPendingSessionId(data.sessionId);
+              return data.sessionId as string;
+            }
+            return null;
           }
           return null;
-        }
-        return null;
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") {
+            return null;
+          }
+          console.error("Failed to create session for warming:", error);
           return null;
+        } finally {
+          if (abortControllerRef.current === abortController) {
+            setIsCreatingSession(false);
+            sessionCreationPromise.current = null;
+            abortControllerRef.current = null;
+          }
         }
-        console.error("Failed to create session for warming:", error);
-        return null;
-      } finally {
-        if (abortControllerRef.current === abortController) {
-          setIsCreatingSession(false);
-          sessionCreationPromise.current = null;
-          abortControllerRef.current = null;
-        }
-      }
-    })();
+      })();
 
-    sessionCreationPromise.current = promise;
-    return promise;
-  }, [
-    selectedRepo,
-    selectedModel,
-    reasoningEffort,
-    selectedBranch,
-    planMode,
-    pendingSessionId,
-    prompt,
-  ]);
+      sessionCreationPromise.current = promise;
+      return promise;
+    },
+    [
+      selectedRepo,
+      selectedModel,
+      reasoningEffort,
+      selectedBranch,
+      planMode,
+      pendingSessionId,
+      prompt,
+    ]
+  );
 
   // Toggling plan-mode invalidates any pre-warmed session so the next
   // submission creates a session with the matching planMode flag.
@@ -352,7 +365,7 @@ export default function Home() {
     // keystrokes. createSessionForWarming() is idempotent (guards on
     // pendingSessionId / the in-flight promise), so later keystrokes are no-ops.
     if (shouldWarmForPrompt(value) && !pendingSessionId && !isCreatingSession && selectedRepo) {
-      createSessionForWarming();
+      createSessionForWarming("warmup");
     }
   };
 
@@ -370,7 +383,7 @@ export default function Home() {
     try {
       let sessionId = pendingSessionId;
       if (!sessionId) {
-        sessionId = await createSessionForWarming();
+        sessionId = await createSessionForWarming("submit");
       }
 
       if (!sessionId) {
