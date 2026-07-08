@@ -2273,6 +2273,28 @@ describe("handleReviewComment", () => {
       "Open-Inspect"
     );
   });
+
+  it("logs a warning but still skips when the fetch-failed reply itself fails to post", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not found", { status: 404 })));
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: ReviewCommentPayload = {
+      ...reviewCommentPayload,
+      comment: { ...reviewCommentPayload.comment, body: "@test-bot[bot] please review this" },
+    };
+    // Best-effort reply: if it fails to post, the handler must not throw or
+    // change outcome — just log, matching the identical pattern already
+    // covered for postRootCoalescedReply's failure branch.
+    vi.mocked(createReviewCommentReply).mockResolvedValue(null);
+
+    const result = await handleReviewComment(env, log, payload, "trace-review-fetch-failed-reply");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "pr_fetch_failed" });
+    expect(log.warn).toHaveBeenCalledWith(
+      "mention_review.pr_fetch_failed_reply_failed",
+      expect.anything()
+    );
+  });
 });
 
 describe("review suggestion tracking (C2)", () => {

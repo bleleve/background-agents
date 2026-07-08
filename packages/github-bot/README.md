@@ -239,12 +239,17 @@ people to request the GitHub App bot through the PR reviewer picker.
      send the comment-action prompt. Mode (plan/direct) and models come from the router, with label
      overrides (`plan`, `plan-<alias>`, `model-/build-<alias>`) applied inside `routeMention`.
 
-**Review Comment:** Same as issue comment, including the `routeMention` review/change-request split,
-but the change-request prompt additionally includes `filePath`, `diffHunk`, and `commentId` for
-thread-specific context and reply threading. The coalesced-request acknowledgment also differs by
-trigger: an inline review comment gets an **in-thread reply** anchored to the triggering comment
-(via `createReviewCommentReply`), whereas a root issue comment gets a top-level comment that
-**quotes the original request** (root comments have no thread to anchor to).
+**Review Comment:** Same happy-path flow as issue comment, including the `routeMention`
+review/change-request split, but the change-request prompt additionally includes `filePath`,
+`diffHunk`, and `commentId` for thread-specific context and reply threading. The coalesced-request
+acknowledgment also differs by trigger: an inline review comment gets an **in-thread reply**
+anchored to the triggering comment (via `createReviewCommentReply`), whereas a root issue comment
+gets a top-level comment that **quotes the original request** (root comments have no thread to
+anchor to). The two lanes diverge on a failed PR-details fetch, though: an issue comment's payload
+already carries `issue.title`/`body`/`user.login`, so the review falls back to those and clones the
+repo default branch instead of skipping; a review comment's payload carries neither, so there is no
+fallback — it posts a visible in-thread error reply and skips rather than starting a review with no
+context.
 
 ## Authentication
 
