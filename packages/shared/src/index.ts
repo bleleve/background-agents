@@ -17,3 +17,4 @@ export * from "./app-name";
 export * from "./user-id";
 export * from "./slack";
 export * from "./prompt-safety";
+export * from "./intent-router";

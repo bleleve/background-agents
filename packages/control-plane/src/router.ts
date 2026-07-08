@@ -26,6 +26,7 @@ import { analyticsRoutes } from "./routes/analytics";
 import { providerIdentityRoutes } from "./routes/provider-identities";
 import { sessionRoutes } from "./routes/sessions";
 import { prSessionRoutes } from "./routes/pr-sessions";
+import { routeIntentRoutes } from "./routes/route-intent";
 import { handleBootProgress } from "./routes/boot-progress";
 import { handleSlackNotify } from "./routes/slack-notify";
 import { prReviewRoutes } from "./routes/pr-review";
@@ -323,6 +324,10 @@ const routes: Route[] = [
   // Atomic D1 claim/confirm/release for github-bot's per-PR session coalescing
   // (request + review lanes). HMAC-authenticated only.
   ...prSessionRoutes,
+
+  // Unified intent classifier (review-vs-request, plan-vs-direct) for GitHub,
+  // Slack, Linear, and web. HMAC-authenticated only.
+  ...routeIntentRoutes,
 
   // Plan persistence
   {

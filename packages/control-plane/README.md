@@ -145,10 +145,11 @@ exists, and `5xx` when provider configuration or upstream token minting fails. S
 providers must implement `generateCredentialHelperAuth` before helper-backed sandbox git auth works
 for that provider.
 
-### Internal Routes (github-bot → control-plane, HMAC-authenticated)
+### Internal Routes (bots/web → control-plane, HMAC-authenticated)
 
-These routes are called by the github-bot via its `CONTROL_PLANE` service binding using a shared
-`INTERNAL_CALLBACK_SECRET`. They are not exposed to end users.
+These routes are called by github-bot, slack-bot, linear-bot, and the web app via their
+`CONTROL_PLANE` service binding (or, for the web app, an equivalent HMAC-authenticated call) using a
+shared `INTERNAL_CALLBACK_SECRET`. They are not exposed to end users.
 
 | Endpoint                              | Method | Description                                                               |
 | ------------------------------------- | ------ | ------------------------------------------------------------------------- |
@@ -160,6 +161,19 @@ These routes are called by the github-bot via its `CONTROL_PLANE` service bindin
 | `/internal/pr-sessions/claim`         | POST   | Atomically claim a PR lane's session slot (`INSERT ... ON CONFLICT`)      |
 | `/internal/pr-sessions/confirm`       | POST   | Confirm a won claim's session id, gated on the claim token                |
 | `/internal/pr-sessions/release`       | POST   | Free a claimed slot whose session has gone dead, gated on the claim token |
+| `/internal/route-intent`              | POST   | Unified intent classifier (review-vs-request, plan-vs-direct)             |
+
+`/internal/route-intent` is a dumb, always-on classify-and-return service — it has no notion of
+shadow/classifier/deterministic mode. Each caller decides whether to act on the result, log it as a
+shadow divergence against its own deterministic default, or ignore it entirely; the route itself
+always runs the real classification and returns it. Request/response are discriminated by `surface`
+(`github_mention` | `slack` | `linear` | `web`) — see `packages/shared/src/intent-router.ts` for the
+wire contract and `packages/control-plane/src/routing/intent-classifier.ts` for the classifier
+itself. The model is `model_preferences.default_routing_model` (Settings → Models "Routing model"),
+constrained to Anthropic models in v1; every failure path (missing key, timeout, API error,
+malformed output, non-Anthropic configured model) degrades to
+`{ source: "fallback", fallbackReason }` rather than an HTTP error, so callers never block on a
+classifier outage.
 
 ### Repositories
 
