@@ -65,7 +65,10 @@ ok(
 // Injection + template selection by family: absent models clone the matching
 // (codex vs. chat) sibling, so they inherit real variants/capabilities.
 ok(out["gpt-5.5"]._src === "tmpl-chat", "absent gpt-5.5 clones the CHAT template");
-ok(out["gpt-5.3-codex-spark"]._src === "tmpl-codex", "absent codex model clones the CODEX template");
+ok(
+  out["gpt-5.3-codex-spark"]._src === "tmpl-codex",
+  "absent codex model clones the CODEX template"
+);
 ok(
   Object.keys(out["gpt-5.3-codex-spark"].variants || {}).length === 5,
   "injected codex model inherits the 5 reasoning variants"

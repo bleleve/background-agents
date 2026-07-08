@@ -144,7 +144,7 @@ describe("model utilities", () => {
 
   it("returns canonical valid models or the default fallback", () => {
     expect(getValidModelOrDefault("claude-sonnet-4-6")).toBe("anthropic/claude-sonnet-4-6");
-    expect(getValidModelOrDefault("codex-spark")).toBe("openai/gpt-5.3-codex-spark");
+    expect(getValidModelOrDefault("gpt-5.3-codex-spark")).toBe("openai/gpt-5.3-codex-spark");
     expect(getValidModelOrDefault("invalid-model")).toBe(DEFAULT_MODEL);
     expect(getValidModelOrDefault(undefined)).toBe(DEFAULT_MODEL);
     expect(getValidModelOrDefault(null)).toBe(DEFAULT_MODEL);
