@@ -117,6 +117,23 @@ function createMockEnv(): Env {
       // Default: no live request session for the PR. Coalesce tests override this.
       return Promise.resolve(new Response(JSON.stringify({ active: false }), { status: 200 }));
     }
+    if (url === "https://internal/internal/pr-sessions/claim") {
+      // Default: the D1 slot is free, so every claim wins outright. Tests that
+      // exercise coalescing/staleness/fallback override this per-test.
+      return Promise.resolve(new Response(JSON.stringify({ result: "claimed" }), { status: 200 }));
+    }
+    if (url === "https://internal/internal/pr-sessions/confirm") {
+      return Promise.resolve(new Response(JSON.stringify({ updated: true }), { status: 200 }));
+    }
+    if (url === "https://internal/internal/pr-sessions/release") {
+      return Promise.resolve(new Response(JSON.stringify({ released: true }), { status: 200 }));
+    }
+    if (/\/internal\/pr-sessions\/peek/.test(url)) {
+      // Default: no confirmed review session for the PR yet.
+      return Promise.resolve(
+        new Response(JSON.stringify({ sessionId: null, status: null }), { status: 200 })
+      );
+    }
     return Promise.resolve(new Response("Not found", { status: 404 }));
   });
 
@@ -138,6 +155,24 @@ function createMockEnv(): Env {
 
 function getControlPlaneFetch(env: Env) {
   return (env.CONTROL_PLANE as unknown as { fetch: ReturnType<typeof vi.fn> }).fetch;
+}
+
+/**
+ * Find a specific `CONTROL_PLANE.fetch` call by URL (exact string or regex),
+ * so assertions don't depend on positional index — the D1 claim/confirm calls
+ * now precede every session-creation call, and their count varies by path.
+ */
+function findCall(
+  fetchMock: ReturnType<typeof vi.fn>,
+  matcher: string | RegExp
+): [string, { body?: string }] {
+  const call = fetchMock.mock.calls.find((c) =>
+    typeof matcher === "string" ? c[0] === matcher : matcher.test(c[0] as string)
+  );
+  if (!call) {
+    throw new Error(`No CONTROL_PLANE.fetch call found matching ${String(matcher)}`);
+  }
+  return call as [string, { body?: string }];
 }
 
 const pullRequestOpenedPayload: PullRequestOpenedPayload = {
@@ -310,9 +345,10 @@ describe("handlePullRequestOpened", () => {
     );
 
     const cpFetch = getControlPlaneFetch(env);
-    expect(cpFetch).toHaveBeenCalledTimes(2);
+    // claim(review) + create session + confirm(review) + prompt.
+    expect(cpFetch).toHaveBeenCalledTimes(4);
 
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.repoOwner).toBe("acme");
     expect(sessionBody.repoName).toBe("widgets");
     expect(sessionBody.title).toContain("PR #42 · review");
@@ -324,7 +360,7 @@ describe("handlePullRequestOpened", () => {
     // issue comments (verdict-only). @mention/command sessions must NOT set it.
     expect(sessionBody.reviewSession).toBe(true);
 
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.source).toBe("github");
     expect(promptBody.authorId).toBe("github:1001");
     expect(promptBody.content).toContain("Pull Request #42");
@@ -381,9 +417,9 @@ describe("handlePullRequestOpened", () => {
       handler_action: "auto_review",
     });
     expect(generateInstallationToken).toHaveBeenCalled();
-    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(2);
+    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(4);
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.model).toBe("cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code");
   });
 
@@ -414,7 +450,7 @@ describe("handlePullRequestOpened", () => {
     expect(checkSenderPermission).not.toHaveBeenCalled();
     expect(generateInstallationToken).toHaveBeenCalled();
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.model).toBe("cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code");
   });
 
@@ -482,7 +518,7 @@ describe("handlePullRequestOpened", () => {
     await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-0");
 
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.model).toBe("anthropic/claude-opus-4-6");
   });
 
@@ -498,7 +534,7 @@ describe("handlePullRequestOpened", () => {
     await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-0");
 
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.reasoningEffort).toBe("high");
   });
 });
@@ -530,9 +566,10 @@ describe("handlePullRequestOpened (ready_for_review action)", () => {
     );
 
     const cpFetch = getControlPlaneFetch(env);
-    expect(cpFetch).toHaveBeenCalledTimes(2);
+    // claim(review) + create session + confirm(review) + prompt.
+    expect(cpFetch).toHaveBeenCalledTimes(4);
 
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.repoOwner).toBe("acme");
     expect(sessionBody.repoName).toBe("widgets");
     expect(sessionBody.title).toContain("PR #42 · review");
@@ -540,7 +577,7 @@ describe("handlePullRequestOpened (ready_for_review action)", () => {
     expect(sessionBody.scmUserId).toBe("1001");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1001");
 
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.source).toBe("github");
     expect(promptBody.authorId).toBe("github:1001");
     expect(promptBody.content).toContain("Pull Request #42");
@@ -581,9 +618,9 @@ describe("handlePullRequestOpened (ready_for_review action)", () => {
       handler_action: "auto_review",
     });
     expect(generateInstallationToken).toHaveBeenCalled();
-    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(2);
+    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(4);
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.model).toBe("cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code");
   });
 
@@ -654,7 +691,7 @@ describe("handlePullRequestOpened (ready_for_review action)", () => {
     await handlePullRequestOpened(env, log, pullRequestReadyForReviewPayload, "trace-rfr-model");
 
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.model).toBe("anthropic/claude-opus-4-6");
   });
 });
@@ -860,7 +897,7 @@ describe("handleReviewRequested", () => {
     await handleReviewRequested(env, log, reviewRequestedPayload, "trace-review-model");
 
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     // Precedence at the dedicated review site: review-<alias> label → reviewModel → model.
     expect(sessionBody.model).toBe("anthropic/claude-opus-4-8");
   });
@@ -892,12 +929,13 @@ describe("handleReviewRequested", () => {
     );
 
     const cpFetch = getControlPlaneFetch(env);
-    expect(cpFetch).toHaveBeenCalledTimes(2);
+    // claim(review) + create session + confirm(review) + prompt.
+    expect(cpFetch).toHaveBeenCalledTimes(4);
 
     // Verify session creation
-    const sessionCall = cpFetch.mock.calls[0];
+    const sessionCall = findCall(cpFetch, "https://internal/sessions");
     expect(sessionCall[0]).toBe("https://internal/sessions");
-    const sessionBody = JSON.parse(sessionCall[1].body);
+    const sessionBody = JSON.parse(sessionCall[1].body!);
     expect(sessionBody.repoOwner).toBe("acme");
     expect(sessionBody.repoName).toBe("widgets");
     expect(sessionBody.title).toContain("PR #42 · review");
@@ -913,9 +951,9 @@ describe("handleReviewRequested", () => {
     expect(sessionBody.prBaseRef).toBe("main");
 
     // Verify prompt sending
-    const promptCall = cpFetch.mock.calls[1];
+    const promptCall = findCall(cpFetch, "https://internal/sessions/session-123/prompt");
     expect(promptCall[0]).toBe("https://internal/sessions/session-123/prompt");
-    const promptBody = JSON.parse(promptCall[1].body);
+    const promptBody = JSON.parse(promptCall[1].body!);
     expect(promptBody.source).toBe("github");
     expect(promptBody.authorId).toBe("github:1001");
     expect(promptBody.content).toContain("Pull Request #42");
@@ -936,6 +974,132 @@ describe("handleReviewRequested", () => {
         session_id: "session-123",
         message_id: "msg-456",
       })
+    );
+  });
+
+  it("creates an uncoalesced session when the 'review' lane slot is still being claimed by someone else", async () => {
+    // status 'creating' with no sessionId yet: a concurrent claimer is actively
+    // creating its session, within the control plane's stale-claim window. Must
+    // not contest it, and must not drop this review either.
+    const env = createMockEnv();
+    const log = createMockLogger();
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: null,
+              status: "creating",
+              claimToken: "tok-in-flight",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleReviewRequested(env, log, reviewRequestedPayload, "trace-racing");
+
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "review",
+    });
+    const cpFetch = getControlPlaneFetch(env);
+    // claim(review) + create session + prompt — no confirm, since we never won a claim token.
+    expect(cpFetch).toHaveBeenCalledTimes(3);
+    expect(cpFetch.mock.calls.map((c) => c[0] as string)).not.toContain(
+      "https://internal/internal/pr-sessions/confirm"
+    );
+  });
+
+  it("creates an uncoalesced review session when the D1 claim call itself fails (network error)", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.reject(new Error("D1 unavailable"));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleReviewRequested(env, log, reviewRequestedPayload, "trace-claim-err");
+
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "review",
+    });
+    expect(log.warn).toHaveBeenCalledWith("review_session.claim_error", expect.anything());
+  });
+
+  it("still returns the freshly created review session when confirm fails (never strands it)", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ result: "claimed" }), { status: 200 })
+        );
+      }
+      if (url === "https://internal/internal/pr-sessions/confirm") {
+        // The claim table no longer reflects reality (e.g. stolen as stale in
+        // the window between claim and confirm) — the review must not be lost.
+        return Promise.resolve(new Response(JSON.stringify({ updated: false }), { status: 200 }));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleReviewRequested(
+      env,
+      log,
+      reviewRequestedPayload,
+      "trace-review-confirm-failed"
+    );
+
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "review",
+    });
+    expect(log.warn).toHaveBeenCalledWith(
+      "review_session.confirm_failed",
+      expect.objectContaining({ session_id: "session-123" })
     );
   });
 
@@ -1022,23 +1186,26 @@ describe("handleIssueComment", () => {
     });
 
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     // Review session (verdict-only gh guard), not the request session.
     expect(sessionBody.title).toMatch(/^GitHub: PR #\d+ · review$/);
     expect(sessionBody.reviewSession).toBe(true);
     // reviewModel wins over the general model on the review lane.
     expect(sessionBody.model).toBe("anthropic/claude-opus-4-8");
 
-    // Stacked onto the PR's review-session KV key, not request-session.
-    const kvPut = env.GITHUB_KV.put as unknown as ReturnType<typeof vi.fn>;
-    expect(kvPut).toHaveBeenCalledWith(
-      expect.stringMatching(/^review-session:/),
-      "session-123",
-      expect.anything()
+    // Claimed and confirmed into the D1 'review' lane slot, not a KV pointer.
+    const confirmBody = JSON.parse(
+      findCall(cpFetch, "https://internal/internal/pr-sessions/confirm")[1].body!
     );
+    expect(confirmBody).toMatchObject({
+      repoFullName: "acme/widgets",
+      prNumber: 42,
+      lane: "review",
+      sessionId: "session-123",
+    });
 
     // The commenter's message is folded into the review prompt (triggerComment).
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("please review this");
   });
 
@@ -1062,9 +1229,10 @@ describe("handleIssueComment", () => {
     );
 
     const cpFetch = getControlPlaneFetch(env);
-    expect(cpFetch).toHaveBeenCalledTimes(2);
+    // claim(request) + create session + confirm(request) + prompt.
+    expect(cpFetch).toHaveBeenCalledTimes(4);
 
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.scmLogin).toBe("bob");
     expect(sessionBody.scmUserId).toBe("1002");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1002");
@@ -1074,15 +1242,19 @@ describe("handleIssueComment", () => {
     // @mention/command session: NOT a review, so the gh guard must not block its
     // top-level issue-comment replies. reviewSession is left unset.
     expect(sessionBody.reviewSession).toBeUndefined();
-    // The fresh request session is remembered so later comments coalesce into it.
-    const kvPut = env.GITHUB_KV.put as unknown as ReturnType<typeof vi.fn>;
-    expect(kvPut).toHaveBeenCalledWith(
-      expect.stringMatching(/^request-session:/),
-      "session-123",
-      expect.objectContaining({ expirationTtl: expect.any(Number) })
+    // The fresh session is claimed and confirmed into the D1 'request' lane slot
+    // so later comments coalesce into it (replaces the old KV pointer).
+    const confirmBody = JSON.parse(
+      findCall(cpFetch, "https://internal/internal/pr-sessions/confirm")[1].body!
     );
+    expect(confirmBody).toMatchObject({
+      repoFullName: "acme/widgets",
+      prNumber: 42,
+      lane: "request",
+      sessionId: "session-123",
+    });
 
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("please fix the error handling");
     expect(promptBody.content).not.toContain("@test-bot[bot]");
     expect(promptBody.authorId).toBe("github:1002");
@@ -1092,9 +1264,21 @@ describe("handleIssueComment", () => {
     const env = createMockEnv();
     const log = createMockLogger();
     const cpFetch = getControlPlaneFetch(env);
-    // A request session already exists for this PR and is still live.
-    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-live");
+    // The D1 'request' lane slot is already claimed by a still-live session.
     cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: "sess-live",
+              status: "active",
+              claimToken: "tok-live",
+            }),
+            { status: 200 }
+          )
+        );
+      }
       if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
         return Promise.resolve(new Response(JSON.stringify({ active: true }), { status: 200 }));
       }
@@ -1128,26 +1312,263 @@ describe("handleIssueComment", () => {
     expect(ackBody).toContain("/session/sess-live");
   });
 
+  it("polls the request lane and coalesces once the in-flight claim confirms", async () => {
+    // The winner's claim is still 'creating' on the first peek, then confirms
+    // by the second — must poll and coalesce rather than immediately spawning
+    // a second, uncoalesced session (the exact race this mechanism exists to
+    // prevent, on a narrower window than the old KV pointer).
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const cpFetch = getControlPlaneFetch(env);
+    let peekCalls = 0;
+    cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: null,
+              status: "creating",
+              claimToken: "tok-in-flight",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (/\/internal\/pr-sessions\/peek\?.*lane=request/.test(url)) {
+        peekCalls++;
+        if (peekCalls < 2) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ sessionId: null, status: "creating" }), { status: 200 })
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "sess-live", status: "active" }), {
+            status: 200,
+          })
+        );
+      }
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        return Promise.resolve(new Response(JSON.stringify({ active: true }), { status: 200 }));
+      }
+      if (/\/sessions\/.+\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-coalesced" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-poll-coalesce");
+
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "sess-live",
+      message_id: "msg-coalesced",
+      handler_action: "comment_coalesced",
+    });
+    expect(peekCalls).toBe(2);
+    const urls = cpFetch.mock.calls.map((c) => c[0] as string);
+    expect(urls).not.toContain("https://internal/sessions");
+  });
+
+  it("creates an uncoalesced request session when the poll budget is exhausted", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const cpFetch = getControlPlaneFetch(env);
+    cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: null,
+              status: "creating",
+              claimToken: "tok-in-flight",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (/\/internal\/pr-sessions\/peek\?.*lane=request/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: null, status: "creating" }), { status: 200 })
+        );
+      }
+      if (url === "https://internal/internal/pr-sessions/confirm") {
+        return Promise.resolve(new Response(JSON.stringify({ updated: true }), { status: 200 }));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-poll-exhausted");
+
+    // Poll budget exhausted with no confirmed session — falls back to a fresh,
+    // uncoalesced session rather than blocking or dropping the request.
+    expect(result).toMatchObject({ session_id: "session-123", handler_action: "comment" });
+    const urls = cpFetch.mock.calls.map((c) => c[0] as string);
+    expect(urls).toContain("https://internal/sessions");
+    // REQUEST_CLAIM_POLL_ATTEMPTS in handlers.ts — kept as a literal here since
+    // it's an internal, unexported constant.
+    expect(
+      urls.filter((u) => /\/internal\/pr-sessions\/peek\?.*lane=request/.test(u))
+    ).toHaveLength(3);
+  });
+
+  it("stops polling and falls back to a fresh session when the confirmed poll target is already dead", async () => {
+    // Distinct from budget-exhaustion: peek() finds a confirmed session on the
+    // very first poll, but its liveness check comes back dead — the loop must
+    // `break` immediately (not keep polling, not release/retry) and fall
+    // through to the same uncoalesced fallback as the exhausted-budget path.
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const cpFetch = getControlPlaneFetch(env);
+    let peekCalls = 0;
+    let livenessCalls = 0;
+    cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: null,
+              status: "creating",
+              claimToken: "tok-in-flight",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (/\/internal\/pr-sessions\/peek\?.*lane=request/.test(url)) {
+        peekCalls++;
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "sess-dead", status: "active" }), {
+            status: 200,
+          })
+        );
+      }
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        livenessCalls++;
+        return Promise.resolve(new Response(JSON.stringify({ active: false }), { status: 200 }));
+      }
+      if (url === "https://internal/internal/pr-sessions/confirm") {
+        return Promise.resolve(new Response(JSON.stringify({ updated: true }), { status: 200 }));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-fresh" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-fresh" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-poll-dead-peek");
+
+    expect(result).toMatchObject({ session_id: "session-fresh", handler_action: "comment" });
+    // Exactly one peek (the loop breaks on the first confirmed-but-dead
+    // observation) and exactly one liveness check for the dead session — no
+    // release/retry attempted from inside the poll loop.
+    expect(peekCalls).toBe(1);
+    expect(livenessCalls).toBe(1);
+    const urls = cpFetch.mock.calls.map((c) => c[0] as string);
+    expect(urls).not.toContain("https://internal/internal/pr-sessions/release");
+  });
+
   it("creates a fresh request session when the remembered one is no longer live", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
-    // A stale pointer exists, but liveness (default mock) reports it inactive, so
-    // coalescing must be skipped (a terminal session would swallow the prompt).
-    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-dead");
+    const cpFetch = getControlPlaneFetch(env);
+    // The claimed slot points at a dead session (liveness false); the code must
+    // release it and retry the claim once, winning it fresh — not skip coalescing
+    // silently.
+    let claimCalls = 0;
+    cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        claimCalls++;
+        if (claimCalls === 1) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                result: "existing",
+                sessionId: "sess-dead",
+                status: "active",
+                claimToken: "tok-dead",
+              }),
+              { status: 200 }
+            )
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ result: "claimed" }), { status: 200 })
+        );
+      }
+      if (url === "https://internal/internal/pr-sessions/release") {
+        return Promise.resolve(new Response(JSON.stringify({ released: true }), { status: 200 }));
+      }
+      if (url === "https://internal/internal/pr-sessions/confirm") {
+        return Promise.resolve(new Response(JSON.stringify({ updated: true }), { status: 200 }));
+      }
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        return Promise.resolve(new Response(JSON.stringify({ active: false }), { status: 200 }));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
 
     const result = await handleIssueComment(env, log, issueCommentPayload, "trace-stale");
 
     expect(result).toMatchObject({ session_id: "session-123", handler_action: "comment" });
-    const urls = getControlPlaneFetch(env).mock.calls.map((c) => c[0] as string);
+    const urls = cpFetch.mock.calls.map((c) => c[0] as string);
     expect(urls).toContain("https://internal/sessions");
+    expect(urls).toContain("https://internal/internal/pr-sessions/release");
+    expect(claimCalls).toBe(2);
   });
 
   it("creates a fresh session when the liveness check returns a non-200 (fails safe)", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
-    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-x");
     const cpFetch = getControlPlaneFetch(env);
     cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: "sess-x",
+              status: "active",
+              claimToken: "tok-x",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (url === "https://internal/internal/pr-sessions/release") {
+        return Promise.resolve(new Response(JSON.stringify({ released: true }), { status: 200 }));
+      }
       if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
         return Promise.resolve(new Response("upstream error", { status: 500 }));
       }
@@ -1155,6 +1576,9 @@ describe("handleIssueComment", () => {
         return Promise.resolve(
           new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
         );
+      }
+      if (url === "https://internal/internal/pr-sessions/confirm") {
+        return Promise.resolve(new Response(JSON.stringify({ updated: true }), { status: 200 }));
       }
       if (/\/prompt$/.test(url)) {
         return Promise.resolve(
@@ -1174,8 +1598,24 @@ describe("handleIssueComment", () => {
   it("creates a fresh session when the liveness fetch throws (fails safe)", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
-    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-x");
-    getControlPlaneFetch(env).mockImplementation((url: string) => {
+    const cpFetch = getControlPlaneFetch(env);
+    cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: "sess-x",
+              status: "active",
+              claimToken: "tok-x",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (url === "https://internal/internal/pr-sessions/release") {
+        return Promise.resolve(new Response(JSON.stringify({ released: true }), { status: 200 }));
+      }
       if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
         return Promise.reject(new Error("network down"));
       }
@@ -1183,6 +1623,9 @@ describe("handleIssueComment", () => {
         return Promise.resolve(
           new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
         );
+      }
+      if (url === "https://internal/internal/pr-sessions/confirm") {
+        return Promise.resolve(new Response(JSON.stringify({ updated: true }), { status: 200 }));
       }
       if (/\/prompt$/.test(url)) {
         return Promise.resolve(
@@ -1201,8 +1644,20 @@ describe("handleIssueComment", () => {
   it("still coalesces (and warns) when the coalesced-reply comment fails to post", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
-    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-live");
     getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: "sess-live",
+              status: "active",
+              claimToken: "tok-live",
+            }),
+            { status: 200 }
+          )
+        );
+      }
       if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
         return Promise.resolve(new Response(JSON.stringify({ active: true }), { status: 200 }));
       }
@@ -1226,6 +1681,113 @@ describe("handleIssueComment", () => {
     );
   });
 
+  it("creates a fresh, unclaimed session when the D1 claim call itself fails (network error)", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.reject(new Error("D1 unavailable"));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-claim-error");
+
+    // Never dropped: a fresh, uncoalesced session is created despite the claim failure.
+    expect(result).toMatchObject({ session_id: "session-123", handler_action: "comment" });
+    expect(log.warn).toHaveBeenCalledWith("request_session.claim_error", expect.anything());
+  });
+
+  it("still returns the freshly created session when confirm fails (never strands it)", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ result: "claimed" }), { status: 200 })
+        );
+      }
+      if (url === "https://internal/internal/pr-sessions/confirm") {
+        // The claim table no longer reflects reality (e.g. stolen as stale in
+        // the window between claim and confirm) — the session must not be lost.
+        return Promise.resolve(new Response(JSON.stringify({ updated: false }), { status: 200 }));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-confirm-failed");
+
+    expect(result).toMatchObject({ session_id: "session-123", handler_action: "comment" });
+    expect(log.warn).toHaveBeenCalledWith(
+      "request_session.confirm_failed",
+      expect.objectContaining({ session_id: "session-123" })
+    );
+  });
+
+  it("falls back to a fresh session when the release call fails but the dead session was still detected", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: "sess-dead",
+              status: "active",
+              claimToken: "tok-dead",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (url === "https://internal/internal/pr-sessions/release") {
+        return Promise.reject(new Error("D1 unavailable"));
+      }
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        return Promise.resolve(new Response(JSON.stringify({ active: false }), { status: 200 }));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-release-error");
+
+    // The release failure is swallowed; the retried claim still returns
+    // "existing" (nothing changed), so the safe fallback creates a fresh session.
+    expect(result).toMatchObject({ session_id: "session-123", handler_action: "comment" });
+    expect(log.warn).toHaveBeenCalledWith("request_session.release_error", expect.anything());
+  });
+
   it("treats @mention of app slug without [bot] as a bot mention", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
@@ -1241,7 +1803,7 @@ describe("handleIssueComment", () => {
 
     expect(result.outcome).toBe("processed");
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("please fix the error handling");
     expect(promptBody.content).not.toContain("@test-bot");
   });
@@ -1261,7 +1823,7 @@ describe("handleIssueComment", () => {
 
     expect(result.outcome).toBe("processed");
     const cpFetch = getControlPlaneFetch(env as unknown as Env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("please fix the error handling");
     expect(promptBody.content).not.toContain("@reef");
   });
@@ -1392,14 +1954,14 @@ describe("handleReviewComment", () => {
 
     const cpFetch = getControlPlaneFetch(env);
 
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.scmLogin).toBe("carol");
     expect(sessionBody.scmUserId).toBe("1003");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1003");
     expect(sessionBody.spawnSource).toBe("github-bot");
     expect(sessionBody.title).toMatch(/^GitHub: PR #\d+ · request$/);
 
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("src/cache.ts");
     expect(promptBody.content).toContain("const cache = new Map()");
     expect(promptBody.content).toContain("comments/200/replies");
@@ -1410,8 +1972,20 @@ describe("handleReviewComment", () => {
     const env = createMockEnv();
     const log = createMockLogger();
     const cpFetch = getControlPlaneFetch(env);
-    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-live");
     cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: "sess-live",
+              status: "active",
+              claimToken: "tok-live",
+            }),
+            { status: 200 }
+          )
+        );
+      }
       if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
         return Promise.resolve(new Response(JSON.stringify({ active: true }), { status: 200 }));
       }
@@ -1448,8 +2022,20 @@ describe("handleReviewComment", () => {
   it("still coalesces (and warns) when the in-thread reply fails to post", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
-    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-live");
     getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: "sess-live",
+              status: "active",
+              claimToken: "tok-live",
+            }),
+            { status: 200 }
+          )
+        );
+      }
       if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
         return Promise.resolve(new Response(JSON.stringify({ active: true }), { status: 200 }));
       }
@@ -1494,7 +2080,7 @@ describe("handleReviewComment", () => {
 
     expect(result.outcome).toBe("processed");
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("can you fix this?");
     expect(promptBody.content).not.toContain("@test-bot");
   });
@@ -1511,7 +2097,7 @@ describe("handleReviewComment", () => {
 
     expect(result.outcome).toBe("processed");
     const cpFetch = getControlPlaneFetch(env as unknown as Env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("can you fix this?");
     expect(promptBody.content).not.toContain("@reef");
   });
@@ -1766,7 +2352,7 @@ describe("size-gated lookout/diver review (D)", () => {
     await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-d");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("Large diff — survey, then dive");
     expect(promptBody.content).toContain("spawn-task");
   });
@@ -1779,7 +2365,7 @@ describe("size-gated lookout/diver review (D)", () => {
     await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-d");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).not.toContain("Large diff — survey, then dive");
   });
 });
@@ -1804,8 +2390,9 @@ describe("error handling", () => {
 
     await handleReviewRequested(env, log, reviewRequestedPayload, "trace-reaction");
 
-    // Session should still be created despite reaction failure
-    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(2);
+    // Session should still be created despite reaction failure: claim(review) +
+    // create session + confirm(review) + prompt.
+    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(4);
   });
 });
 
@@ -1831,7 +2418,7 @@ describe("integration config", () => {
     await handleReviewRequested(env, log, reviewRequestedPayload, "trace-model");
 
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.model).toBe("anthropic/claude-opus-4-6");
     expect(sessionBody.reasoningEffort).toBe("low");
   });
@@ -1879,7 +2466,7 @@ describe("integration config", () => {
 
     // Should proceed normally — null means all repos allowed
     const cpFetch = getControlPlaneFetch(env);
-    expect(cpFetch).toHaveBeenCalledTimes(2);
+    expect(cpFetch).toHaveBeenCalledTimes(4);
   });
 
   it("rejects sender not in allowedTriggerUsers (handleIssueComment)", async () => {
@@ -1913,7 +2500,7 @@ describe("integration config", () => {
     await handleIssueComment(env, log, issueCommentPayload, "trace-allowed");
 
     // bob matches → proceeds to session creation
-    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(2);
+    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(4);
   });
 
   it("empty allowedTriggerUsers rejects all senders (handleReviewRequested)", async () => {
@@ -2022,7 +2609,7 @@ describe("integration config", () => {
     await handleReviewRequested(env, log, reviewRequestedPayload, "trace-review-instr");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("## Custom Instructions");
     expect(promptBody.content).toContain("Focus on security.");
   });
@@ -2038,7 +2625,7 @@ describe("integration config", () => {
     await handleIssueComment(env, log, issueCommentPayload, "trace-comment-instr");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("## Custom Instructions");
     expect(promptBody.content).toContain("Run tests first.");
   });
@@ -2054,7 +2641,7 @@ describe("integration config", () => {
     await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-pr-instr");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("## Custom Instructions");
     expect(promptBody.content).toContain("Check for SQL injection.");
   });
@@ -2070,7 +2657,7 @@ describe("integration config", () => {
     await handleReviewComment(env, log, reviewCommentPayload, "trace-rc-instr");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("## Custom Instructions");
     expect(promptBody.content).toContain("Prefer minimal diffs.");
   });
@@ -2083,7 +2670,7 @@ describe("integration config", () => {
     await handleReviewRequested(env, log, reviewRequestedPayload, "trace-null-instr");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).not.toContain("## Custom Instructions");
   });
 
@@ -2098,7 +2685,7 @@ describe("integration config", () => {
     await handleReviewRequested(env, log, reviewRequestedPayload, "trace-aa-review");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("submit-pr-review");
     expect(promptBody.content).toContain("permits a formal REQUEST_CHANGES verdict");
     expect(promptBody.content).toContain("cannot APPROVE");
@@ -2112,7 +2699,7 @@ describe("integration config", () => {
     await handleReviewRequested(env, log, reviewRequestedPayload, "trace-no-aa-review");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("submit-pr-review");
     expect(promptBody.content).toContain("NEVER submit a review with `gh pr review`");
     expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
@@ -2131,7 +2718,7 @@ describe("handlePullRequestOpened autoApproveOnOpen", () => {
     await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-aa-open");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("submit-pr-review");
     expect(promptBody.content).toContain("permits a formal REQUEST_CHANGES verdict");
     expect(promptBody.content).toContain("cannot APPROVE");
@@ -2145,7 +2732,7 @@ describe("handlePullRequestOpened autoApproveOnOpen", () => {
     await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-no-aa-open");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("submit-pr-review");
     expect(promptBody.content).toContain("does not permit blocking verdicts");
     expect(promptBody.content).not.toContain('event="APPROVE|REQUEST_CHANGES|COMMENT"');
@@ -2249,7 +2836,7 @@ describe("privateReposOnly", () => {
     const result = await handleReviewRequested(env, log, reviewRequestedPayload, "trace-priv-off");
 
     expect(result.outcome).toBe("processed");
-    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(2);
+    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(4);
   });
 });
 
@@ -2276,7 +2863,11 @@ describe("handlePullRequestLabeled", () => {
     const env = { ...createMockEnv(), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
     const log = createMockLogger();
     const cpFetch = getControlPlaneFetch(env);
-    cpFetch.mockResolvedValue(new Response(JSON.stringify({ dispatchId: "d-1" }), { status: 202 }));
+    // A fresh Response per call — the control plane is now hit twice (peek, then
+    // dispatch), and a Response body can only be consumed once.
+    cpFetch.mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ dispatchId: "d-1" }), { status: 202 }))
+    );
     const payload: PullRequestLabeledPayload = {
       ...pullRequestLabeledPayload,
       label: { name: "preview" },
@@ -2288,9 +2879,10 @@ describe("handlePullRequestLabeled", () => {
 
     await handlePullRequestLabeled(env, log, payload, "trace-preview");
 
-    expect(cpFetch).toHaveBeenCalledOnce();
-    expect(cpFetch.mock.calls[0][0]).toBe("https://internal/previews/dispatch");
-    expect(JSON.parse(cpFetch.mock.calls[0][1].body)).toMatchObject({
+    // peek(review) — no confirmed review session for this PR — then dispatch.
+    expect(cpFetch).toHaveBeenCalledTimes(2);
+    const dispatchCall = findCall(cpFetch, "https://internal/previews/dispatch");
+    expect(JSON.parse(dispatchCall[1].body!)).toMatchObject({
       repoOwner: "acme",
       repoName: "widgets",
       commitSha: "abc123",
@@ -2302,20 +2894,24 @@ describe("handlePullRequestLabeled", () => {
     const env = { ...createMockEnv(), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
     const log = createMockLogger();
     const cpFetch = getControlPlaneFetch(env);
-    cpFetch.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          dispatchId: "d-1",
-          runUrl: "https://cloud.rwx.com/mint/fountain/runs/123",
-          previewUrls: {
-            hire: "https://hire-widgets-42--fountain.r1.rwx.run/",
-            "recruiter-ui": "https://recruiter-ui-widgets-42--fountain.r1.rwx.run/",
-            "applicant-ui": "https://applicant-ui-widgets-42--fountain.r1.rwx.run/",
-            "career-site-ui": "https://career-site-ui-widgets-42--fountain.r1.rwx.run/",
-            wx: "https://wx-widgets-42--fountain.r1.rwx.run/",
-          },
-        }),
-        { status: 202 }
+    // A fresh Response per call — the control plane is now hit twice (peek, then
+    // dispatch), and a Response body can only be consumed once.
+    cpFetch.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            dispatchId: "d-1",
+            runUrl: "https://cloud.rwx.com/mint/fountain/runs/123",
+            previewUrls: {
+              hire: "https://hire-widgets-42--fountain.r1.rwx.run/",
+              "recruiter-ui": "https://recruiter-ui-widgets-42--fountain.r1.rwx.run/",
+              "applicant-ui": "https://applicant-ui-widgets-42--fountain.r1.rwx.run/",
+              "career-site-ui": "https://career-site-ui-widgets-42--fountain.r1.rwx.run/",
+              wx: "https://wx-widgets-42--fountain.r1.rwx.run/",
+            },
+          }),
+          { status: 202 }
+        )
       )
     );
     const payload: PullRequestLabeledPayload = {
@@ -2378,15 +2974,15 @@ describe("handlePullRequestLabeled", () => {
     });
 
     const cpFetch = getControlPlaneFetch(env);
-    expect(cpFetch).toHaveBeenCalledTimes(2);
+    expect(cpFetch).toHaveBeenCalledTimes(4);
 
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = JSON.parse(findCall(cpFetch, "https://internal/sessions")[1].body!);
     expect(sessionBody.title).toContain("PR #42 · review");
     expect(sessionBody.scmLogin).toBe("bob");
 
     // It sends the full review prompt (not a comment action) with the pr_review
     // callback context, so the verdict guarantee + label removal fire on completion.
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("Pull Request #42");
     expect(promptBody.callbackContext).toEqual({
       source: "github",
@@ -2406,7 +3002,7 @@ describe("handlePullRequestLabeled", () => {
     await handlePullRequestLabeled(env, log, pullRequestLabeledPayload, "trace-lbl");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     // The labeled path forces the no-formal-verdict hint regardless of the repo
     // setting; the tool would also reject it server-side.
     expect(promptBody.content).toContain("submit-pr-review");
@@ -2470,8 +3066,28 @@ describe("handlePullRequestLabeled", () => {
   it("re-runs in the existing review session when one is mapped (no new session)", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
-    // KV maps this PR to a prior review session.
-    (env.GITHUB_KV.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue("sess-existing");
+    // The D1 'review' lane slot is already claimed by a confirmed prior review session.
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: "sess-existing",
+              status: "active",
+              claimToken: "tok-existing",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
 
     const result = await handlePullRequestLabeled(env, log, pullRequestLabeledPayload, "trace-lbl");
 
@@ -2483,11 +3099,14 @@ describe("handlePullRequestLabeled", () => {
     });
 
     const cpFetch = getControlPlaneFetch(env);
-    // Only the prompt is sent — no session is created.
-    expect(cpFetch).toHaveBeenCalledTimes(1);
-    expect(cpFetch.mock.calls[0][0]).toBe("https://internal/sessions/sess-existing/prompt");
+    // claim(review) resolves to the existing session, then only the prompt is
+    // sent — no new session is created.
+    expect(cpFetch).toHaveBeenCalledTimes(2);
+    const urls = cpFetch.mock.calls.map((c) => c[0] as string);
+    expect(urls).not.toContain("https://internal/sessions");
+    expect(urls).toContain("https://internal/sessions/sess-existing/prompt");
     // The resumed prompt tells the agent to sync the worktree to the latest head.
-    const promptBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("RE-REVIEW in an existing session");
   });
 });
@@ -2614,7 +3233,11 @@ describe("handlePullRequestSynchronized", () => {
     const env = { ...createMockEnv(), PREVIEW_LABEL_ENABLED: "true" } as unknown as Env;
     const log = createMockLogger();
     const cpFetch = getControlPlaneFetch(env);
-    cpFetch.mockResolvedValue(new Response(JSON.stringify({ dispatchId: "d-1" }), { status: 202 }));
+    // A fresh Response per call — the control plane is now hit twice (peek, then
+    // dispatch), and a Response body can only be consumed once.
+    cpFetch.mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ dispatchId: "d-1" }), { status: 202 }))
+    );
     const payload: PullRequestSynchronizedPayload = {
       action: "synchronize",
       pull_request: {
@@ -2629,7 +3252,9 @@ describe("handlePullRequestSynchronized", () => {
     const result = await handlePullRequestSynchronized(env, log, payload, "trace-sync");
 
     expect(result).toMatchObject({ outcome: "processed", handler_action: "preview_dispatch" });
-    expect(JSON.parse(cpFetch.mock.calls[0][1].body)).toMatchObject({
+    expect(
+      JSON.parse(findCall(cpFetch, "https://internal/previews/dispatch")[1].body!)
+    ).toMatchObject({
       commitSha: "def456",
       slug: "widgets-42",
     });
@@ -2728,7 +3353,7 @@ describe("handleReviewRequestInternal", () => {
     const result = await handleReviewRequestInternal(env, log, internalRequest, "trace-int");
 
     expect(result).toEqual({ ok: true, sessionId: "session-123" });
-    const promptBody = JSON.parse(getControlPlaneFetch(env).mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(getControlPlaneFetch(env), /\/prompt$/)[1].body!);
     expect(promptBody.content).toContain("## Full Diff");
     expect(promptBody.content).toContain("hello-from-diff");
     expect(promptBody.content).not.toContain("## Diff access");
@@ -2745,7 +3370,7 @@ describe("handleReviewRequestInternal", () => {
     const result = await handleReviewRequestInternal(env, log, internalRequest, "trace-int");
 
     expect(result).toEqual({ ok: true, sessionId: "session-123" });
-    const promptBody = JSON.parse(getControlPlaneFetch(env).mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(getControlPlaneFetch(env), /\/prompt$/)[1].body!);
     expect(promptBody.content).not.toContain('<user_content source="github_pr_diff"');
     expect(promptBody.content).not.toContain("should-not-be-inlined");
     expect(promptBody.content).toContain("## Diff access");
@@ -2784,7 +3409,7 @@ describe("handleReviewRequestInternal", () => {
 
     expect(result).toEqual({ ok: true, sessionId: "session-123" });
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = JSON.parse(findCall(cpFetch, /\/prompt$/)[1].body!);
     expect(promptBody.callbackContext).toMatchObject({ kind: "pr_review", prNumber: 42 });
     expect(promptBody.authorId).toBe("github:1001");
   });
