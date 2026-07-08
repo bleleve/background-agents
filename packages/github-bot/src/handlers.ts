@@ -630,9 +630,35 @@ async function resolveRequestSession(
     return { sessionId: await createFresh(), coalesced: false };
   }
 
-  // status 'creating' with no confirmed session yet: another claimer is
-  // actively creating one, within the control plane's stale-claim window.
-  // Don't contest it — just don't drop this request either.
+  // status 'creating' with no confirmed session yet: another claimer won the
+  // slot moments ago and is still creating its session. Poll briefly — the
+  // request lane's failure mode for giving up here is severe (a second
+  // session racing to push the same branch, exactly the incident this
+  // mechanism exists to prevent, just on a much narrower window than the old
+  // KV pointer). Session creation is fast, so a short bounded wait usually
+  // observes the winner's confirm() instead of contesting it.
+  for (let attempt = 0; attempt < REQUEST_CLAIM_POLL_ATTEMPTS; attempt++) {
+    await delay(REQUEST_CLAIM_POLL_INTERVAL_MS);
+    const peeked = await peekPrSession(
+      controlPlane,
+      headers,
+      repoFullName,
+      prNumber,
+      "request",
+      log,
+      meta
+    );
+    if (peeked?.status === "active" && peeked.sessionId) {
+      const live = await checkSessionLiveness(controlPlane, headers, peeked.sessionId, log, meta);
+      if (live) return { sessionId: peeked.sessionId, coalesced: true };
+      // Confirmed but already dead (unlikely this soon) — fall through to the
+      // budget-exhausted path below rather than releasing/retrying here; the
+      // next request for this PR will find and evict it via the normal path.
+      break;
+    }
+  }
+  // Poll budget exhausted with no confirmed session — safe fallback, matches
+  // the pre-existing behavior (never block or drop the request).
   return { sessionId: await createFresh(), coalesced: false };
 }
 
@@ -676,6 +702,39 @@ async function resolveReviewSession(
 }
 
 /**
+ * Read-only lookup of a PR's slot for the given lane — "is there a confirmed
+ * session" without claiming it. Never throws; any failure resolves to null.
+ * `status` is `null` when there's no row at all (nobody has ever claimed this
+ * slot), `'creating'` when a claim is in flight but unconfirmed, or `'active'`
+ * with a non-null `sessionId` once confirmed.
+ */
+async function peekPrSession(
+  controlPlane: Fetcher,
+  headers: Record<string, string>,
+  repoFullName: string,
+  prNumber: number,
+  lane: PrSessionLane,
+  log: Logger,
+  meta: Record<string, unknown>
+): Promise<{ sessionId: string | null; status: PrSessionStatus | null } | null> {
+  try {
+    const url = `https://internal/internal/pr-sessions/peek?repoFullName=${encodeURIComponent(repoFullName)}&prNumber=${prNumber}&lane=${lane}`;
+    const res = await controlPlane.fetch(url, { method: "GET", headers });
+    if (!res.ok) {
+      log.debug(`${lane}_session.peek_unavailable`, { ...meta, status: res.status });
+      return null;
+    }
+    return (await res.json()) as { sessionId: string | null; status: PrSessionStatus | null };
+  } catch (err) {
+    log.warn(`${lane}_session.peek_error`, {
+      ...meta,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+    return null;
+  }
+}
+
+/**
  * Read-only lookup of the PR's confirmed review session, for callers that
  * only need "is there one" (relaying a PR state change, resolving a branch
  * for a preview dispatch) without claiming the slot. Never throws; any
@@ -689,23 +748,33 @@ async function peekReviewSession(
   log: Logger,
   meta: Record<string, unknown>
 ): Promise<string | null> {
-  try {
-    const url = `https://internal/internal/pr-sessions/peek?repoFullName=${encodeURIComponent(repoFullName)}&prNumber=${prNumber}&lane=review`;
-    const res = await controlPlane.fetch(url, { method: "GET", headers });
-    if (!res.ok) {
-      log.debug("review_session.peek_unavailable", { ...meta, status: res.status });
-      return null;
-    }
-    const { sessionId } = (await res.json()) as { sessionId: string | null };
-    return sessionId;
-  } catch (err) {
-    log.warn("review_session.peek_error", {
-      ...meta,
-      error: err instanceof Error ? err : new Error(String(err)),
-    });
-    return null;
-  }
+  const result = await peekPrSession(
+    controlPlane,
+    headers,
+    repoFullName,
+    prNumber,
+    "review",
+    log,
+    meta
+  );
+  return result?.sessionId ?? null;
 }
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * How many times (and how far apart) `resolveRequestSession` polls a
+ * still-`'creating'` request-lane slot before giving up and creating an
+ * uncoalesced session. Bounds the added latency to well under a second — only
+ * paid on an actual concurrent race, never on the common single-request path.
+ * Session creation is a fast DB-insert-and-return (the sandbox itself boots
+ * later, out of band), so a handful of short polls is enough to observe the
+ * winner's confirm() without meaningfully slowing this request down.
+ */
+const REQUEST_CLAIM_POLL_ATTEMPTS = 3;
+const REQUEST_CLAIM_POLL_INTERVAL_MS = 150;
 
 /**
  * Blockquote an original request for a root acknowledgment, so the ack is tied to

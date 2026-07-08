@@ -1057,6 +1057,52 @@ describe("handleReviewRequested", () => {
     expect(log.warn).toHaveBeenCalledWith("review_session.claim_error", expect.anything());
   });
 
+  it("still returns the freshly created review session when confirm fails (never strands it)", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ result: "claimed" }), { status: 200 })
+        );
+      }
+      if (url === "https://internal/internal/pr-sessions/confirm") {
+        // The claim table no longer reflects reality (e.g. stolen as stale in
+        // the window between claim and confirm) — the review must not be lost.
+        return Promise.resolve(new Response(JSON.stringify({ updated: false }), { status: 200 }));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleReviewRequested(
+      env,
+      log,
+      reviewRequestedPayload,
+      "trace-review-confirm-failed"
+    );
+
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "review",
+    });
+    expect(log.warn).toHaveBeenCalledWith(
+      "review_session.confirm_failed",
+      expect.objectContaining({ session_id: "session-123" })
+    );
+  });
+
   it("returns early if reviewer is not the bot", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
@@ -1264,6 +1310,119 @@ describe("handleIssueComment", () => {
     expect(ackBody).toContain("> ");
     expect(ackBody).toContain("please fix the error handling");
     expect(ackBody).toContain("/session/sess-live");
+  });
+
+  it("polls the request lane and coalesces once the in-flight claim confirms", async () => {
+    // The winner's claim is still 'creating' on the first peek, then confirms
+    // by the second — must poll and coalesce rather than immediately spawning
+    // a second, uncoalesced session (the exact race this mechanism exists to
+    // prevent, on a narrower window than the old KV pointer).
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const cpFetch = getControlPlaneFetch(env);
+    let peekCalls = 0;
+    cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: null,
+              status: "creating",
+              claimToken: "tok-in-flight",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (/\/internal\/pr-sessions\/peek\?.*lane=request/.test(url)) {
+        peekCalls++;
+        if (peekCalls < 2) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ sessionId: null, status: "creating" }), { status: 200 })
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "sess-live", status: "active" }), {
+            status: 200,
+          })
+        );
+      }
+      if (/\/sessions\/[^/]+\/liveness$/.test(url)) {
+        return Promise.resolve(new Response(JSON.stringify({ active: true }), { status: 200 }));
+      }
+      if (/\/sessions\/.+\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-coalesced" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-poll-coalesce");
+
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "sess-live",
+      message_id: "msg-coalesced",
+      handler_action: "comment_coalesced",
+    });
+    expect(peekCalls).toBe(2);
+    const urls = cpFetch.mock.calls.map((c) => c[0] as string);
+    expect(urls).not.toContain("https://internal/sessions");
+  });
+
+  it("creates an uncoalesced request session when the poll budget is exhausted", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const cpFetch = getControlPlaneFetch(env);
+    cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/internal/pr-sessions/claim") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              result: "existing",
+              sessionId: null,
+              status: "creating",
+              claimToken: "tok-in-flight",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (/\/internal\/pr-sessions\/peek\?.*lane=request/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: null, status: "creating" }), { status: 200 })
+        );
+      }
+      if (url === "https://internal/internal/pr-sessions/confirm") {
+        return Promise.resolve(new Response(JSON.stringify({ updated: true }), { status: 200 }));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        );
+      }
+      if (/\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-poll-exhausted");
+
+    // Poll budget exhausted with no confirmed session — falls back to a fresh,
+    // uncoalesced session rather than blocking or dropping the request.
+    expect(result).toMatchObject({ session_id: "session-123", handler_action: "comment" });
+    const urls = cpFetch.mock.calls.map((c) => c[0] as string);
+    expect(urls).toContain("https://internal/sessions");
+    // REQUEST_CLAIM_POLL_ATTEMPTS in handlers.ts — kept as a literal here since
+    // it's an internal, unexported constant.
+    expect(
+      urls.filter((u) => /\/internal\/pr-sessions\/peek\?.*lane=request/.test(u))
+    ).toHaveLength(3);
   });
 
   it("creates a fresh request session when the remembered one is no longer live", async () => {
