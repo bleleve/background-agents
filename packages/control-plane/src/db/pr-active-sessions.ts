@@ -103,19 +103,26 @@ export class PrActiveSessionStore {
     return { sessionId: row.session_id, status: row.status };
   }
 
-  private async getRow(
+  private prepareGetRow(
     repoFullName: string,
     prNumber: number,
     lane: PrSessionLane
-  ): Promise<PrActiveSessionRow | null> {
+  ): D1PreparedStatement {
     return this.db
       .prepare(
         `SELECT session_id, status, claim_token, updated_at
          FROM pr_active_sessions
          WHERE repo_full_name = ? AND pr_number = ? AND lane = ?`
       )
-      .bind(repoFullName, prNumber, lane)
-      .first<PrActiveSessionRow>();
+      .bind(repoFullName, prNumber, lane);
+  }
+
+  private async getRow(
+    repoFullName: string,
+    prNumber: number,
+    lane: PrSessionLane
+  ): Promise<PrActiveSessionRow | null> {
+    return this.prepareGetRow(repoFullName, prNumber, lane).first<PrActiveSessionRow>();
   }
 
   /**
@@ -133,23 +140,32 @@ export class PrActiveSessionStore {
     const repoFullName = params.repoFullName.toLowerCase();
     const { prNumber, lane, claimToken, now } = params;
 
-    await this.db
+    const insertStmt = this.db
       .prepare(
         `INSERT INTO pr_active_sessions
            (repo_full_name, pr_number, lane, session_id, status, claim_token, updated_at)
          VALUES (?, ?, ?, NULL, 'creating', ?, ?)
          ON CONFLICT (repo_full_name, pr_number, lane) DO NOTHING`
       )
-      .bind(repoFullName, prNumber, lane, claimToken, now)
-      .run();
+      .bind(repoFullName, prNumber, lane, claimToken, now);
 
-    let row = await this.getRow(repoFullName, prNumber, lane);
+    // Batched (not two separate statements): D1 executes a batch as a single
+    // transaction, so no concurrent writer — in particular a release() on this
+    // exact row — can land between the INSERT and this SELECT. Without the
+    // batch, a release() landing in that window would delete the row the
+    // INSERT just no-op'd against, and the follow-up SELECT would find
+    // nothing — reproducible against a real D1 binding, not just theoretical.
+    const [, selectResult] = await this.db.batch<PrActiveSessionRow>([
+      insertStmt,
+      this.prepareGetRow(repoFullName, prNumber, lane),
+    ]);
+    let row: PrActiveSessionRow | null = selectResult.results[0] ?? null;
     if (!row) {
-      // Unreachable in practice: our own INSERT either created the row or hit
-      // a conflict with an existing one, so a SELECT immediately after must
-      // find something. release() can only remove a row whose claim_token it
-      // already knows, and it cannot know the token we just generated.
-      throw new Error("pr_active_sessions: row missing immediately after claim insert");
+      // Genuinely unreachable now: the INSERT and SELECT commit as one D1
+      // transaction, so no other statement can observe or act on the row
+      // between them — the row the INSERT created or conflicted against is
+      // still there when the SELECT in the same batch runs.
+      throw new Error("pr_active_sessions: row missing immediately after batched claim insert");
     }
     if (row.claim_token === claimToken) {
       return { result: "claimed" };

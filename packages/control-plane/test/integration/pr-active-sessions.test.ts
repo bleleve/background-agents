@@ -137,6 +137,70 @@ describe("PR active session claim/confirm/release (D1 integration)", () => {
     });
   });
 
+  describe("request-body field validation (claim/confirm/release)", () => {
+    const validClaim = {
+      repoFullName: REPO,
+      prNumber: PR_NUMBER,
+      lane: "request",
+      claimToken: "t",
+    };
+
+    it.each([
+      ["claim", "/internal/pr-sessions/claim", validClaim],
+      ["confirm", "/internal/pr-sessions/confirm", { ...validClaim, sessionId: "s" }],
+      ["release", "/internal/pr-sessions/release", validClaim],
+    ])("%s: rejects a missing repoFullName with 400", async (_name, path, body) => {
+      const headers = await authHeaders();
+      const { repoFullName: _omit, ...rest } = body;
+      const response = await SELF.fetch(`https://test.local${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(rest),
+      });
+      expect(response.status).toBe(400);
+    });
+
+    it.each([
+      ["claim", "/internal/pr-sessions/claim", validClaim],
+      ["confirm", "/internal/pr-sessions/confirm", { ...validClaim, sessionId: "s" }],
+      ["release", "/internal/pr-sessions/release", validClaim],
+    ])("%s: rejects a missing prNumber with 400", async (_name, path, body) => {
+      const headers = await authHeaders();
+      const { prNumber: _omit, ...rest } = body;
+      const response = await SELF.fetch(`https://test.local${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(rest),
+      });
+      expect(response.status).toBe(400);
+    });
+
+    it.each([
+      ["claim", "/internal/pr-sessions/claim", validClaim],
+      ["confirm", "/internal/pr-sessions/confirm", { ...validClaim, sessionId: "s" }],
+      ["release", "/internal/pr-sessions/release", validClaim],
+    ])("%s: rejects a missing claimToken with 400", async (_name, path, body) => {
+      const headers = await authHeaders();
+      const { claimToken: _omit, ...rest } = body;
+      const response = await SELF.fetch(`https://test.local${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(rest),
+      });
+      expect(response.status).toBe(400);
+    });
+
+    it("confirm: rejects a missing sessionId with 400", async () => {
+      const headers = await authHeaders();
+      const response = await SELF.fetch("https://test.local/internal/pr-sessions/confirm", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(validClaim), // no sessionId
+      });
+      expect(response.status).toBe(400);
+    });
+  });
+
   describe("GET /internal/pr-sessions/peek", () => {
     it("returns null for a slot with no row", async () => {
       const headers = await authHeaders();
