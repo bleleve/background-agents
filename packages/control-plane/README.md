@@ -150,12 +150,16 @@ for that provider.
 These routes are called by the github-bot via its `CONTROL_PLANE` service binding using a shared
 `INTERNAL_CALLBACK_SECRET`. They are not exposed to end users.
 
-| Endpoint                              | Method | Description                                                              |
-| ------------------------------------- | ------ | ------------------------------------------------------------------------ |
-| `/review-suggestions`                 | POST   | Record a bot-posted inline review suggestion (webhook fallback path)     |
-| `/review-suggestions/resolve`         | POST   | Mark suggestion threads as resolved                                      |
-| `/review-suggestions/acceptance-rate` | GET    | Acceptance-rate query (legacy, unwired from analytics UI)                |
-| `/sessions/:id/liveness`              | GET    | Liveness for per-PR request coalescing (active if non-terminal + recent) |
+| Endpoint                              | Method | Description                                                               |
+| ------------------------------------- | ------ | ------------------------------------------------------------------------- |
+| `/review-suggestions`                 | POST   | Record a bot-posted inline review suggestion (webhook fallback path)      |
+| `/review-suggestions/resolve`         | POST   | Mark suggestion threads as resolved                                       |
+| `/review-suggestions/acceptance-rate` | GET    | Acceptance-rate query (legacy, unwired from analytics UI)                 |
+| `/sessions/:id/liveness`              | GET    | Liveness for per-PR request coalescing (active if non-terminal + recent)  |
+| `/internal/pr-sessions/peek`          | GET    | Read-only lookup of a PR lane's confirmed session, no claim               |
+| `/internal/pr-sessions/claim`         | POST   | Atomically claim a PR lane's session slot (`INSERT ... ON CONFLICT`)      |
+| `/internal/pr-sessions/confirm`       | POST   | Confirm a won claim's session id, gated on the claim token                |
+| `/internal/pr-sessions/release`       | POST   | Free a claimed slot whose session has gone dead, gated on the claim token |
 
 ### Repositories
 
