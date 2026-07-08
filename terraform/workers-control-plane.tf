@@ -87,6 +87,9 @@ module "control_plane_worker" {
       { name = "DEFAULT_PLAN_MODEL", value = "claude-haiku-4-5" },
       { name = "AUTOMATION_DELETE_ADMINS", value = var.automation_delete_admins },
       { name = "SANDBOX_INACTIVITY_TIMEOUT_MS", value = tostring(var.sandbox_inactivity_timeout_ms) },
+      # "shadow" (default) classifies for telemetry only; "classifier" acts on
+      # the inferred plan-vs-direct mode. See intent-classifier.ts.
+      { name = "INTENT_ROUTER_MODE_SESSION_CREATE", value = var.intent_router_mode_session_create },
     ],
     local.use_modal_backend ? [
       { name = "MODAL_WORKSPACE", value = var.modal_workspace },
@@ -125,6 +128,13 @@ module "control_plane_worker" {
       { name = "GITHUB_APP_ID", value = var.github_app_id },
       { name = "GITHUB_APP_PRIVATE_KEY", value = var.github_app_private_key },
       { name = "GITHUB_APP_INSTALLATION_ID", value = var.github_app_installation_id },
+      # The unified intent classifier (routing/intent-classifier.ts) calls the
+      # Anthropic API directly from control-plane regardless of sandbox
+      # backend — this must NOT be gated behind use_opencomputer_backend like
+      # the sandbox-provider ANTHROPIC_API_KEY use below used to be, or every
+      # non-opencomputer deployment silently gets no key and the classifier
+      # always falls back (source: "fallback", fallbackReason: "no_api_key").
+      { name = "ANTHROPIC_API_KEY", value = var.anthropic_api_key },
     ],
     local.use_modal_backend ? [
       { name = "MODAL_TOKEN_ID", value = var.modal_token_id },
@@ -136,7 +146,6 @@ module "control_plane_worker" {
     ] : [],
     local.use_opencomputer_backend ? [
       { name = "OPENCOMPUTER_API_KEY", value = var.opencomputer_api_key },
-      { name = "ANTHROPIC_API_KEY", value = var.anthropic_api_key },
     ] : [],
     local.use_vercel_backend ? [
       { name = "VERCEL_TOKEN", value = var.vercel_sandbox_token },
