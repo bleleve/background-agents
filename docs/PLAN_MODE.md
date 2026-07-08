@@ -80,6 +80,14 @@ The split matters: planning benefits from a more capable model since the resulti
 implementation; the build model can be cheaper. The deployment defaults are stored in D1 and read by
 every bot at session-creation time — no Terraform redeploy needed to change them.
 
+How the two models are picked is intentionally different per channel, not a bug: on the web app,
+plan mode has a single model picker at submit time, and that one selection is sent as both the
+initial plan model and the build model (see [Approve, reject, amend → Web](#web) for the separate
+`Build with` choice you still get at approval time). GitHub and Linear `@mention` sessions keep the
+two independent from the start — the build model comes from the bot's configured model (or a
+`model-`/`build-<alias>` label), the plan model from the deployment `defaultPlanModel` (or a
+`plan-<alias>` label); see `routeMention` in `packages/github-bot/src/routing/mention-router.ts`.
+
 ### Label aliases (Linear + GitHub)
 
 Linear forbids `:` in label names, so we use dash-separated everywhere:

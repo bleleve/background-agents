@@ -10,6 +10,16 @@ import type { ResolvedGitHubConfig } from "../src/utils/integration-config";
 import type { GitHubLabel } from "../src/label-resolution";
 import type { Logger } from "../src/logger";
 
+function createMockLogger(): Logger {
+  return {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    child: vi.fn().mockReturnThis(),
+  };
+}
+
 const baseConfig: ResolvedGitHubConfig = {
   model: "anthropic/claude-sonnet-4-6",
   reviewModel: null,
@@ -22,16 +32,6 @@ const baseConfig: ResolvedGitHubConfig = {
   codeReviewInstructions: null,
   commentActionInstructions: null,
 };
-
-function createMockLogger(): Logger {
-  return {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    child: vi.fn().mockReturnThis(),
-  };
-}
 
 const defaultMeta = { trace_id: "trace-1", repo: "acme/widgets", pull_number: 42 };
 
@@ -101,6 +101,22 @@ describe("isReviewCommand", () => {
       expect(isReviewCommand(s)).toBe(false);
     }
   });
+
+  it("declines a compound review-and-write ask — the review lane can't act on the write half", () => {
+    for (const s of [
+      "review my changes and fix the tests",
+      "review this PR and then update the docs",
+      "please review and add a test",
+    ]) {
+      expect(isReviewCommand(s)).toBe(false);
+    }
+  });
+
+  it("still matches a plain review ask followed by non-write coordination", () => {
+    for (const s of ["review this and let me know", "review this PR and merge it"]) {
+      expect(isReviewCommand(s)).toBe(true);
+    }
+  });
 });
 
 describe("guardEffort", () => {
@@ -127,6 +143,35 @@ describe("guardEffort", () => {
     const [model, cfg] = entry;
     const effort = (cfg as { efforts: string[] }).efforts[0];
     expect(guardEffort(model, { ...baseConfig, reasoningEffort: effort })).toBe(effort);
+  });
+
+  it("logs a debug event when it drops an invalid effort", () => {
+    const log = createMockLogger();
+    guardEffort(
+      "anthropic/claude-sonnet-4-6",
+      { ...baseConfig, reasoningEffort: "definitely-not-an-effort" },
+      log
+    );
+    expect(log.debug).toHaveBeenCalledWith("mention_router.effort_dropped", {
+      model: "anthropic/claude-sonnet-4-6",
+      configured_effort: "definitely-not-an-effort",
+    });
+  });
+
+  it("does not log when there is nothing to drop", () => {
+    const log = createMockLogger();
+    guardEffort("anthropic/claude-sonnet-4-6", { ...baseConfig, reasoningEffort: null }, log);
+    expect(log.debug).not.toHaveBeenCalled();
+
+    const entry = Object.entries(MODEL_REASONING_CONFIG).find(
+      ([, cfg]) => (cfg as { efforts?: string[] }).efforts?.length
+    );
+    if (entry) {
+      const [model, cfg] = entry;
+      const effort = (cfg as { efforts: string[] }).efforts[0];
+      guardEffort(model, { ...baseConfig, reasoningEffort: effort }, log);
+      expect(log.debug).not.toHaveBeenCalled();
+    }
   });
 });
 
@@ -172,6 +217,14 @@ describe("routeMention — request lane", () => {
     expect(d.mode).toBe("direct");
     expect(d.model).toBe(baseConfig.model);
     expect(d.planModel).toBeUndefined();
+  });
+
+  it("falls through a compound review-and-fix ask to the request lane", async () => {
+    const d = await routeMention(ctx("review my changes and fix the tests"));
+    expect(d.target).toBe("request");
+    if (d.target !== "request") throw new Error("unreachable");
+    expect(d.mode).toBe("direct");
+    expect(d.model).toBe(baseConfig.model);
   });
 
   it("honors a model-/build-<alias> label for the build model", async () => {

@@ -18,20 +18,18 @@ import { isValidReasoningEffort } from "@open-inspect/shared";
 import {
   extractModelFromLabels,
   extractPlanModelFromLabels,
-  extractReviewModelFromLabels,
   hasPlanLabel,
+  resolveReviewModel,
   type GitHubLabel,
 } from "../label-resolution";
-import type { ResolvedGitHubConfig } from "../utils/integration-config";
 import type { Logger } from "../logger";
+import type { ResolvedGitHubConfig } from "../utils/integration-config";
 
 export type RouteTarget = "review" | "request";
 
 export interface MentionRoutingContext {
   /** The comment body, already stripped of the `@mention`. */
   commentBody: string;
-  /** Top-level PR comment vs inline review-thread comment. */
-  isInline: boolean;
   /** PR/issue labels — for review / model / plan-alias overrides. */
   labels: GitHubLabel[];
   /** Resolved GitHub bot config (reviewModel, model, reasoningEffort, …). */
@@ -49,6 +47,11 @@ export interface MentionRoutingContext {
   /** Correlation ids for the decision log, same shape the call sites already build for their other `log.info` calls (trace_id, repo, pull_number). */
   meta: Record<string, unknown>;
   // ── reserved for the future complexity router (unused in v1) ──────────────
+  // isInline (top-level PR comment vs inline review-thread comment) is already
+  // threaded through from both call sites, but routeMention's body doesn't
+  // consult it yet — it's forward-looking context for a future
+  // inline-vs-toplevel routing decision, not a behavior toggle today.
+  isInline: boolean;
   // prSizeHint?: number; changedFilePaths?: string[]; diffStat?: string;
   // threadContext?: string; prTitle?: string;
 }
@@ -100,6 +103,19 @@ const REVIEW_STANDALONE =
 const REVIEW_IMPERATIVE =
   /^review(?:[^\w]*$|\s+(?:again|this|that|these|those|it|the|my|our|your|pr|everything|once|please|pls|now|when|thanks|thx)\b)/i;
 
+// A review command that also coordinates a write ask in the same breath (e.g.
+// "review my changes and fix the tests") can't be honored by the read-only
+// review lane — it only posts a verdict comment, so the write half would be
+// silently stranded (the triggerComment is folded into the review prompt so
+// the reviewer *sees* the ask, but has no way to act on it). Asymmetric cost
+// guides the bias: a false negative here just falls through to the request
+// lane, where the agent still judges review-only intent at runtime (see
+// prompts.ts); a false positive lands in a lane that literally cannot act on
+// the write part. So this guard is deliberately narrow (an explicit "and/then
+// <write verb>" coordination) rather than broad.
+const COMPOUND_WRITE_ASK =
+  /\b(?:and|then)\s+(?:fix|update|change|add|remove|rename|implement|refactor|delete)\b/i;
+
 /**
  * Whether an @mention comment reads as an explicit request to (re-)review the
  * PR. Leading-command style (like the plan approve/reject shortcut): the verb
@@ -109,17 +125,26 @@ const REVIEW_IMPERATIVE =
  */
 export function isReviewCommand(body: string): boolean {
   const stripped = body.trim().replace(LEADING_POLITENESS, "");
-  return REVIEW_STANDALONE.test(stripped) || REVIEW_IMPERATIVE.test(stripped);
+  if (!(REVIEW_STANDALONE.test(stripped) || REVIEW_IMPERATIVE.test(stripped))) return false;
+  return !COMPOUND_WRITE_ASK.test(stripped);
 }
 
 /**
  * `config.reasoningEffort` is tied to `config.model`; it may be invalid for a
  * different chosen model. Pass it through only when valid for `model`.
  */
-export function guardEffort(model: string, config: ResolvedGitHubConfig): string | undefined {
-  return config.reasoningEffort && isValidReasoningEffort(model, config.reasoningEffort)
-    ? config.reasoningEffort
-    : undefined;
+export function guardEffort(
+  model: string,
+  config: ResolvedGitHubConfig,
+  log?: Logger
+): string | undefined {
+  if (!config.reasoningEffort) return undefined;
+  if (isValidReasoningEffort(model, config.reasoningEffort)) return config.reasoningEffort;
+  log?.debug("mention_router.effort_dropped", {
+    model,
+    configured_effort: config.reasoningEffort,
+  });
+  return undefined;
 }
 
 /**
@@ -134,10 +159,9 @@ export async function routeMention(ctx: MentionRoutingContext): Promise<RoutingD
 
 async function decideRoute(ctx: MentionRoutingContext): Promise<RoutingDecision> {
   if (isReviewCommand(ctx.commentBody)) {
-    // Review lane precedence: `review-<alias>` label → repo reviewModel → model
-    // (mirrors the dedicated review sites).
-    const model =
-      extractReviewModelFromLabels(ctx.labels) ?? ctx.config.reviewModel ?? ctx.config.model;
+    // Review lane precedence mirrors the dedicated review sites — see
+    // resolveReviewModel's doc comment for the ladder.
+    const model = resolveReviewModel(ctx.labels, ctx.config);
     return {
       target: "review",
       model,
