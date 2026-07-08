@@ -823,6 +823,16 @@ const createSessionRequestBaseSchema = z.object({
    */
   planModel: z.string().optional(),
   /**
+   * Raw text (issue description, triggering comment, or user prompt) used
+   * ONLY to infer plan-vs-direct mode via the intent classifier when
+   * `planMode` is omitted — never persisted, never used as the session's
+   * actual first prompt. Ignored when `planMode` is explicitly set (an
+   * explicit choice always outranks inference) or when the caller's
+   * `spawnSource` isn't one the classifier covers. See
+   * `packages/control-plane/src/routing/intent-classifier.ts`.
+   */
+  planClassificationText: z.string().optional(),
+  /**
    * True for a dedicated PR *review* session (the github-bot's runCodeReview
    * path). Persisted on the session and delivered to the sandbox as the
    * REEF_REVIEW_SESSION env var, which switches the gh guard to block raw issue

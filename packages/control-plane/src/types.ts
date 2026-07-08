@@ -123,7 +123,12 @@ export interface Env {
   // library constant. Mirror DEFAULT_MODEL / DEFAULT_PLAN_MODEL on the bot workers.
   DEFAULT_MODEL?: string;
   DEFAULT_PLAN_MODEL?: string;
-  DEFAULT_ROUTING_MODEL?: string; // Model for the future @mention router (intent/complexity classification)
+  DEFAULT_ROUTING_MODEL?: string; // Model for the unified intent classifier (review/plan routing) — see routing/intent-classifier.ts
+  // "shadow" (default) classifies for telemetry only and keeps today's
+  // label-else-direct behavior; "classifier" acts on the inferred mode.
+  // Governs both the Linear and web surfaces' plan-vs-direct inference in
+  // session-create.ts, since they share the same code path.
+  INTENT_ROUTER_MODE_SESSION_CREATE?: string;
 
   // Logging
   LOG_LEVEL?: string; // "debug" | "info" | "warn" | "error" (default: "info")

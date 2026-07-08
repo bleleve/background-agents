@@ -280,6 +280,12 @@ variable "anthropic_api_key" {
   sensitive   = true
 }
 
+variable "intent_router_mode_session_create" {
+  description = "Unified intent classifier mode for the Linear/web plan-vs-direct surfaces in control-plane's session-create route: \"shadow\" (classify for telemetry only, keep today's default-direct behavior) or \"classifier\" (act on the inferred mode). See packages/control-plane/src/routing/intent-classifier.ts."
+  type        = string
+  default     = "shadow"
+}
+
 # =============================================================================
 # Security Secrets
 # =============================================================================

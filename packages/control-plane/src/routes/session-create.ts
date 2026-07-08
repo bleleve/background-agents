@@ -1,8 +1,13 @@
-import { getValidModelOrDefault, isValidReasoningEffort } from "@open-inspect/shared";
+import {
+  getValidModelOrDefault,
+  isValidReasoningEffort,
+  type CreateSessionInput,
+} from "@open-inspect/shared";
 import { encryptTokenPair, generateId } from "../auth/crypto";
 import { DEFAULT_TOKEN_LIFETIME_MS, UserScmTokenStore } from "../db/user-scm-tokens";
 import { UserStore } from "../db/user-store";
-import { createLogger } from "../logger";
+import { createLogger, type Logger } from "../logger";
+import { classifyIntent } from "../routing/intent-classifier";
 import { parseCreateSessionInput } from "../session/create-session-input";
 import { initializeSession, type SessionInitInput } from "../session/initialize";
 import {
@@ -29,6 +34,71 @@ import {
 
 const logger = createLogger("router:session-create");
 const INVALID_SESSION_REQUEST_BODY_ERROR = "Invalid session request body";
+
+/**
+ * Surfaces the intent classifier covers for plan-vs-direct inference at
+ * session-create time. github-bot and slack-bot resolve plan mode themselves
+ * (via their own `/internal/route-intent` calls) before ever calling this
+ * endpoint, so they always send an explicit `planMode`; `agent`/`automation`
+ * sessions aren't a free-text human request in the same sense, so there's
+ * nothing to classify. Everything else falls through to the `false` default.
+ */
+export function classificationSurfaceFor(
+  spawnSource: CreateSessionInput["spawnSource"]
+): "linear" | "web" | null {
+  if (spawnSource === "linear-bot") return "linear";
+  if (spawnSource === "user") return "web";
+  return null;
+}
+
+/**
+ * Resolve `planMode` for a session-create request. An explicit `body.planMode`
+ * always wins — inference only runs when it's omitted. When it runs, a
+ * classifier failure of any kind (see `IntentRouterFallbackReason`) falls
+ * back to `false`, identical to today's behavior for an unset `planMode` —
+ * this must never be a new way for session creation to fail or behave
+ * unpredictably. `INTENT_ROUTER_MODE_SESSION_CREATE` gates whether the
+ * inferred mode is actually acted on (`"classifier"`) or only classified for
+ * telemetry while still defaulting to `false` (`"shadow"`, the default).
+ */
+export async function resolvePlanMode(
+  env: Env,
+  log: Logger,
+  body: CreateSessionInput,
+  ctx: RequestContext
+): Promise<boolean> {
+  if (body.planMode !== undefined) return body.planMode;
+
+  const surface = classificationSurfaceFor(body.spawnSource);
+  if (!surface || !body.planClassificationText) return false;
+
+  const result = await classifyIntent(
+    env,
+    log,
+    { surface, text: body.planClassificationText, title: body.title },
+    { trace_id: ctx.trace_id, request_id: ctx.request_id }
+  );
+  if (result.source !== "classifier") return false;
+
+  const inferredPlanMode = result.mode === "plan";
+  const acting = env.INTENT_ROUTER_MODE_SESSION_CREATE === "classifier";
+  if (!acting) {
+    // Shadow: log the divergence between what the classifier would have
+    // decided and what actually happens (always "direct" here — there is no
+    // other deterministic signal once planMode is unset), without acting on
+    // it. This is the calibration data future promotion decisions read.
+    log.info("intent_router.shadow", {
+      trace_id: ctx.trace_id,
+      surface,
+      inferred_mode: result.mode,
+      acted_mode: "direct",
+      confidence: result.confidence,
+      diverged: inferredPlanMode,
+    });
+    return false;
+  }
+  return inferredPlanMode;
+}
 
 async function handleCreateSession(
   request: Request,
@@ -162,6 +232,14 @@ async function handleCreateSession(
 
   const sessionId = generateId();
 
+  // Resolve before building `input`: an explicit body.planMode always wins;
+  // an omitted one is inferred via the intent classifier for the surfaces it
+  // covers (see resolvePlanMode), falling back to false (today's behavior)
+  // otherwise. Never affects planModel — model selection stays label/config
+  // driven; a classifier-inferred plan uses the DO's DEFAULT_PLAN_MODEL
+  // fallback, same as an unset planModel does today.
+  const resolvedPlanMode = await resolvePlanMode(env, logger, body, ctx);
+
   const input: SessionInitInput = {
     sessionId,
     repoOwner,
@@ -196,8 +274,9 @@ async function handleCreateSession(
     // Plan mode: gate the session on human plan approval before any
     // code-changing turn. Without this the home-page "Plan" toggle is silently
     // dropped and the first turn dispatches as a normal build (regression from
-    // the router-module refactor #692, which lost these two lines).
-    planMode: body.planMode === true,
+    // the router-module refactor #692, which lost these two lines). See
+    // resolvePlanMode above for how an omitted planMode is now inferred.
+    planMode: resolvedPlanMode,
     planModel: body.planMode === true ? body.planModel : undefined,
     // Marks a dedicated PR review session so the sandbox gh guard blocks raw
     // issue comments (verdict-only). Set only by the github-bot review path.
