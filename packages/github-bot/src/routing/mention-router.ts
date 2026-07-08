@@ -24,7 +24,6 @@ import {
 } from "../label-resolution";
 import type { Logger } from "../logger";
 import type { ResolvedGitHubConfig } from "../utils/integration-config";
-import type { Logger } from "../logger";
 
 export type RouteTarget = "review" | "request";
 

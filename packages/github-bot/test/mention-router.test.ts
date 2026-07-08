@@ -33,16 +33,6 @@ const baseConfig: ResolvedGitHubConfig = {
   commentActionInstructions: null,
 };
 
-function createMockLogger(): Logger {
-  return {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    child: vi.fn().mockReturnThis(),
-  };
-}
-
 const defaultMeta = { trace_id: "trace-1", repo: "acme/widgets", pull_number: 42 };
 
 function ctx(
