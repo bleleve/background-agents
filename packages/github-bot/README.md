@@ -352,18 +352,19 @@ GitHub webhook → Bot (trace_id generated) → Control plane (trace_id in x-tra
 
 Key log events:
 
-| Event                            | Level | When                                          |
-| -------------------------------- | ----- | --------------------------------------------- |
-| `webhook.received`               | info  | Webhook arrives (event type, repo, action)    |
-| `webhook.duplicate_delivery`     | info  | Redelivery or replay skipped by delivery ID   |
-| `webhook.dedupe_finalize_failed` | warn  | Success path could not extend dedupe TTL      |
-| `webhook.dedupe_clear_failed`    | warn  | Failure path could not clear in-flight marker |
-| `webhook.signature_invalid`      | warn  | Signature verification fails                  |
-| `webhook.ignored`                | debug | Event doesn't match any handler               |
-| `session.created`                | info  | Session created via control plane             |
-| `prompt.sent`                    | info  | Prompt delivered to session                   |
-| `acknowledgment.posted`          | debug | Eyes reaction posted                          |
-| `acknowledgment.failed`          | warn  | Reaction failed (non-blocking)                |
+| Event                            | Level | When                                                |
+| -------------------------------- | ----- | --------------------------------------------------- |
+| `webhook.received`               | info  | Webhook arrives (event type, repo, action)          |
+| `webhook.duplicate_delivery`     | info  | Redelivery or replay skipped by delivery ID         |
+| `webhook.dedupe_finalize_failed` | warn  | Success path could not extend dedupe TTL            |
+| `webhook.dedupe_clear_failed`    | warn  | Failure path could not clear in-flight marker       |
+| `webhook.signature_invalid`      | warn  | Signature verification fails                        |
+| `webhook.ignored`                | debug | Event doesn't match any handler                     |
+| `mention_router.decision`        | info  | @mention routed (target/model/source, content-free) |
+| `session.created`                | info  | Session created via control plane                   |
+| `prompt.sent`                    | info  | Prompt delivered to session                         |
+| `acknowledgment.posted`          | debug | Eyes reaction posted                                |
+| `acknowledgment.failed`          | warn  | Reaction failed (non-blocking)                      |
 
 ## Development
 
