@@ -19,6 +19,12 @@ import {
  *   • `plan`                       → trigger plan-mode (plan model = env default)
  *   • `plan-<alias>`               → trigger plan-mode AND set the plan model
  *                                    (e.g. `plan-sonnet`, `plan-opus`).
+ *   • `no-plan`                    → force direct mode, overriding intent-classifier
+ *                                    inference (see resolvePlanModeTrigger). Has no
+ *                                    effect when `plan`/`plan-<alias>` is also present
+ *                                    — `plan` wins, matching an explicit human label
+ *                                    outranking another explicit human label by
+ *                                    "positive" intent.
  *   • `model-<alias>`              → build model override (e.g. `model-sonnet`).
  *   • `build-<alias>`              → build model override (alias of `model-<alias>`).
  *                                    Useful in plan-mode where it reads more naturally.
@@ -86,6 +92,25 @@ export function resolveStaticRepo(
 export function isPlanModeTriggered(labels: LinearLabel[]): boolean {
   if (hasPrefixedLabel(labels, PREFIX_PLAN)) return true;
   return labels.some((l) => l.name.trim().toLowerCase() === PREFIX_PLAN);
+}
+
+/** Bare `no-plan` label — forces direct mode, overriding intent-classifier inference. */
+export function isNoPlanLabelPresent(labels: LinearLabel[]): boolean {
+  return labels.some((l) => l.name.trim().toLowerCase() === "no-plan");
+}
+
+/**
+ * Tri-state plan-mode resolution: an explicit `plan`/`plan-<alias>` or
+ * `no-plan` label always wins (`true`/`false`). With neither present, returns
+ * `undefined` so the caller sends no `planMode` at all — control-plane then
+ * infers it from the issue text via the intent classifier (or falls back to
+ * direct mode, same as today, if inference is unavailable or off). `plan`
+ * outranks `no-plan` when both are somehow applied.
+ */
+export function resolvePlanModeTrigger(labels: LinearLabel[]): boolean | undefined {
+  if (isPlanModeTriggered(labels)) return true;
+  if (isNoPlanLabelPresent(labels)) return false;
+  return undefined;
 }
 
 export function isPreviewEnabled(labels: LinearLabel[]): boolean {

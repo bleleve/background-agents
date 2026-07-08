@@ -31,8 +31,8 @@ import {
   resolveStaticRepo,
   extractModelFromLabels,
   extractPlanModelFromLabels,
-  isPlanModeTriggered,
   isPreviewEnabled,
+  resolvePlanModeTrigger,
   resolveSessionModelSettings,
 } from "./model-resolution";
 import {
@@ -149,6 +149,8 @@ async function createSession(
     actorEmail?: string;
     planMode?: boolean;
     planModel?: string;
+    /** Text control-plane uses to infer planMode via the intent classifier when planMode is omitted — see resolvePlanModeTrigger. */
+    planClassificationText?: string;
     previewEnabled?: boolean;
   },
   traceId?: string
@@ -904,14 +906,27 @@ async function handleNewSession(
   // in model-resolution.ts):
   //   • `plan` or `plan-<alias>`     → trigger plan-mode; alias sets plan model
   //                                    (`plan` or `plan-default` = env default).
+  //   • `no-plan`                    → force direct mode, overriding inference.
   //   • `model-<alias>`              → build model override.
   //   • `build-<alias>`              → build model override (alias of `model-<alias>`).
   //                                    Useful in plan-mode where it reads more naturally.
   //   • `review-<alias>`             → review model override (GitHub-only feature).
-  const planMode = isPlanModeTriggered(labels);
+  //
+  // With neither `plan`-family nor `no-plan` present, planMode is left
+  // undefined — control-plane infers it from the issue text via the unified
+  // intent classifier (see resolvePlanModeTrigger's doc comment), falling
+  // back to direct mode if inference is unavailable or off.
+  const planMode = resolvePlanModeTrigger(labels);
   const planModel = planMode
     ? (extractPlanModelFromLabels(labels) ?? modelDefaults.defaultPlanModel)
     : undefined;
+  // Best-effort text for the intent classifier's plan-vs-direct inference —
+  // not persisted, not used as the session's actual first prompt (that's
+  // sent separately below). Prefer the triggering comment (the explicit ask)
+  // over the issue description (the original scope), same precedence
+  // classifyRepo already uses for its own LLM classification above.
+  const planClassificationText =
+    comment?.body || issueDetails?.description || issue.description || undefined;
 
   const sessionResult = await createSession(
     env,
@@ -926,6 +941,7 @@ async function handleNewSession(
       actorEmail,
       planMode,
       planModel,
+      planClassificationText,
       previewEnabled: isPreviewEnabled(labels),
     },
     traceId
