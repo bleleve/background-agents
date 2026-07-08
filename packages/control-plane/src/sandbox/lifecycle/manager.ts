@@ -1559,7 +1559,7 @@ export class SandboxLifecycleManager {
 
   /**
    * Resolve the provider and model ID from the session or config default.
-   * e.g., "openai/gpt-5.2-codex" -> { provider: "openai", model: "gpt-5.2-codex" }
+   * e.g., "openai/gpt-5.3-codex-spark" -> { provider: "openai", model: "gpt-5.3-codex-spark" }
    */
   private resolveProviderAndModel(session: SessionRow): { provider: string; model: string } {
     return extractProviderAndModel(session.model || this.config.model);

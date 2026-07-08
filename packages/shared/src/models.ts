@@ -19,11 +19,8 @@ export const VALID_MODELS = [
   "anthropic/claude-opus-4-7",
   "anthropic/claude-opus-4-8",
   "anthropic/claude-fable-5",
-  "openai/gpt-5.2",
   "openai/gpt-5.4",
   "openai/gpt-5.5",
-  "openai/gpt-5.2-codex",
-  "openai/gpt-5.3-codex",
   "openai/gpt-5.3-codex-spark",
   "opencode/kimi-k2.5",
   "opencode/kimi-k2.6",
@@ -79,11 +76,9 @@ export const MODEL_ALIAS_MAP: Record<string, ValidModel> = {
   opus: "anthropic/claude-opus-4-5",
   "opus-4-6": "anthropic/claude-opus-4-6",
   "opus-4-7": "anthropic/claude-opus-4-7",
-  "gpt-5.2": "openai/gpt-5.2",
   "gpt-5.4": "openai/gpt-5.4",
   "gpt-5.5": "openai/gpt-5.5",
-  "gpt-5.2-codex": "openai/gpt-5.2-codex",
-  "gpt-5.3-codex": "openai/gpt-5.3-codex",
+  "codex-spark": "openai/gpt-5.3-codex-spark",
 };
 
 /**
@@ -217,11 +212,8 @@ export const MODEL_REASONING_CONFIG: Partial<Record<ValidModel, ModelReasoningCo
     efforts: ["low", "medium", "high", "xhigh", "max"],
     default: "medium",
   },
-  "openai/gpt-5.2": { efforts: ["none", "low", "medium", "high", "xhigh"], default: "medium" },
   "openai/gpt-5.4": { efforts: ["none", "low", "medium", "high", "xhigh"], default: "medium" },
   "openai/gpt-5.5": { efforts: ["none", "low", "medium", "high", "xhigh"], default: "medium" },
-  "openai/gpt-5.2-codex": { efforts: ["low", "medium", "high", "xhigh"], default: "medium" },
-  "openai/gpt-5.3-codex": { efforts: ["low", "medium", "high", "xhigh"], default: "medium" },
   "openai/gpt-5.3-codex-spark": { efforts: ["low", "medium", "high", "xhigh"], default: "medium" },
 };
 
@@ -293,11 +285,8 @@ export const MODEL_OPTIONS: ModelCategory[] = [
   {
     category: "OpenAI",
     models: [
-      { id: "openai/gpt-5.2", name: "GPT 5.2", description: "400K context, fast" },
       { id: "openai/gpt-5.4", name: "GPT 5.4", description: "Flagship model" },
       { id: "openai/gpt-5.5", name: "GPT 5.5", description: "Latest flagship model" },
-      { id: "openai/gpt-5.2-codex", name: "GPT 5.2 Codex", description: "Optimized for code" },
-      { id: "openai/gpt-5.3-codex", name: "GPT 5.3 Codex", description: "Latest codex" },
       {
         id: "openai/gpt-5.3-codex-spark",
         name: "GPT 5.3 Codex Spark",
@@ -354,11 +343,8 @@ export const DEFAULT_ENABLED_MODELS: ValidModel[] = [
   "anthropic/claude-opus-4-7",
   "anthropic/claude-opus-4-8",
   "anthropic/claude-fable-5",
-  "openai/gpt-5.2",
   "openai/gpt-5.4",
   "openai/gpt-5.5",
-  "openai/gpt-5.2-codex",
-  "openai/gpt-5.3-codex",
   "openai/gpt-5.3-codex-spark",
 ];
 
@@ -427,7 +413,7 @@ export function isValidReasoningEffort(model: string, effort: string): boolean {
  * @example
  * extractProviderAndModel("anthropic/claude-haiku-4-5") // { provider: "anthropic", model: "claude-haiku-4-5" }
  * extractProviderAndModel("claude-haiku-4-5") // { provider: "anthropic", model: "claude-haiku-4-5" }
- * extractProviderAndModel("openai/gpt-5.2-codex") // { provider: "openai", model: "gpt-5.2-codex" }
+ * extractProviderAndModel("openai/gpt-5.3-codex-spark") // { provider: "openai", model: "gpt-5.3-codex-spark" }
  */
 export function extractProviderAndModel(modelId: string): { provider: string; model: string } {
   const normalized = normalizeModelId(modelId);
