@@ -1,6 +1,11 @@
 """Tests for OpenCode plugin deployment in SandboxSupervisor."""
 
+import shutil
+import subprocess
+from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from sandbox_runtime.entrypoint import SandboxSupervisor
 
@@ -148,3 +153,28 @@ class TestSkillSpanPluginDeployment:
 
         assert (opencode_dir / "plugins" / "codex-auth-plugin.js").exists()
         assert (opencode_dir / "plugins" / "skill-span-plugin.js").exists()
+
+
+class TestSkillSpanPluginBehavior:
+    """Behavioral coverage for skill-span-plugin.js's OTEL hooks.
+
+    Deploy gating is covered above; this exercises the plugin's actual
+    span-naming and Langfuse metadata-stamping logic via the real `server()`
+    hooks (not a source-substring check). See tests/skill_span_plugin_behavior.mjs.
+    """
+
+    def test_skill_span_hook_behavior(self):
+        node = shutil.which("node")
+        if node is None:  # pragma: no cover - node is present on CI
+            pytest.skip("node runtime not available")
+        harness = Path(__file__).parent / "skill_span_plugin_behavior.mjs"
+        result = subprocess.run(
+            [node, str(harness)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, (
+            "skill span plugin behavior harness failed:\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )

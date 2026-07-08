@@ -13,7 +13,7 @@ const MODEL_DISPLAY_NAMES = new Map<string, string>(
 /**
  * Format model ID to display name.
  * e.g., "anthropic/claude-sonnet-4-5" → "Claude Sonnet 4.5"
- * e.g., "openai/gpt-5.2-codex" → "GPT 5.2 Codex"
+ * e.g., "openai/gpt-5.3-codex-spark" → "GPT 5.3 Codex Spark"
  */
 export function formatModelName(modelId: string): string {
   if (!modelId) return "Unknown Model";
